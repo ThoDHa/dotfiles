@@ -1,6 +1,2 @@
 i3-wm.bar.position: top
-i3xrocks.date.format2: %b %d, %Y %I:%M
-
-gnome.gtk.theme: HighContrast
-gtk.theme_name: HighContrast
-
+i3xrocks.date.format2: %B %d, %Y %I:%M %p
