@@ -4,7 +4,8 @@
 # set up VIM TMUX and Bash
 sudo apt-get install tmux vim fzf fd-find exuberant-ctags
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/.vimrce >> ~/.vimrc
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/.tmux.conf >> ~/.tmux..conf
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/.tmux.conf >> ~/.tmux.conf
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/.ctags >> ~/.ctags
 
 mkdir ~/.vim/tmp/
 
@@ -32,4 +33,5 @@ rm ~/.config/regolith2/i3xrocks/conf.d/40_cpu-usage
 mv ~/.config/regolith2/i3xrocks/conf.d/80_battery ~/.config/regolith2/i3xrocks/conf.d/90_battery
 mv ~/.config/regolith2/i3xrocks/conf.d/80_volume ~/.config/regolith2/i3xrocks/conf.d/70_volume
 mv ~/.config/regolith2/i3xrocks/conf.d/90_time ~/.config/regolith2/i3xrocks/conf.d/80_time
+
 ```
