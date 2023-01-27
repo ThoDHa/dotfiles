@@ -3,9 +3,9 @@
 
 # set up VIM TMUX and Bash
 sudo apt-get install tmux vim fzf fd-find exuberant-ctags
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/.vimrc
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/.tmux.conf
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/vimrc
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/tmux.conf
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/ctags
 
 mkdir ~/.vim/tmp/
 
@@ -13,10 +13,12 @@ mkdir ~/.vim/tmp/
 if grep -q "set -o vi" ~/.bashrc; then
 	echo "set -o vi" >> ~/.bashrc
 fi
+
 # Set up fzf to work correctly
 if grep -q "source /usr/share/doc/fzf/examples/key-bindings.bash" ~/.bashrc; then
 	echo "source /usr/share/doc/fzf/examples/key-bindings.bash" >> ~/.bashrc
 fi
+
 if grep -q "source /usr/share/doc/fzf/examples/completion.bash" ~/.bashrc; then
 	echo "source /usr/share/doc/fzf/examples/completion.bash" >> ~/.bashrc
 fi
@@ -35,5 +37,4 @@ rm ~/.config/regolith2/i3xrocks/conf.d/40_cpu-usage
 mv ~/.config/regolith2/i3xrocks/conf.d/80_battery ~/.config/regolith2/i3xrocks/conf.d/90_battery
 mv ~/.config/regolith2/i3xrocks/conf.d/80_volume ~/.config/regolith2/i3xrocks/conf.d/70_volume
 mv ~/.config/regolith2/i3xrocks/conf.d/90_time ~/.config/regolith2/i3xrocks/conf.d/80_time
-
 ```
