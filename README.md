@@ -9,6 +9,13 @@ curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/tmux.conf
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags.d/default.ctags
 
+
+mkdir -p ~/.vim/pack/themes/start
+git clone https://github.com/tomasiser/vim-code-dark ~/.vim/pack/themes/start/vim-code-dark 
+
+mkdir -p ~/.vim/pack/git-plugins/start
+git clone --depth 1 https://github.com/dense-analysis/ale.git ~/.vim/pack/git-plugins/start/ale
+
 # Add VIM Key bindings to bash
 if grep -q "set -o vi" ~/.bashrc; then
 	echo "set -o vi" >> ~/.bashrc
