@@ -5,8 +5,8 @@
 mkdir ~/.vim/tmp/mkdir 
 
 sudo apt-get install tmux vim fzf fd-find exuberant-ctags
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/vimrc
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/tmux.conf
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/.vimrc
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/.tmux.conf
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags.d/default.ctags
 
 
