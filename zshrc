@@ -1,15 +1,17 @@
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
-
+fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
 # Path to your oh-my-zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
+HISTSIZE=10000
+SAVEHIST=10000
+HISTFILE=~/.zsh_history
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
 # to know which specific one was loaded, run: echo $RANDOM_THEME
 # See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
 ZSH_THEME="robbyrussell"
-plugins=(git z zsh-interactive-cd)
 # Set list of themes to pick from when loading at random
 # Setting this variable when ZSH_THEME=random will cause zsh to load
 # a theme from this variable instead of looking in $ZSH/themes/
@@ -70,8 +72,10 @@ plugins=(git z zsh-interactive-cd)
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
+#
 source $ZSH/oh-my-zsh.sh
 
+plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-history-substring-search)
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -100,6 +104,7 @@ source $ZSH/oh-my-zsh.sh
 
 alias vim='nvim'
 alias fd='fdfind'
+alias bat='batcat'
 
 #options to fzf command
 export FZF_COMPLETION_OPTS='--border --info=inline'
@@ -120,6 +125,7 @@ export FZF_CTRL_R_OPTS="
 
 # Print tree structure in the preview window
 export FZF_ALT_C_OPTS="--preview 'tree -C {}'"
+
 # Use fd (https://github.com/sharkdp/fd) instead of the default find
 # command for listing path candidates.
 # - The first argument to the function ($1) is the base path to start traversal
@@ -147,20 +153,11 @@ _fzf_comprun() {
         *)            fzf --preview 'bat -n --color=always {}' "$@" ;;
     esac
 }
-
-# Fancy Ctrl-Z: https://sheerun.net/2014/03/21/how-to-boost-your-vim-productivity/
-fancy-ctrl-z () {
-	if [[ $#BUFFER -eq 0 ]]; then
-		BUFFER="fg"
-			zle accept-line
-	else
-		zle push-input
-			zle clear-screen
-			fi
-}
-zle -N fancy-ctrl-z
-bindkey '^Z' fancy-ctrl-z
-
 bindkey -v
-source .completions.zsh
-source .key-bindings.zsh
+bindkey '^R' history-incremental-search-backward
+source ~/.completions.zsh
+source ~/.key-bindings.zsh
+
+export NVM_DIR=~/.nvm
+ [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
