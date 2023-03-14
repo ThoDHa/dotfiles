@@ -45,9 +45,6 @@ fi
 # zsh
 # OH MY SH
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-
-curl https://raw.githubusercontent.com/junegunn/fzf/master/shell/completion.zsh > ~/.completion.zsh
-curl http://raw.githubusercontent.com/junegunn/fzf/master/shell/key-bindings.zsh > ~/.key-bindings.zsh
 curl http://raw.githubusercontent.com/ThoDHa/confs/master/zshrc > ~/.zshrc
 git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions 
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
