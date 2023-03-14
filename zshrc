@@ -73,9 +73,10 @@ ZSH_THEME="robbyrussell"
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 #
+#
+plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z )
 source $ZSH/oh-my-zsh.sh
 
-plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-history-substring-search)
 # User configuration
 
 # export MANPATH="/usr/local/man:$MANPATH"
@@ -110,18 +111,18 @@ alias bat='batcat'
 export FZF_COMPLETION_OPTS='--border --info=inline'
 
 # Preview file content using bat (https://github.com/sharkdp/bat)
- export FZF_CTRL_T_OPTS="
-   --preview 'bat -n --color=always {}'
-     --bind 'ctrl-/:change-preview-window(down|hidden|)'"
+export FZF_CTRL_T_OPTS="
+--preview 'bat -n --color=always {}'
+--bind 'ctrl-/:change-preview-window(down|hidden|)'"
 
 # CTRL-/ to toggle small preview window to see the full command
 # CTRL-Y to copy the command into clipboard using pbcopy
 export FZF_CTRL_R_OPTS="
-  --preview 'echo {}' --preview-window up:3:hidden:wrap
-    --bind 'ctrl-/:toggle-preview'
-      --bind 'ctrl-y:execute-silent(echo -n {2..} | pbcopy)+abort'
-        --color header:italic
-          --header 'Press CTRL-Y to copy command into clipboard'"
+--preview 'echo {}' --preview-window up:3:hidden:wrap
+--bind 'ctrl-/:toggle-preview'
+--bind 'ctrl-y:execute-silent(echo -n {2..} | pbcopy)+abort'
+--color header:italic
+--header 'Press CTRL-Y to copy command into clipboard'"
 
 # Print tree structure in the preview window
 export FZF_ALT_C_OPTS="--preview 'tree -C {}'"
@@ -153,11 +154,7 @@ _fzf_comprun() {
         *)            fzf --preview 'bat -n --color=always {}' "$@" ;;
     esac
 }
-bindkey -v
-bindkey '^R' history-incremental-search-backward
-source ~/.completions.zsh
-source ~/.key-bindings.zsh
-
 export NVM_DIR=~/.nvm
  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh

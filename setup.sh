@@ -3,7 +3,7 @@
 # set up VIM TMUX and Bash
 mkdir ~/.vim/tmp/mkdir 
 
-sudo apt-get install tmux vim fzf fd-find bat exuberant-ctags zsh
+sudo apt-get install tmux vim fd-find bat exuberant-ctags zsh
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/.vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/.tmux.conf
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags.d/default.ctags
@@ -45,11 +45,17 @@ fi
 # zsh
 # OH MY SH
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+
 curl https://raw.githubusercontent.com/junegunn/fzf/master/shell/completion.zsh > ~/.completion.zsh
 curl http://raw.githubusercontent.com/junegunn/fzf/master/shell/key-bindings.zsh > ~/.key-bindings.zsh
 curl http://raw.githubusercontent.com/ThoDHa/confs/master/zshrc > ~/.zshrc
 git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions 
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+
+# FZF
+git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+~/.fzf/install
+
 
 # REGOLITH
 sudo apt-get install i3xrocks-volume i3xrocks-battery dunst
