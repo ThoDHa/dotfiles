@@ -5,7 +5,7 @@
 ################################################################################
 mkdir ~/.vim/tmp/mkdir 
 
-sudo apt-get install tmux vim exuberant-ctags
+sudo apt-get install tmux vim exuberant-ctags git curl gcc
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/.vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/.tmux.conf
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags.d/default.ctags
@@ -26,10 +26,10 @@ git clone --depth 1 https://github.com/dense-analysis/ale.git ~/.vim/pack/git-pl
 # https://github.com/neovim/neovim/releases/tag/stable
 wget https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.deb
 sudo apt install ./nvim-linux64.deb
-sudo apt install ripgrep
+sudo apt install ripgrep python3-pip3
 python3 -m pip install --user virtualenv
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
-nvm install latest
+nvm install --lts 
 nvm install-latest-npm
 
 mkdir -m ~/.config/nvim
@@ -45,11 +45,11 @@ sudo apt-get install zsh
 # OH MY ZSH
 ################################################################################
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-curl http://raw.githubusercontent.com/ThoDHa/confs/master/zshrc > ~/.zshrc
+curl https://raw.githubusercontent.com/ThoDHa/confs/master/zshrc > ~/.zshrc
 git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
 git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions 
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-
+chsh -s $(which zsh)
 
 
 ################################################################################
@@ -80,7 +80,6 @@ sudo apt-get remove i3xrocks-net-traffic cpu-usage regolith-rofication
 curl https://raw.githubusercontent.com/ThoDHa/confs/master/Xresources > ~/.config/regolith2/Xresources
 
 mkdir ~/.config/regolith2/i3xrocks
-mkdir ~/.config/regolith2/i3xrocks/
 cp -r /usr/share/i3xrocks/conf.d ~/.config/regolith2/i3xrocks
 rm ~/.config/regolith2/i3xrocks/conf.d/30_net-traffic  
 rm ~/.config/regolith2/i3xrocks/conf.d/40_cpu-usage    
