@@ -74,7 +74,7 @@ ZSH_THEME="robbyrussell"
 # Add wisely, as too many plugins slow down shell startup.
 #
 #
-plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z )
+plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-syntax-highlighting)
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
