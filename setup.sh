@@ -20,14 +20,18 @@ git clone --depth 1 https://github.com/dense-analysis/ale.git ~/.vim/pack/git-pl
 ################################################################################
 # NVIM
 ################################################################################
-wget https://github.com/neovim/neovim/releases/download/stable/nvim-linux64.deb
-sudo apt install ./nvim-linux64.deb -y
+curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
+./nvim.appimage --appimage-extract
+./squashfs-root/AppRun --version
+sudo mv squashfs-root /
+sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
+
 sudo apt install ripgrep python3-pip3 -y
 python3 -m pip install --user virtualenv
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
 nvm install --lts 
 nvm install-latest-npm
-rm nvim-linux64.deb
+nvim.appimage
 
 mkdir -m ~/.config/nvim
 git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
