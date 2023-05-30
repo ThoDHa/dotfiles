@@ -106,7 +106,7 @@ source $ZSH/oh-my-zsh.sh
 alias vim='nvim'
 alias fd='fdfind'
 alias bat='batcat'
-
+source ~/.bash_aliases
 #options to fzf command
 export FZF_COMPLETION_OPTS='--border --info=inline'
 
@@ -154,6 +154,9 @@ _fzf_comprun() {
         *)            fzf --preview 'bat -n --color=always {}' "$@" ;;
     esac
 }
+
+export MANPAGER='nvim +Man!'
+export MANWIDTH=999
 export NVM_DIR=~/.nvm
  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
