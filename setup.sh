@@ -6,10 +6,10 @@
 mkdir ~/.vim/tmp/mkdir 
 
 sudo apt-get install tmux vim exuberant-ctags git curl gcc -y
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/vimrc > ~/.vimrc
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/tmux.conf > ~/.tmux.conf
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/ctags > ~/.ctags.d/default.ctags
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/zsrch > ~/.zshrc
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/vimrc > ~/.vimrc
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/ctags > ~/.ctags.d/default.ctags
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/zshrc > ~/.zshrc
 
 # This sets up VIM
 mkdir -p ~/.vim/pack/themes/start
