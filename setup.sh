@@ -7,9 +7,7 @@ mkdir ~/.vim/tmp/mkdir
 
 sudo apt-get install tmux vim exuberant-ctags git curl gcc -y
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/vimrc > ~/.vimrc
-curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/ctags > ~/.ctags.d/default.ctags
-curl https://raw.githubusercontent.com/ThoDHa/confs/main/zshrc > ~/.zshrc
 
 # This sets up VIM
 mkdir -p ~/.vim/pack/themes/start
@@ -18,43 +16,7 @@ git clone https://github.com/tomasiser/vim-code-dark ~/.vim/pack/themes/start/vi
 mkdir -p ~/.vim/pack/git-plugins/start
 git clone --depth 1 https://github.com/dense-analysis/ale.git ~/.vim/pack/git-plugins/start/ale
 
-################################################################################
-# NVIM
-################################################################################
-curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
-chmod u+x nvim.appimage
-./nvim.appimage --appimage-extract
-./squashfs-root/AppRun --version
-sudo mv squashfs-root /
-sudo ln -s /squashfs-root/AppRun /usr/bin/nvim
-
-sudo apt install ripgrep python3-pip3 -y
-python3 -m pip install --user virtualenv
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
-nvm install --lts 
-nvm install-latest-npm
-nvim.appimage
-
-mkdir -m ~/.config/nvim
-git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
-
-################################################################################
-# zsh and OH MY ZSH
-################################################################################
-sudo apt-get install zsh -y
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-curl https://raw.githubusercontent.com/ThoDHa/confs/master/zshrc > ~/.zshrc
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions 
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-chsh -s $(which zsh)
-
-################################################################################
-# FZF
-################################################################################
-sudo apt-get install fd-find bat tree -y
-git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
-~/.fzf/install
+min_setup.sh
 
 ################################################################################
 # REGOLITH

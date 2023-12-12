@@ -106,7 +106,8 @@ source $ZSH/oh-my-zsh.sh
 alias vim='nvim'
 alias fd='fdfind'
 alias bat='batcat'
-source ~/.bash_aliases
+
+#source ~/.bash_aliases
 #options to fzf command
 export FZF_COMPLETION_OPTS='--border --info=inline'
 
