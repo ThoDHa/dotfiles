@@ -3,11 +3,15 @@
 ################################################################################
 # set up VIM TMUX and Bash
 ################################################################################
+
+min_setup.sh
+
 mkdir ~/.vim/tmp/mkdir 
 
-sudo apt-get install tmux vim exuberant-ctags git curl gcc -y
+sudo apt-get install git tmux vim exuberant-ctags git curl gcc zsh zip unzip python3 python3 wget fd-find bat tree -y
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/vimrc > ~/.vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/ctags > ~/.ctags.d/default.ctags
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
 
 # This sets up VIM
 mkdir -p ~/.vim/pack/themes/start
@@ -16,7 +20,6 @@ git clone https://github.com/tomasiser/vim-code-dark ~/.vim/pack/themes/start/vi
 mkdir -p ~/.vim/pack/git-plugins/start
 git clone --depth 1 https://github.com/dense-analysis/ale.git ~/.vim/pack/git-plugins/start/ale
 
-min_setup.sh
 
 ################################################################################
 # REGOLITH
