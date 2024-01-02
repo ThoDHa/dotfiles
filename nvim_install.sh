@@ -12,6 +12,4 @@ rm -rf squashfs-root
 nvm install --lts 
 nvm install-latest-npm
 git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
-nvim --headless "+Lazy! sync" +qa \
-  && nvim --headless "+MasonInstall jdtls eslint rust_analyzer marksman clangd lua_ls" -c qall
-
+nvim --headless "+Lazy! sync" +qa
