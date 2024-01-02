@@ -23,12 +23,10 @@ ln -s /squashfs-root/AppRun /usr/bin/nvim
 rm nvim.appimage
 rm -rf squashfs-root
 
-apt install ripgrep python3-pip3 -y
 python3 -m pip install --user virtualenv
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
 nvm install --lts 
 nvm install-latest-npm
-mkdir -m ~/.config/nvim
 git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
 nvim --headless "+Lazy! sync" +qa \
   && nvim --headless "+MasonInstall jdtls eslint rust_analyzer marksman clangd lua_ls" -c qall

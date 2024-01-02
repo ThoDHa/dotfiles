@@ -113,7 +113,7 @@ export FZF_COMPLETION_OPTS='--border --info=inline'
 
 # Preview file content using bat (https://github.com/sharkdp/bat)
 export FZF_CTRL_T_OPTS="
---preview 'bat -n --color=always {}'
+--preview 'batcat -n --color=always {}'
 --bind 'ctrl-/:change-preview-window(down|hidden|)'"
 
 # CTRL-/ to toggle small preview window to see the full command
@@ -152,7 +152,7 @@ _fzf_comprun() {
         cd)           fzf --preview 'tree -C {} | head -200'   "$@" ;;
         export|unset) fzf --preview "eval 'echo \$'{}"         "$@" ;;
         ssh)          fzf --preview 'dig {}'                   "$@" ;;
-        *)            fzf --preview 'bat -n --color=always {}' "$@" ;;
+        *)            fzf --preview 'batcat -n --color=always {}' "$@" ;;
     esac
 }
 
