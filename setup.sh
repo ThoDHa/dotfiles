@@ -4,9 +4,9 @@
 # set up VIM TMUX and Bash
 ################################################################################
 
-sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 python3 wget fd-find bat tree xclip -y
+sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 wget fd-find bat tree xclip -y
 
-min_setup.sh
+sh min_setup.sh
 
 mkdir ~/.vim/tmp/mkdir 
 

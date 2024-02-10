@@ -9,6 +9,7 @@ ln -s /squashfs-root/AppRun /usr/bin/nvim
 rm nvim.appimage
 rm -rf squashfs-root
 
+pip3 install neovim
 nvm install --lts 
 nvm install-latest-npm
 git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
