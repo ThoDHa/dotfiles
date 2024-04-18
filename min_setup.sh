@@ -1,5 +1,9 @@
 #!/bin/bash
 
+sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 wget fd-find bat tree ripgrep default-jdk -y
+
+curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
+
 ################################################################################
 # zsh and OH MY ZSH
 ################################################################################
@@ -14,22 +18,7 @@ chsh -s $(which zsh)
 ################################################################################
 # NVIM
 ################################################################################
-curl -LO https://github.com/neovim/neovim/releases/latest/download/nvim.appimage
-chmod u+x nvim.appimage
-./nvim.appimage --appimage-extract
-./squashfs-root/AppRun --version
-mv squashfs-root /
-ln -s /squashfs-root/AppRun /usr/bin/nvim
-rm nvim.appimage
-rm -rf squashfs-root
-
-python3 -m pip install --user virtualenv
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.1/install.sh | bash
-nvm install --lts 
-nvm install-latest-npm
-git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
-nvim --headless "+Lazy! sync" +qa \
-  && nvim --headless "+MasonInstall jdtls eslint rust_analyzer marksman clangd lua_ls" -c qall
+sh nvim_install.sh
 
 ################################################################################
 # FZF
