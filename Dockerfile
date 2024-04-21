@@ -1,6 +1,6 @@
 FROM debian:stable
-RUN apt-get update && apt-get -y install \
-    git curl gcc zsh zip unzip python3 wget fd-find bat tree xclip \
+RUN apt-get update && apt-get -y upgrade && apt-get -y install \
+    tmux git curl gcc zsh zip unzip python3 wget fd-find bat tree ripgrep \
     && apt-get clean
 
 COPY min_setup.sh /root/setup.sh
