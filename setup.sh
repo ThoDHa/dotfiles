@@ -4,12 +4,9 @@
 # set up VIM TMUX and Bash
 ################################################################################
 
-sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 wget fd-find bat tree xclip ripgrep -y
-
 sh min_setup.sh
 
-mkdir ~/.vim/tmp/mkdir 
-
+mkdir ~/.vim
 
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/vimrc > ~/.vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/ctags > ~/.ctags.d/default.ctags
