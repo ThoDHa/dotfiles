@@ -2,7 +2,6 @@
 
 sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 wget fd-find bat tree ripgrep default-jdk -y
 
-curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
 
 ################################################################################
 # zsh and OH MY ZSH
@@ -15,10 +14,18 @@ git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.o
 git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 chsh -s $(which zsh)
 
+
+################################################################################
+# TMUX
+################################################################################
+
+git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
+
 ################################################################################
 # NVIM
 ################################################################################
+
 sh nvim_install.sh
 
 ################################################################################
