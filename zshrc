@@ -3,8 +3,8 @@
 fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
 # Path to your oh-my-zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
-HISTSIZE=10000
-SAVEHIST=10000
+HISTSIZE=1000
+SAVEHIST=1000
 HISTFILE=~/.zsh_history
 
 # Set name of the theme to load --- if set to "random", it will
@@ -156,7 +156,7 @@ _fzf_comprun() {
 
     case "$command" in
         cd)           fzf --preview 'tree -C {} | head -200'   "$@" ;;
-        export|unset) fzf --preview "eval 'echo \$'{}"         "$@" ;;
+        export|unset) fzf --preview "eval 'echo \$'{}"         "Q$@" ;;
         ssh)          fzf --preview 'dig {}'                   "$@" ;;
         *)            fzf --preview 'batcat -n --color=always {}' "$@" ;;
     esac
@@ -168,4 +168,5 @@ export NVM_DIR=~/.nvm
  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 

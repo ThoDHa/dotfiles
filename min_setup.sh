@@ -1,7 +1,6 @@
 #!/bin/bash
 
-sudo apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 wget fd-find bat tree ripgrep default-jdk -y
-
+apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 python3-venv python3-dev wget fd-find bat tree ripgrep default-jdk -y
 
 ################################################################################
 # zsh and OH MY ZSH

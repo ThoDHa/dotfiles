@@ -1,9 +1,26 @@
-{
+
     "$help": "https://aka.ms/terminal-documentation",
     "$schema": "https://aka.ms/terminal-profiles-schema",
-    "actions": [],
+    "actions": 
+    [
+        {
+            "command": "find",
+            "keys": "ctrl+shift+f"
+        },
+        {
+            "command": 
+            {
+                "action": "splitPane",
+                "split": "auto",
+                "splitMode": "duplicate"
+            },
+            "keys": "alt+shift+d"
+        }
+    ],
     "alwaysShowTabs": false,
-    "defaultProfile": "{acc2abbd-3ae4-4ff3-ad13-eede07850278}",
+    "copyFormatting": "none",
+    "copyOnSelect": false,
+    "defaultProfile": "{2c4de342-38b7-51cf-b940-2309a097f518}",
     "newTabMenu": 
     [
         {
@@ -15,37 +32,45 @@
         "defaults": 
         {
             "bellStyle": "none",
-            "colorScheme": "One Dark Deep",
+            "colorScheme": "Tokyo Night",
             "font": 
             {
-                "face": "UbuntuMono Nerd Font"
+                "cellHeight": "1",
+                "face": "FiraCode Nerd Font Mono",
+                "size": 12.0
             }
         },
         "list": 
         [
             {
+                "commandline": "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
                 "guid": "{61c54bbd-c2c6-5271-96e7-009a87ff44bf}",
                 "hidden": false,
                 "name": "Windows PowerShell"
             },
             {
+                "commandline": "%SystemRoot%\\System32\\cmd.exe",
                 "guid": "{0caa0dad-35be-5f56-a8ff-afceeeaa6101}",
                 "hidden": false,
                 "name": "Command Prompt"
             },
             {
-                "commandline": "C:\\WINDOWS\\system32\\wsl.exe -d Ubuntu",
-                "guid": "{acc2abbd-3ae4-4ff3-ad13-eede07850278}",
+                "guid": "{b453ae62-4e3d-5e58-b989-0a998ec441b8}",
                 "hidden": false,
-                "icon": "ms-appx:///ProfileIcons/{9acb9455-ca41-5af7-950f-6bca1bc9722f}.png",
-                "name": "Ubuntu",
-                "startingDirectory": "~"
+                "name": "Azure Cloud Shell",
+                "source": "Windows.Terminal.Azure"
             },
             {
                 "guid": "{51855cb2-8cce-5362-8f54-464b92b32386}",
                 "hidden": false,
                 "name": "Ubuntu",
                 "source": "CanonicalGroupLimited.Ubuntu_79rhkp1fndgsc"
+            },
+            {
+                "guid": "{2c4de342-38b7-51cf-b940-2309a097f518}",
+                "hidden": true,
+                "name": "Ubuntu",
+                "source": "Windows.Terminal.Wsl"
             }
         ]
     },
@@ -208,7 +233,7 @@
             "name": "Solarized Light",
             "purple": "#D33682",
             "red": "#DC322F",
-            "selectionBackground": "#073642",
+            "selectionBackground": "#FFFFFF",
             "white": "#EEE8D5",
             "yellow": "#B58900"
         },
@@ -254,7 +279,7 @@
             "name": "Tango Light",
             "purple": "#75507B",
             "red": "#CC0000",
-            "selectionBackground": "#555753",
+            "selectionBackground": "#FFFFFF",
             "white": "#D3D7CF",
             "yellow": "#C4A000"
         },
@@ -303,8 +328,32 @@
             "selectionBackground": "#FFFFFF",
             "white": "#C0C0C0",
             "yellow": "#808000"
-        }
+        },
+{
+    "background": "#1a1b26",
+    "black": "#15161e",
+    "blue": "#7aa2f7",
+    "brightBlack": "#414868",
+    "brightBlue": "#7aa2f7",
+    "brightCyan": "#7dcfff",
+    "brightGreen": "#9ece6a",
+    "brightPurple": "#9d7cd8",
+    "brightRed": "#f7768e",
+    "brightWhite": "#c0caf5",
+    "brightYellow": "#e0af68",
+    "cursorColor": "#c0caf5",
+    "cyan": "#7dcfff",
+    "foreground": "#c0caf5",
+    "green": "#9ece6a",
+    "name": "Tokyo Night",
+    "purple": "#bb9af7",
+    "red": "#f7768e",
+    "selectionBackground": "#283457",
+    "white": "#a9b1d6",
+    "yellow": "#e0af68"
+}
     ],
     "showTabsInTitlebar": false,
+    "showTerminalTitleInTitlebar": false,
     "themes": []
 }
