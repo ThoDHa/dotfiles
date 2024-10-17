@@ -15,7 +15,7 @@ nvm install-latest-npm
 # NVIM
 ################################################################################
 
-curl -LO https://github.com/neovim/neovim/releases/download/v0.10.0/nvim.appimage
+curl -LO https://github.com/neovim/neovim/releases/download/v0.10.2/nvim.appimage
 chmod u+x nvim.appimage
 rm -rf /squashfs-root
 ./nvim.appimage --appimage-extract

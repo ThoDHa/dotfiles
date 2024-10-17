@@ -109,10 +109,6 @@ alias vimdiff='nvim -d'
 alias fd='fdfind'
 alias bat='batcat'
 
-if command -v tmux &> /dev/null && [ -n "$PS1" ] && [[ ! "$TERM" =~ screen ]] && [[ ! "$TERM" =~ tmux ]] && [ -z "$TMUX" ]; then
-  exec tmux new -A -s 0
-fi
-
 #source ~/.bash_aliases
 #options to fzf command
 export FZF_COMPLETION_OPTS='--border --info=inline'
@@ -170,3 +166,5 @@ export NVM_DIR=~/.nvm
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
+eval $(ssh-agent) &> /dev/null
+ssh-add ~/.ssh/id_rsa &> /dev/null
