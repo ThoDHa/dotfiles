@@ -1,0 +1,5 @@
+[settings]
+profile="black"
+skip = [".gitignore", ".dockerignore"]
+multi_line_output = 3
+split_on_trailing_comma = true 
