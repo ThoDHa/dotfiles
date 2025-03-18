@@ -20,6 +20,7 @@ chsh -s $(which zsh)
 
 git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
+tmux run-shell ~/.tmux/plugins/tpm/bin/install_plugins
 
 ################################################################################
 # NVIM
