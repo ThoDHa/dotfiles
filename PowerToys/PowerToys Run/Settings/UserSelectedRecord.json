@@ -1,0 +1,378 @@
+{
+  "Records": {
+    "https://m./7/]\u0027[;?%5C%5C : Open in default browser": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-05-18T05:14:46.5024649Z",
+      "IconPath": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "Title": "https://m./7/]\u0027[;?%5C%5C",
+      "Search": "m./7\\]\u0027[;?\\\\",
+      "Score": 0,
+      "SubTitle": "Open in default browser",
+      "PluginID": "03276A39D4E9417C8FFD200B0EE5E871"
+    },
+    "UEFI Firmware Settings : Reboot computer into UEFI Firmware Settings (Requires administrative permissions.)": {
+      "SelectedCount": 2,
+      "LastSelected": "2024-11-15T20:33:41.6378943Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\System\\Images\\firmwareSettings.dark.png",
+      "Title": "UEFI Firmware Settings",
+      "Search": "firre",
+      "Score": 0,
+      "SubTitle": "Reboot computer into UEFI Firmware Settings (Requires administrative permissions.)",
+      "PluginID": "CEA08895D2544B019B2E9C5009600DF4"
+    },
+    "Terminal : Packaged application": {
+      "SelectedCount": 30,
+      "LastSelected": "2025-03-07T16:33:29.2250296Z",
+      "Title": "Terminal",
+      "Search": "termin",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Microsoft Teams : Packaged application": {
+      "SelectedCount": 28,
+      "LastSelected": "2025-03-07T16:03:21.6534972Z",
+      "Title": "Microsoft Teams",
+      "Search": "teams",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Chat | Ryan Hutchison | Microsoft Teams : Running: ms-teams.exe": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-10-01T16:48:21.9992177Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\WindowWalker\\Images/windowwalker.dark.png",
+      "Title": "Chat | Ryan Hutchison | Microsoft Teams",
+      "Search": "teams",
+      "Score": 0,
+      "SubTitle": "Running: ms-teams.exe",
+      "PluginID": "F737A9223560B3C6833B5FFB8CDF78E5"
+    },
+    "Zebar : Application": {
+      "SelectedCount": 4,
+      "LastSelected": "2024-10-07T16:03:12.3890598Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Zebar\\Zebar.lnk",
+      "Title": "Zebar",
+      "Search": "z",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "File Explorer : Application": {
+      "SelectedCount": 2,
+      "LastSelected": "2024-10-02T13:45:34.6509763Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\File Explorer.lnk",
+      "Title": "File Explorer",
+      "Search": "exp",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Firefox : Application": {
+      "SelectedCount": 23,
+      "LastSelected": "2025-02-20T16:41:33.3772044Z",
+      "IconPath": "C:\\Users\\Public\\Desktop\\Firefox.lnk",
+      "Title": "Firefox",
+      "Search": "fire",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "OpenVPN Connect : Application": {
+      "SelectedCount": 13,
+      "LastSelected": "2025-01-24T16:05:54.1536927Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\OpenVPN Connect\\OpenVPN Connect.lnk",
+      "Title": "OpenVPN Connect",
+      "Search": "vpn",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "GlazeWM : Application": {
+      "SelectedCount": 11,
+      "LastSelected": "2024-11-06T17:09:30.1287359Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\GlazeWM.lnk",
+      "Title": "GlazeWM",
+      "Search": "gla",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Slack : Application": {
+      "SelectedCount": 45,
+      "LastSelected": "2025-03-07T16:03:19.213531Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Slack Technologies Inc\\Slack.lnk",
+      "Title": "Slack",
+      "Search": "slack",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "cmd.exe : Run command": {
+      "SelectedCount": 2,
+      "LastSelected": "2024-12-12T19:20:36.4029884Z",
+      "IconPath": "C:\\Windows\\system32\\cmd.exe",
+      "Title": "cmd.exe",
+      "Search": "cmd",
+      "Score": 0,
+      "SubTitle": "Run command",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Google Chrome : Application": {
+      "SelectedCount": 4,
+      "LastSelected": "2024-12-02T17:34:47.5198523Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Google Chrome.lnk",
+      "Title": "Google Chrome",
+      "Search": "chrome",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Snipping Tool : Packaged application": {
+      "SelectedCount": 19,
+      "LastSelected": "2025-03-11T15:55:24.4891457Z",
+      "Title": "Snipping Tool",
+      "Search": "sni",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Discord : Application": {
+      "SelectedCount": 33,
+      "LastSelected": "2025-03-07T16:03:20.4012746Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Discord Inc\\Discord.lnk",
+      "Title": "Discord",
+      "Search": "dis",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "MyASUS : Packaged application": {
+      "SelectedCount": 3,
+      "LastSelected": "2024-12-18T15:05:24.8876531Z",
+      "Title": "MyASUS",
+      "Search": "my",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "1Password : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-10-18T21:58:14.792505Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\1Password.lnk",
+      "Title": "1Password",
+      "Search": "1pas",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Calculator : Packaged application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-10-23T12:34:11.8009809Z",
+      "Title": "Calculator",
+      "Search": "cal",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Task Manager : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-10-30T12:58:08.0079956Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Task Manager.lnk",
+      "Title": "Task Manager",
+      "Search": "task",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Outlook : Application": {
+      "SelectedCount": 13,
+      "LastSelected": "2025-02-25T14:01:36.0099931Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Outlook.lnk",
+      "Title": "Outlook",
+      "Search": "outlo",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "slakc : Search the web in Firefox": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-01T19:04:03.4484826Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\WebSearch\\Images/WebSearch.dark.png",
+      "Title": "slakc",
+      "Search": "slakc",
+      "Score": 0,
+      "SubTitle": "Search the web in Firefox",
+      "PluginID": "9F1B49201C3F4BF781CAAD5CD88EA4DC"
+    },
+    "Docker Desktop : Application": {
+      "SelectedCount": 3,
+      "LastSelected": "2025-01-23T15:01:33.5753222Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Docker Desktop.lnk",
+      "Title": "Docker Desktop",
+      "Search": "do",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Visual Studio Code : Application": {
+      "SelectedCount": 3,
+      "LastSelected": "2024-12-12T17:16:41.4754655Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Visual Studio Code\\Visual Studio Code.lnk",
+      "Title": "Visual Studio Code",
+      "Search": "vs",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "PowerToys (Preview) : Application": {
+      "SelectedCount": 11,
+      "LastSelected": "2025-02-03T16:36:15.5137213Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\PowerToys (Preview)\\PowerToys (Preview).lnk",
+      "Title": "PowerToys (Preview)",
+      "Search": "power",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Windows Tools : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-13T14:03:14.0240908Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Administrative Tools.lnk",
+      "Title": "Windows Tools",
+      "Search": "displ",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "https://powertoyhs/ : Open in default browser": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-14T22:32:56.2872103Z",
+      "IconPath": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "Title": "https://powertoyhs/",
+      "Search": "powerToyhs",
+      "Score": 0,
+      "SubTitle": "Open in default browser",
+      "PluginID": "03276A39D4E9417C8FFD200B0EE5E871"
+    },
+    "Windows Memory Diagnostic : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-21T16:43:11.5735364Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Administrative Tools\\Memory Diagnostics Tool.lnk",
+      "Title": "Windows Memory Diagnostic",
+      "Search": "diag",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "https://firfef/ : Open in default browser": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-22T17:42:07.4708315Z",
+      "IconPath": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "Title": "https://firfef/",
+      "Search": "firfef",
+      "Score": 0,
+      "SubTitle": "Open in default browser",
+      "PluginID": "03276A39D4E9417C8FFD200B0EE5E871"
+    },
+    "https://outf/ : Open in default browser": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-11-25T15:28:09.5347784Z",
+      "IconPath": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "Title": "https://outf/",
+      "Search": "outf",
+      "Score": 0,
+      "SubTitle": "Open in default browser",
+      "PluginID": "03276A39D4E9417C8FFD200B0EE5E871"
+    },
+    "Hyper-V Manager : Application": {
+      "SelectedCount": 7,
+      "LastSelected": "2025-02-17T23:07:10.0807933Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Administrative Tools\\Hyper-V Manager.lnk",
+      "Title": "Hyper-V Manager",
+      "Search": "hyper",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Restart : Restart computer": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-12-04T17:09:03.1773351Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\System\\Images\\restart.dark.png",
+      "Title": "Restart",
+      "Search": "restart",
+      "Score": 0,
+      "SubTitle": "Restart computer",
+      "PluginID": "CEA08895D2544B019B2E9C5009600DF4"
+    },
+    "Command Prompt : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-12-12T19:22:42.244307Z",
+      "IconPath": "C:\\Users\\ThoHa\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Command Prompt.lnk",
+      "Title": "Command Prompt",
+      "Search": "cm",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "SteelSeries GG : Application": {
+      "SelectedCount": 15,
+      "LastSelected": "2025-03-11T16:49:48.2650802Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\SteelSeries\\SteelSeries GG\\SteelSeries GG.lnk",
+      "Title": "SteelSeries GG",
+      "Search": "stee",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Task Scheduler : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2024-12-16T15:33:34.8459291Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Administrative Tools\\Task Scheduler.lnk",
+      "Title": "Task Scheduler",
+      "Search": "task s",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Microsoft Store : Packaged application": {
+      "SelectedCount": 2,
+      "LastSelected": "2025-01-02T15:09:03.7420717Z",
+      "Title": "Microsoft Store",
+      "Search": "store",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Shortcut Guide : PowerToys Utility": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-01-02T15:05:40.4767983Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\PowerToys\\Images/ShortcutGuide.png",
+      "Title": "Shortcut Guide",
+      "Search": "short",
+      "Score": 0,
+      "SubTitle": "PowerToys Utility",
+      "PluginID": "29DD65DB28C84A37BDEF1D2B43DA368B"
+    },
+    "docker.exe : Run command": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-01-14T17:10:07.2253788Z",
+      "IconPath": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+      "Title": "docker.exe",
+      "Search": "docker",
+      "Score": 0,
+      "SubTitle": "Run command",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "sl;ack : Search the web in Firefox": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-01-23T15:01:30.0836778Z",
+      "IconPath": "C:\\Program Files\\PowerToys\\RunPlugins\\WebSearch\\Images/WebSearch.dark.png",
+      "Title": "sl;ack",
+      "Search": "sl;ack",
+      "Score": 0,
+      "SubTitle": "Search the web in Firefox",
+      "PluginID": "9F1B49201C3F4BF781CAAD5CD88EA4DC"
+    }
+  }
+}
