@@ -1,5 +1,5 @@
 #!/bin/bash
-
+apt-get update && apt-get upgrade -y
 apt-get install git tmux vim exuberant-ctags curl gcc zsh zip unzip python3 python3-venv python3-dev wget fd-find bat tree ripgrep default-jdk -y
 
 ################################################################################

@@ -4,6 +4,8 @@
 # set up VIM TMUX and Bash
 ################################################################################
 
+apt-get update && apt-get upgrade -y
+
 sh min_setup.sh
 
 mkdir ~/.vim
