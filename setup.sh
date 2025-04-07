@@ -4,14 +4,16 @@
 # set up VIM TMUX and Bash
 ################################################################################
 
-apt-get update && apt-get upgrade -y
+sudo apt-get update && apt-get upgrade -y
 
 sh min_setup.sh
 
+rm -rf ~/.vim
 mkdir ~/.vim
 
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/vimrc > ~/.vimrc
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/ctags > ~/.ctags.d/default.ctags
+
 
 # This sets up VIM
 mkdir -p ~/.vim/pack/themes/start
