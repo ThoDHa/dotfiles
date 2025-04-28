@@ -28,3 +28,10 @@ rm -rf squashfs-root
 git clone https://github.com/ThoDHa/nvim.git ~/.config/nvim
 nvim --headless "+Lazy! sync" +qa
 
+
+# Copy tmux-sessionizer and windowizer
+for file in tmux-sessionizer tmux-windowizer; do
+    cp local/bin/$file ~/.local/bin/.
+    chmod +x ~/.local/bin/$file
+done
+
