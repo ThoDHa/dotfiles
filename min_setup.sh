@@ -21,6 +21,10 @@ chsh -s $(which zsh)
 git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 curl https://raw.githubusercontent.com/ThoDHa/confs/main/tmux.conf > ~/.tmux.conf
 tmux run-shell ~/.tmux/plugins/tpm/bin/install_plugins
+cp tmux-windowizer ~/.local/bin/.
+cp tmux-sessionizer ~/.local/bin/.
+sudo chmod +x ~/.local/bin/tmux-windowizer
+sudo chmod +x ~/.local/bin/tmux-sessionizer
 
 ################################################################################
 # NVIM
