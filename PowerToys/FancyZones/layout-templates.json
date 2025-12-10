@@ -16,24 +16,24 @@
     },
     {
       "type": "columns",
-      "show-spacing": false,
+      "show-spacing": true,
       "spacing": 16,
       "zone-count": 3,
       "sensitivity-radius": 20
     },
     {
       "type": "rows",
-      "show-spacing": false,
+      "show-spacing": true,
       "spacing": 16,
       "zone-count": 3,
       "sensitivity-radius": 20
     },
     {
       "type": "grid",
-      "show-spacing": false,
-      "spacing": 16,
+      "show-spacing": true,
+      "spacing": 0,
       "zone-count": 144,
-      "sensitivity-radius": 20
+      "sensitivity-radius": 0
     },
     {
       "type": "priority-grid",
