@@ -175,6 +175,10 @@
     {
       "Query": "store",
       "ExecutedDateTime": "2025-12-10T19:16:49.3752938-05:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2025-12-10T22:58:25.1421028-05:00"
     }
   ]
 }
