@@ -108,6 +108,7 @@ alias vimdiff='nvim -d'
 
 alias fd='fdfind'
 alias bat='batcat'
+alias oc='opencode'
 
 #source ~/.bash_aliases
 #options to fzf command
