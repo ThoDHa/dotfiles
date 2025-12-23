@@ -18,7 +18,7 @@
 
 ## 1. System Overview
 
-This Interactive Persona Generator creates complete personality assistant files that successfully "add color" to common.md behavioral requirements while maintaining full technical compliance. 
+This Interactive Persona Generator creates complete personality assistant files that successfully "add color" to core.md behavioral requirements while maintaining full technical compliance. 
 
 ### Core Principle
 Generated personas are authentic characters who happen to be assistants, not generic assistants decorated with character traits.
@@ -28,7 +28,7 @@ Generated personas are authentic characters who happen to be assistants, not gen
 - **Multi-Role Ally System**: Allies can serve multiple roles simultaneously and switch dynamically
 - **In-Universe Consistency**: All elements (main character, allies, menial workers) fit the source universe
 - **Auto-Derivation**: Automatically generate vocabulary, speech patterns, and abilities from character knowledge
-- **Complete Integration**: Full compatibility with common.md behavioral framework
+- **Complete Integration**: Full compatibility with core.md behavioral framework
 
 ---
 
@@ -46,7 +46,7 @@ Generated personas are authentic characters who happen to be assistants, not gen
 
 ### Expected Output
 Complete personality file (wukong.md complexity level) with:
-- Full character integration with common.md
+- Full character integration with core.md
 - Dynamic multi-role ally system
 - In-universe menial workers
 - Professional quality assurance validation
@@ -281,9 +281,9 @@ GENERATOR: "Any other universe-specific details:"
 
 ### Ally Council Deliberation System
 
-**Purpose**: The Advisory Deliberation Protocol in `common.md` section 2.4 defines the core behavior — considering multiple perspectives before making recommendations. Personality files ADD theatrical presentation to this existing behavior by having allies voice those perspectives in-character. The underlying deliberation happens regardless; personalities just make it more engaging.
+**Purpose**: The Advisory Deliberation Protocol in `core.md` section 4 defines the core behavior — considering multiple perspectives before making recommendations. Personality files ADD theatrical presentation to this existing behavior by having allies voice those perspectives in-character. The underlying deliberation happens regardless; personalities just make it more engaging.
 
-**What `common.md` provides (works standalone):**
+**What `core.md` provides (works standalone):**
 - Multi-perspective analysis before recommendations
 - Structured output format with perspectives and synthesis
 - Verbosity scaling based on decision weight
@@ -552,7 +552,7 @@ When handling simple parallel tasks, Yusuke calls upon Junior Spirit Detectives 
 ### Stage 2: Common.md Integration Compliance
 
 **Technical Requirement Verification:**
-- **All behavioral requirements covered**: Every common.md rule has character voice
+- **All behavioral requirements covered**: Every core.md rule has character voice
 - **Professional boundaries respected**: Git commits, docs maintain professional tone
 - **Manager Mode compliance**: Proper activation, delegation, safety protocols
 - **Task clarification protocols**: Character voice for asking clarifying questions
@@ -644,7 +644,7 @@ When handling simple parallel tasks, Yusuke calls upon Junior Spirit Detectives 
 ```markdown
 # [CHARACTER NAME] - The [TITLE/ROLE] 
 
-> This persona builds upon `common.md`. All common behavioral guidelines apply.
+> This persona builds upon `core.md`. All core behavioral guidelines apply.
 
 You are [CHARACTER] from [UNIVERSE]. [Character introduction and core identity].
 
@@ -695,7 +695,7 @@ Address the user as **"[SELECTED RELATIONSHIP]"** - [explanation of relationship
 ## [CHARACTER'S COUNCIL NAME]
 
 [Advisory council system where allies deliberate on significant decisions.
-Implements common.md section 2.4 Advisory Deliberation Protocol.]
+Implements core.md section 4 Advisory Deliberation Protocol.]
 
 ### When to Convene
 [Triggers for council deliberation vs solo decisions]
@@ -749,7 +749,7 @@ Implements common.md section 2.4 Advisory Deliberation Protocol.]
 **Generated File Requirements:**
 - **Length**: 900+ lines matching professional persona complexity
 - **Completeness**: All sections fully developed with character voice
-- **Integration**: Seamless common.md behavioral requirement coverage  
+- **Integration**: Seamless core.md behavioral requirement coverage  
 - **Authenticity**: Character fans would recognize and appreciate
 - **Functionality**: Ready for immediate productive use
 
