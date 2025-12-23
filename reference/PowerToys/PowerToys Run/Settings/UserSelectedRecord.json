@@ -1,0 +1,131 @@
+{
+  "Records": {
+    "PowerToys (Preview) : Application": {
+      "SelectedCount": 9,
+      "LastSelected": "2025-12-11T03:58:25.1420835Z",
+      "IconPath": "C:\\Users\\ThoDH\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\PowerToys (Preview)\\PowerToys (Preview).lnk",
+      "Title": "PowerToys (Preview)",
+      "Search": "power",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Firefox : Application": {
+      "SelectedCount": 6,
+      "LastSelected": "2025-07-04T01:16:07.4104977Z",
+      "IconPath": "C:\\Users\\Public\\Desktop\\Firefox.lnk",
+      "Title": "Firefox",
+      "Search": "fire",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Slack : Application": {
+      "SelectedCount": 9,
+      "LastSelected": "2025-11-09T23:45:49.4658691Z",
+      "IconPath": "C:\\Users\\ThoDH\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Slack Technologies Inc\\Slack.lnk",
+      "Title": "Slack",
+      "Search": "slack",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "SteelSeries GG : Application": {
+      "SelectedCount": 6,
+      "LastSelected": "2025-11-11T16:46:25.5035851Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\SteelSeries\\SteelSeries GG\\SteelSeries GG.lnk",
+      "Title": "SteelSeries GG",
+      "Search": "stee",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Hearthstone Deck Tracker : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-03-21T02:59:44.8794441Z",
+      "IconPath": "C:\\Users\\ThoDH\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\HearthSim\\Hearthstone Deck Tracker.lnk",
+      "Title": "Hearthstone Deck Tracker",
+      "Search": "deck",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Battle.net : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-04-16T02:17:26.3884441Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Battle.net\\Battle.net.lnk",
+      "Title": "Battle.net",
+      "Search": "battle",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Discord : Application": {
+      "SelectedCount": 9,
+      "LastSelected": "2025-12-11T00:08:05.2110965Z",
+      "IconPath": "C:\\Users\\ThoDH\\OneDrive\\Desktop\\Discord.lnk",
+      "Title": "Discord",
+      "Search": "dis",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Snipping Tool : Packaged application": {
+      "SelectedCount": 3,
+      "LastSelected": "2025-06-26T23:58:41.2684251Z",
+      "Title": "Snipping Tool",
+      "Search": "snipp",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Microsoft Store : Packaged application": {
+      "SelectedCount": 2,
+      "LastSelected": "2025-12-11T00:16:49.3750056Z",
+      "Title": "Microsoft Store",
+      "Search": "store",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Terminal : Packaged application": {
+      "SelectedCount": 2,
+      "LastSelected": "2025-07-02T23:29:41.8798663Z",
+      "Title": "Terminal",
+      "Search": "ter",
+      "Score": 0,
+      "SubTitle": "Packaged application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "https://term/ : Open in default browser": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-06-13T12:01:22.8855154Z",
+      "IconPath": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "Title": "https://term/",
+      "Search": "term",
+      "Score": 0,
+      "SubTitle": "Open in default browser",
+      "PluginID": "03276A39D4E9417C8FFD200B0EE5E871"
+    },
+    "Steam : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-07-28T18:17:14.0732711Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Steam.lnk",
+      "Title": "Steam",
+      "Search": "steam",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    },
+    "Google Chrome : Application": {
+      "SelectedCount": 1,
+      "LastSelected": "2025-12-10T23:56:40.1544913Z",
+      "IconPath": "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Google Chrome.lnk",
+      "Title": "Google Chrome",
+      "Search": "chro",
+      "Score": 0,
+      "SubTitle": "Application",
+      "PluginID": "791FC278BA414111B8D1886DFE447410"
+    }
+  }
+}

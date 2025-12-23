@@ -1,0 +1,184 @@
+{
+  "Items": [
+    {
+      "Query": "powerto",
+      "ExecutedDateTime": "2025-03-20T18:54:51.6986043-04:00"
+    },
+    {
+      "Query": "fi",
+      "ExecutedDateTime": "2025-03-20T18:57:12.1860467-04:00"
+    },
+    {
+      "Query": "s",
+      "ExecutedDateTime": "2025-03-20T18:59:58.2448301-04:00"
+    },
+    {
+      "Query": "stee",
+      "ExecutedDateTime": "2025-03-20T22:58:46.5229328-04:00"
+    },
+    {
+      "Query": "deck",
+      "ExecutedDateTime": "2025-03-20T22:59:44.8794551-04:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2025-04-15T22:04:53.105328-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-04-15T22:07:57.0576215-04:00"
+    },
+    {
+      "Query": "battle",
+      "ExecutedDateTime": "2025-04-15T22:17:26.3885828-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-04-16T13:31:49.4002001-04:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2025-04-21T21:55:10.8815962-04:00"
+    },
+    {
+      "Query": "snipp",
+      "ExecutedDateTime": "2025-05-14T19:20:03.5744829-04:00"
+    },
+    {
+      "Query": "power t",
+      "ExecutedDateTime": "2025-06-01T11:15:43.9018227-04:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2025-06-07T12:36:35.1366033-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-06-07T18:04:12.0756893-04:00"
+    },
+    {
+      "Query": "store",
+      "ExecutedDateTime": "2025-06-11T18:42:04.6862169-04:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2025-06-11T19:01:17.1386463-04:00"
+    },
+    {
+      "Query": "term",
+      "ExecutedDateTime": "2025-06-13T08:01:22.8855334-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-06-13T08:27:24.7281749-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-06-13T16:55:58.033503-04:00"
+    },
+    {
+      "Query": "stee",
+      "ExecutedDateTime": "2025-06-15T10:21:39.0672927-04:00"
+    },
+    {
+      "Query": "sni",
+      "ExecutedDateTime": "2025-06-18T22:35:14.9699216-04:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2025-06-19T15:26:17.6494333-04:00"
+    },
+    {
+      "Query": "po",
+      "ExecutedDateTime": "2025-06-23T21:51:54.6217804-04:00"
+    },
+    {
+      "Query": "snipp",
+      "ExecutedDateTime": "2025-06-26T19:58:41.2686088-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-06-28T10:15:21.2123245-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-06-28T10:15:23.675737-04:00"
+    },
+    {
+      "Query": "ter",
+      "ExecutedDateTime": "2025-07-02T19:29:41.880303-04:00"
+    },
+    {
+      "Query": "fire",
+      "ExecutedDateTime": "2025-07-03T21:16:07.410858-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-07-04T21:32:43.3959156-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-07-17T21:03:32.5612917-04:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2025-07-23T16:59:23.3010372-04:00"
+    },
+    {
+      "Query": "stee",
+      "ExecutedDateTime": "2025-07-25T19:47:39.168978-04:00"
+    },
+    {
+      "Query": "steam",
+      "ExecutedDateTime": "2025-07-28T14:17:14.0733929-04:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-08-17T22:35:19.7275234-04:00"
+    },
+    {
+      "Query": "stee",
+      "ExecutedDateTime": "2025-09-11T19:12:06.3795817-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-10-19T10:00:39.0447533-04:00"
+    },
+    {
+      "Query": "d",
+      "ExecutedDateTime": "2025-10-19T10:00:41.1881697-04:00"
+    },
+    {
+      "Query": "slack",
+      "ExecutedDateTime": "2025-11-09T18:45:49.4662064-05:00"
+    },
+    {
+      "Query": "disc",
+      "ExecutedDateTime": "2025-11-09T18:45:50.6568759-05:00"
+    },
+    {
+      "Query": "stee",
+      "ExecutedDateTime": "2025-11-11T11:46:25.503594-05:00"
+    },
+    {
+      "Query": "chro",
+      "ExecutedDateTime": "2025-12-10T18:56:40.1550888-05:00"
+    },
+    {
+      "Query": "dis",
+      "ExecutedDateTime": "2025-12-10T19:08:05.2112342-05:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2025-12-10T19:12:47.1587337-05:00"
+    },
+    {
+      "Query": "store",
+      "ExecutedDateTime": "2025-12-10T19:16:49.3752938-05:00"
+    },
+    {
+      "Query": "power",
+      "ExecutedDateTime": "2025-12-10T22:58:25.1421028-05:00"
+    }
+  ]
+}
