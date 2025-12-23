@@ -10,7 +10,7 @@ OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-wukong personality-carl personality-naruto
+.PHONY: personality-wukong
 
 # Default target
 all: help
@@ -65,8 +65,6 @@ dry-run:
 # ============================================================================
 # Usage:
 #   make personality-wukong   # Set Wukong as active personality
-#   make personality-carl     # Set Carl as active personality
-#   make personality-naruto   # Set Naruto as active personality
 #
 # The personality is set by symlinking rules/personality.md to the desired
 # reference file. OpenCode loads all rules/*.md files, including the symlink.
@@ -76,16 +74,6 @@ personality-wukong:
 	@echo "Setting Wukong as active personality..."
 	@ln -sf $(OPENCODE_REF)/wukong.md $(OPENCODE_RULES)/personality.md
 	@echo "Done! Wukong is now the active personality."
-
-personality-carl:
-	@echo "Setting Carl as active personality..."
-	@ln -sf $(OPENCODE_REF)/carl.md $(OPENCODE_RULES)/personality.md
-	@echo "Done! Carl is now the active personality."
-
-personality-naruto:
-	@echo "Setting Naruto as active personality..."
-	@ln -sf $(OPENCODE_REF)/naruto.md $(OPENCODE_RULES)/personality.md
-	@echo "Done! Naruto is now the active personality."
 
 # Override stow-opencode to also set default personality
 stow-opencode:
@@ -131,8 +119,6 @@ help:
 	@echo "OpenCode Personality:"
 	@echo "  make stow-opencode       - Stow opencode + set Wukong as default"
 	@echo "  make personality-wukong  - Switch to Wukong personality"
-	@echo "  make personality-carl    - Switch to Carl personality"
-	@echo "  make personality-naruto  - Switch to Naruto personality"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES)"
 	@echo ""
