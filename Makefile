@@ -5,9 +5,11 @@ CONTAINER := base_dev
 STOW_PACKAGES := shell tmux scripts isort opencode
 STOW_TARGET := $(HOME)
 
-# OpenCode personality paths (resolved after stow)
+# OpenCode personality paths
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
-OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
+# Point directly to dotfiles source to avoid symlink chains
+DOTFILES_DIR := $(shell cd $(dir $(lastword $(MAKEFILE_LIST))) && pwd)
+OPENCODE_REF_SRC := $(DOTFILES_DIR)/opencode/.config/opencode/reference
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
 .PHONY: personality-wukong personality-none clean-stow
@@ -91,7 +93,7 @@ clean-stow:
 
 personality-wukong:
 	@echo "Setting Wukong as active personality..."
-	@ln -sf $(OPENCODE_REF)/wukong.md $(OPENCODE_RULES)/personality.md
+	@ln -sf $(OPENCODE_REF_SRC)/wukong.md $(OPENCODE_RULES)/personality.md
 	@echo "Done! Wukong is now the active personality."
 
 personality-none:
@@ -104,7 +106,7 @@ stow-opencode:
 	@echo "Stowing opencode..."
 	stow -v --no-folding -t $(STOW_TARGET) opencode
 	@echo "Setting Wukong as default personality..."
-	@ln -sf $(OPENCODE_REF)/wukong.md $(OPENCODE_RULES)/personality.md
+	@ln -sf $(OPENCODE_REF_SRC)/wukong.md $(OPENCODE_RULES)/personality.md
 	@echo "Done! OpenCode stowed with Wukong as default personality."
 
 # Full bootstrap - install all dev tools
