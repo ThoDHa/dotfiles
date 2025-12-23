@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN bash -c 'export SKIP_CHSH=1 && /root/bootstrap/install.sh'
 
 # Stow packages will be mounted at runtime via volume
-# The container expects configs to be mounted at /root/confs
+# The container expects configs to be mounted at /root/dotfiles
 
 # Git safe directory for any mounted repos
 RUN git config --global --add safe.directory '*'

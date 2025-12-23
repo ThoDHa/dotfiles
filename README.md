@@ -6,8 +6,8 @@ Personal configuration files managed with [GNU Stow](https://www.gnu.org/softwar
 
 ```bash
 # Clone the repository
-git clone https://github.com/ThoDHa/confs.git ~/confs
-cd ~/confs
+git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
+cd ~/dotfiles
 
 # Full setup (install tools + symlink configs)
 make bootstrap
@@ -21,7 +21,7 @@ make install
 Each directory is a stow "package" that mirrors the target structure in `$HOME`:
 
 ```
-confs/
+dotfiles/
 ├── shell/              # Zsh configuration
 │   └── .zshrc          # -> ~/.zshrc
 ├── tmux/               # Tmux configuration
@@ -30,22 +30,21 @@ confs/
 │   └── .local/bin/
 │       ├── tmux-sessionizer
 │       └── tmux-windowizer
-├── cursor/             # Cursor IDE AI rules
-│   └── .cursor/rules/
-├── opencode/           # OpenCode AI config (manual symlinks)
-│   ├── .local/bin/opencode
-│   └── .opencode/
-│       ├── rules/
-│       └── opencode.json
 ├── isort/              # Python isort config
 │   └── .config/isort/
+│       └── config.toml # -> ~/.config/isort/config.toml
+├── opencode/           # OpenCode AI config
+│   └── .config/opencode/
+│       ├── opencode.json
+│       ├── rules/      # RFC 2119 specification files
+│       └── reference/  # Personality definitions
 ├── bootstrap/          # Setup scripts (not stowed)
-│   ├── install.sh      # Main bootstrap script
-│   ├── opencode-install.sh  # OpenCode symlink setup
-│   └── Dockerfile      # Development container
+│   ├── install.sh
+│   ├── opencode-install.sh
+│   └── Dockerfile
 ├── reference/          # Template configs (not stowed)
 │   ├── markdownlint.json
-│   ├── PowerToys/      # PowerToys settings backup
+│   ├── PowerToys/
 │   └── windows_terminal_settings.json
 ├── Makefile
 └── README.md
@@ -76,11 +75,19 @@ confs/
 | `shell` | `~/.zshrc` | Zsh config with oh-my-zsh, FZF, aliases |
 | `tmux` | `~/.tmux.conf` | Tmux config with TPM plugins, rose-pine theme |
 | `scripts` | `~/.local/bin/` | tmux-sessionizer and tmux-windowizer |
-| `cursor` | `~/.cursor/` | Cursor IDE AI rules and personas |
-| `opencode` | `~/.opencode/` | OpenCode AI config and personas (manual symlinks, not stow) |
 | `isort` | `~/.config/isort/` | Python import sorter config |
+| `opencode` | `~/.config/opencode/` | OpenCode AI rules and personality |
 
-**Note:** The `opencode` package uses manual symlinks instead of stow because `~/.opencode/` contains runtime files (node_modules, etc.) that can't be managed by stow. Use `make opencode` or `./bootstrap/opencode-install.sh` to set it up.
+## OpenCode Personality
+
+Switch OpenCode personality after stowing:
+
+```bash
+make stow-opencode        # Stow opencode + set Wukong as default
+make personality-wukong   # Switch to Wukong personality
+```
+
+The personality system uses symlinks — `rules/personality.md` points to the active personality in `reference/`.
 
 ## Bootstrap
 
@@ -104,7 +111,7 @@ The `reference/` directory contains configuration templates that you copy to pro
 **Project Templates:**
 ```bash
 # Copy markdownlint config to a project
-cp ~/confs/reference/markdownlint.json ~/my-project/.markdownlint.json
+cp ~/dotfiles/reference/markdownlint.json ~/my-project/.markdownlint.json
 ```
 
 ## Windows Configuration

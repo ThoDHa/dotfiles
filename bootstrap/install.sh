@@ -7,8 +7,8 @@
 #   ./bootstrap/install.sh
 #
 # Prerequisites:
-#   1. Clone repo:    git clone https://github.com/ThoDHa/confs.git ~/confs
-#   2. Stow configs:  cd ~/confs && make stow
+#   1. Clone repo:    git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
+#   2. Stow configs:  cd ~/dotfiles && make stow
 #   3. Run this:      ./bootstrap/install.sh
 #
 
@@ -42,7 +42,7 @@ echo ""
 if [ ! -L "$HOME/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
     print_error "Configs not found! Run 'make stow' first."
     echo ""
-    echo "  cd ~/confs"
+    echo "  cd ~/dotfiles"
     echo "  make stow"
     echo "  ./bootstrap/install.sh"
     echo ""
