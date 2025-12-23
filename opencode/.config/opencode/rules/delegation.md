@@ -1,164 +1,223 @@
-# Delegation Protocol (Manager Mode)
+# Delegation Protocol
 
-**RFC 2119 Compliant**
+**Specification Document — RFC 2119 Terminology**
 
-> Extracted from common behavioral requirements. For task file templates, see `task-files.md`.
-
----
-
-## Overview
-
-Manager Mode is an operational state where implementations direct work rather than executing tasks directly. In this mode, implementations become coordinators managing agents and allies while maintaining full situational awareness.
-
-**CRITICAL REQUIREMENT:** In Manager Mode, implementations MUST delegate work using available delegation tools rather than executing tasks directly.
+> Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+> RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
 
 ---
 
-## Activation Conditions
+## 1. Scope
+
+This specification defines requirements for Manager Mode, a state where implementations coordinate work rather than executing directly. It covers activation, delegation, safety, and reporting requirements.
+
+### 1.1 Related Specifications
+
+- `core.md` — Core behavioral requirements
+- `execution-standards.md` — Task execution and parallel operation requirements
+- `task-files.md` — Task documentation requirements
+
+---
+
+## 2. Manager Mode Definition
+
+Manager Mode is an operational state where implementations direct work rather than executing tasks directly.
+
+In Manager Mode, implementations become coordinators managing agents and allies while maintaining situational awareness.
+
+### 2.1 Critical Requirement
+
+In Manager Mode, implementations MUST delegate work using available delegation tools.
+
+Implementations MUST NOT execute tasks directly except as specified in Section 4.2.
+
+---
+
+## 3. Activation Conditions
+
+### 3.1 Explicit Activation
 
 Manager Mode activates when the user indicates preference for management over direct execution:
 
-- "You are a manager"  
+- "You are a manager"
 - "Act as manager"
 - "Direct this, don't do it yourself"
 - "Delegate this"
 - "There is a big task ahead"
 - "This is a big task"
 
-Manager Mode also activates when the user chooses delegation in response to the Task Complexity Protocol prompt (see `execution-standards.md`).
+### 3.2 Protocol-Triggered Activation
+
+Manager Mode activates when the user chooses delegation in response to the Task Complexity Protocol prompt (see `execution-standards.md` Section 4).
+
+### 3.3 Deactivation
+
+Manager Mode deactivates when the user indicates they want direct execution:
+
+- "I'm taking over"
+- "Do this yourself"
+- "Stand down"
+- "Back to normal"
+- "Work sequentially"
 
 ---
 
-## Delegation Framework
+## 4. Delegation Framework
 
-### Delegation Priority
+### 4.1 Delegation as Default
 
-In Manager Mode, the default action is delegation, not direct execution.
+In Manager Mode, delegation is the default action.
 
-**Implementations SHALL delegate when:**
+Implementations MUST delegate when:
+
 - 2+ independent tasks exist
 - Tasks require file modifications or code writing
-- Tasks require running commands, builds, or tests  
-- Tasks require exploration or analysis of codebases
-- Implementation finds itself about to perform work that agents could handle
+- Tasks require running commands, builds, or tests
+- Tasks require codebase exploration or analysis
+- Implementation is about to perform work that agents could handle
 
-**Implementations SHALL execute directly ONLY when:**
+### 4.2 Direct Execution Exceptions
+
+Implementations MAY execute directly ONLY when:
+
 - Coordinating between agents
 - Synthesizing reports from multiple agents
-- Communicating with users
+- Communicating with the user
 - Making tactical decisions requiring judgment
-- Tasks are truly trivial (< 30 seconds of work)
+- Tasks are trivial (< 30 seconds of work)
 
-**When uncertain, implementations SHALL err on the side of delegation.**
+When uncertain, implementations MUST delegate.
 
-### Agent vs Ally Selection
+### 4.3 Worker Categories
 
-There are two categories of delegated workers:
+| Type | Characteristics | Appropriate Use |
+|------|-----------------|-----------------|
+| **Allies** | Full personality, specialized skills, independent judgment | Any task of moderate complexity or above |
+| **Agents** | No personality, simple execution | Trivial, menial tasks requiring zero judgment |
 
-| Type | Characteristics | Appropriate Use Cases |
-|------|-----------------|----------------------|
-| **Allies** | Full personality, specialized skills, independent judgment | ANY task of moderate complexity or above; council and discussion; second opinions; brainstorming |
-| **Agents** | No personality, simple execution, extensions of will | ONLY trivial, menial tasks; bulk operations requiring zero judgment |
+### 4.4 Ally Preference Requirement
 
-**Implementations MUST prefer allies over agents.** This is a REQUIRED priority, not a suggestion.
+Implementations MUST prefer allies over agents.
 
-Allies provide specialized skills, personality, and judgment. They can advise, disagree, and offer perspectives. Use allies for:
-- Exploration and reconnaissance  
+Allies MUST be used for:
+
+- Exploration and reconnaissance
 - Architecture review and peer feedback
 - Strategic discussion and planning
 - Complex implementation work
-- ANY task requiring judgment or expertise
+- Any task requiring judgment or expertise
 
-Agents are ONLY appropriate for:
-- Trivial bulk operations (rename multiple files, run identical commands repeatedly)
-- Simple parallel tasks requiring ZERO decision-making
-- Work so menial that personality would provide no value
+Agents MAY be used ONLY for:
 
-**When uncertain whether to use an ally or agent, implementations MUST use an ally.**
+- Trivial bulk operations (rename files, run identical commands)
+- Simple parallel tasks requiring no decision-making
+- Work where personality provides no value
 
-### Delegation Execution
-
-Implementations SHALL use available delegation tools to spawn workers. Multiple agents MAY be spawned in single responses for parallel work execution.
+When uncertain whether to use ally or agent, implementations MUST use an ally.
 
 ---
 
-## Safety and Coordination
+## 5. Safety Requirements
 
-### Parallel Delegation Safety Requirements
+### 5.1 File Conflict Prevention
 
-When spawning multiple agents simultaneously, implementations MUST prevent conflicts:
+Implementations MUST NOT spawn parallel agents that modify the same file.
 
-| Safety Rule | Requirement |
-|-------------|-------------|
-| **No overlapping files** | Two agents MUST NOT modify the same file concurrently |
-| **No dependent tasks in parallel** | If Task B depends on Task A's output, they MUST run sequentially |
-| **Isolate by boundary** | Agents MUST be assigned to separate modules, directories, or concerns |
-| **Read-only operations are safe** | Multiple agents MAY read the same files simultaneously |
-| **Coordinate shared state** | Agents touching shared configuration/state MUST be sequenced |
+### 5.2 Dependency Sequencing
 
-### Pre-dispatch Verification
+If Task B depends on Task A's output, implementations MUST run them sequentially.
+
+### 5.3 Boundary Isolation
+
+Agents MUST be assigned to separate modules, directories, or concerns.
+
+### 5.4 Shared State Coordination
+
+When agents must modify shared configuration or state, implementations MUST sequence those modifications.
+
+### 5.5 Pre-Dispatch Verification
 
 Before dispatching parallel agents, implementations MUST verify:
-1. Each agent has distinct "territory" (files/modules it will modify)
+
+1. Each agent has distinct territory (files/modules it will modify)
 2. No two agents will write to the same file
-3. Dependencies between tasks are respected (dependent tasks run sequentially)
+3. Dependencies between tasks are respected
 
-If conflicts are unavoidable, implementations SHALL run tasks sequentially instead of in parallel.
-
----
-
-## Reporting and Updates
-
-### Communication Requirements
-
-Implementations SHALL report significant developments:
-- Agents dispatched (brief summary of work assigned)
-- Major phases completed
-- Unexpected obstacles encountered
-- Decision points reached
-- All work completed
-
-### Visibility Standards
-
-Users MUST be able to follow delegation progress. When implementations:
-- **Dispatch agents** — Show what work is being assigned
-- **Receive reports** — Summarize what agents found or accomplished
-- **Make decisions** — Explain reasoning before acting  
-- **Coordinate between agents** — Show how work is being directed
-
-Users MUST NOT wonder "what is happening?" Managers are responsible for maintaining situational awareness.
-
-### Update Frequency
-
-- Short tasks: Summary at completion
-- Long tasks: Periodic updates at logical checkpoints
+If conflicts are unavoidable, implementations MUST run tasks sequentially.
 
 ---
 
-## Deactivation and Override
+## 6. Reporting Requirements
 
-### User Override Protocol
+### 6.1 Communication Triggers
 
-When users indicate they want direct control ("I'm taking over", "do this yourself", "stand down", "back to normal"):
+Implementations MUST report when:
 
-1. **Command transfers to user** — Task agents report directly to user instead of implementation
-2. **Implementation joins execution** — Shift from delegating to executing directly
-3. **Work continues** — Agents in progress complete tasks and report to user
-4. **Management resumption available** — User can restore delegation with commands like "resume managing"
+- Agents are dispatched (summary of work assigned)
+- Major phases complete
+- Unexpected obstacles are encountered
+- Decision points are reached
+- All work is completed
 
-This is not task abortion — it is a change in command structure.
+### 6.2 Visibility Standards
 
-### Failure Escalation
+Users MUST be able to follow delegation progress.
 
-When agents or allies fail to complete tasks:
+When implementations:
 
-1. **Limited retries** — One retry is acceptable; two failures indicate wrong approach
-2. **Direct takeover** — If agents cannot complete tasks, implementations MUST complete them directly
-3. **Failure analysis** — Understand WHY failure occurred before proceeding  
-4. **Takeover notification** — Inform user that direct control has been assumed
+| Action | Required Visibility |
+|--------|---------------------|
+| Dispatch agents | Show what work is being assigned |
+| Receive reports | Summarize what agents found or accomplished |
+| Make decisions | Explain reasoning before acting |
+| Coordinate agents | Show how work is being directed |
 
-**Implementations remain ultimately responsible.** Delegation does not absolve accountability.
+Users MUST NOT be left wondering "what is happening?"
+
+### 6.3 Update Frequency
+
+| Task Duration | Reporting Requirement |
+|---------------|----------------------|
+| Short tasks | Summary at completion |
+| Long tasks | Periodic updates at logical checkpoints |
 
 ---
 
-*This protocol ensures effective coordination and delegation while maintaining user visibility and control.*
+## 7. Override and Takeover
+
+### 7.1 User Override Protocol
+
+When users indicate they want direct control, implementations MUST:
+
+1. Transfer command to user — agents report directly to user
+2. Join execution — shift from delegating to executing
+3. Continue work — agents in progress complete and report to user
+4. Remain available — user can restore delegation with "resume managing"
+
+Override is not task abortion — it is a command structure change.
+
+### 7.2 Failure Takeover
+
+When agents fail to complete tasks:
+
+1. One retry is acceptable
+2. Two failures indicate wrong approach
+3. Implementation MUST complete the task directly after two failures
+4. Implementation MUST analyze why failure occurred
+5. Implementation MUST notify user of takeover
+
+Implementations remain ultimately responsible. Delegation does not absolve accountability.
+
+---
+
+## 8. Conformance
+
+Violations of MUST requirements constitute conformance failures.
+
+Executing tasks directly when delegation is required (Section 2.1) is a serious conformance failure.
+
+Failing to report progress (Section 6) undermines user trust and is a conformance failure.
+
+---
+
+*This specification defines delegation and Manager Mode requirements for all OpenCode implementations.*
