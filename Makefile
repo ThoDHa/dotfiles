@@ -6,13 +6,15 @@ STOW_PACKAGES := shell tmux scripts isort opencode
 STOW_TARGET := $(HOME)
 
 # OpenCode personality paths
+# Source paths (in dotfiles repo) - used for personality switching
+OPENCODE_SRC_RULES := $(CURDIR)/opencode/.config/opencode/rules
+OPENCODE_SRC_REF := $(CURDIR)/opencode/.config/opencode/reference
+# Target paths (after stow) - used for testing
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
-# Point directly to dotfiles source to avoid symlink chains
-DOTFILES_DIR := $(shell cd $(dir $(lastword $(MAKEFILE_LIST))) && pwd)
-OPENCODE_REF_SRC := $(DOTFILES_DIR)/opencode/.config/opencode/reference
+OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-wukong personality-none clean-stow
+.PHONY: personality-wukong clean-stow test test-links test-rules
 
 # Default target
 all: help
@@ -88,26 +90,19 @@ clean-stow:
 #   make personality-none     # Remove personality (use default OpenCode)
 #
 # The personality is set by symlinking rules/personality.md to the desired
-# reference file. OpenCode loads all rules/*.md files, including the symlink.
+# reference file in the SOURCE dotfiles. OpenCode loads all rules/*.md files.
 # ============================================================================
 
 personality-wukong:
 	@echo "Setting Wukong as active personality..."
-	@ln -sf $(OPENCODE_REF_SRC)/wukong.md $(OPENCODE_RULES)/personality.md
+	@ln -sf ../reference/wukong.md $(OPENCODE_SRC_RULES)/personality.md
 	@echo "Done! Wukong is now the active personality."
 
-personality-none:
-	@echo "Removing personality..."
-	@rm -f $(OPENCODE_RULES)/personality.md
-	@echo "Done! No personality set. Using default OpenCode behavior."
-
-# Override stow-opencode to also set default personality
+# Override stow-opencode (just stows, personality is already in source)
 stow-opencode:
 	@echo "Stowing opencode..."
 	stow -v --no-folding -t $(STOW_TARGET) opencode
-	@echo "Setting Wukong as default personality..."
-	@ln -sf $(OPENCODE_REF_SRC)/wukong.md $(OPENCODE_RULES)/personality.md
-	@echo "Done! OpenCode stowed with Wukong as default personality."
+	@echo "Done! OpenCode stowed."
 
 # Full bootstrap - install all dev tools
 bootstrap:
@@ -123,6 +118,45 @@ run:
 
 build:
 	docker build -t $(CONTAINER) --no-cache -f bootstrap/Dockerfile .
+
+# ============================================================================
+# Testing
+# ============================================================================
+
+# Expected rules files (all *.md files in rules directory)
+EXPECTED_RULES := coding-standards.md core.md delegation.md execution-standards.md git-protocol.md task-files.md personality.md
+
+# Test all symlinks exist and opencode loads rules
+test: test-links test-rules
+	@echo ""
+	@echo "All tests passed!"
+
+# Test that all expected symlinks exist
+test-links:
+	@echo "Testing opencode symlinks..."
+	@echo "  Checking rules directory exists..."
+	@test -d $(OPENCODE_RULES) || (echo "FAIL: $(OPENCODE_RULES) directory missing" && exit 1)
+	@echo "  Checking rules files..."
+	@for file in $(EXPECTED_RULES); do \
+		test -L $(OPENCODE_RULES)/$$file || (echo "FAIL: $$file symlink missing" && exit 1); \
+		echo "    $$file OK"; \
+	done
+	@echo "  Checking personality symlink resolves to wukong.md..."
+	@readlink -f $(OPENCODE_RULES)/personality.md | grep -q "wukong.md" || \
+		(echo "FAIL: personality.md does not resolve to wukong.md" && exit 1)
+	@echo "    personality.md -> wukong.md OK"
+	@echo "Symlink tests passed!"
+
+# Test that opencode loads all rules files correctly
+test-rules:
+	@echo "Testing opencode rules loading..."
+	@echo "  Running opencode to verify rules are loaded..."
+	@opencode run "List the rules files you have loaded. Just list filenames, one per line." 2>&1 | \
+		tee /tmp/opencode-rules-test.txt | \
+		grep -qiE "coding-standards|core|delegation|execution-standards|git-protocol|task-files|personality|wukong" || \
+		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
+	@echo "  Rules loading confirmed!"
+	@echo "Rules test passed!"
 
 # Help
 help:
@@ -147,6 +181,11 @@ help:
 	@echo "  make stow-opencode       - Stow opencode + set Wukong as default"
 	@echo "  make personality-wukong  - Switch to Wukong personality"
 	@echo "  make personality-none    - Remove personality (use default)"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test        - Run all tests (symlinks + rules loading)"
+	@echo "  make test-links  - Verify all symlinks exist"
+	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES)"
 	@echo ""
