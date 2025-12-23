@@ -5,14 +5,21 @@ Personal configuration files managed with [GNU Stow](https://www.gnu.org/softwar
 ## Quick Start
 
 ```bash
-# Clone the repository
+# Clone, stow configs, and bootstrap everything
 git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
 cd ~/dotfiles
+make stow
+./bootstrap/install.sh
 
-# Full setup (install tools + symlink configs)
-make bootstrap
+# Restart shell when done
+exec zsh
+```
 
-# Or just symlink configs (if tools already installed)
+**Alternative:** If you just want to symlink configs without installing tools:
+
+```bash
+git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
+cd ~/dotfiles
 make install
 ```
 
@@ -61,6 +68,7 @@ dotfiles/
 | `make unstow` | Remove stow symlinks |
 | `make restow` | Update symlinks (unstow + stow) |
 | `make dry-run` | Preview what would be stowed |
+| `make clean-stow` | Remove conflicting files before stowing |
 | `make stow-PKG` | Stow a single package (e.g., `make stow-shell`) |
 | `make unstow-PKG` | Unstow a single package |
 | `make build` | Build the dev container |
@@ -140,9 +148,8 @@ Copy-Item "reference\windows_terminal_settings.json" "$env:LOCALAPPDATA\Packages
 **Stow conflicts:**
 ```bash
 # If stow complains about existing files/directories
-make unstow
-rm ~/.zshrc  # Remove the conflicting file
-make stow
+make clean-stow  # Remove all conflicting files
+make stow        # Create fresh symlinks
 ```
 
 **Bootstrap issues:**

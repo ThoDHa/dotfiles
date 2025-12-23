@@ -10,7 +10,7 @@ OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-wukong
+.PHONY: personality-wukong clean-stow
 
 # Default target
 all: help
@@ -59,6 +59,24 @@ dry-run:
 		echo "\n=== $$pkg ==="; \
 		stow -n -v --no-folding -t $(STOW_TARGET) $$pkg 2>&1 || true; \
 	done
+
+# Clean up conflicting files/symlinks before stowing
+# Removes any existing files that would conflict with stow
+clean-stow:
+	@echo "Cleaning up conflicting files for stow..."
+	@# shell package
+	@rm -f $(STOW_TARGET)/.zshrc
+	@# tmux package
+	@rm -f $(STOW_TARGET)/.tmux.conf
+	@# scripts package
+	@rm -f $(STOW_TARGET)/.local/bin/tmux-sessionizer
+	@rm -f $(STOW_TARGET)/.local/bin/tmux-windowizer
+	@rm -f $(STOW_TARGET)/.local/bin/opencode
+	@# isort package
+	@rm -f $(STOW_TARGET)/.config/isort/config.toml
+	@# opencode package
+	@rm -rf $(STOW_TARGET)/.config/opencode
+	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
 # ============================================================================
 # OpenCode Personality Switching
@@ -113,6 +131,7 @@ help:
 	@echo "  make unstow      - Remove stow symlinks"
 	@echo "  make restow      - Update symlinks (unstow + stow)"
 	@echo "  make dry-run     - Preview what would be stowed"
+	@echo "  make clean-stow  - Remove conflicting files before stowing"
 	@echo "  make stow-PKG    - Stow a single package (e.g., make stow-shell)"
 	@echo "  make unstow-PKG  - Unstow a single package"
 	@echo ""

@@ -56,11 +56,27 @@ sudo apt-get upgrade -y
 sudo apt-get install -y \
     git curl wget zip unzip tree stow \
     zsh tmux \
-    gcc python3 python3-venv python3-dev default-jdk \
+    gcc python3 python3-venv python3-dev python3-pip default-jdk \
     ripgrep fd-find bat
 print_success "System packages installed"
 
-# Step 2: oh-my-zsh and plugins
+# Step 2: NeoVim Python provider
+print_step "Setting up NeoVim Python provider..."
+NVIM_VENV="$HOME/.local/share/nvim/venv"
+if [ ! -d "$NVIM_VENV" ]; then
+    echo "  Creating NeoVim Python venv..."
+    mkdir -p "$HOME/.local/share/nvim"
+    python3 -m venv "$NVIM_VENV"
+    "$NVIM_VENV/bin/pip" install --upgrade pip
+    "$NVIM_VENV/bin/pip" install pynvim
+else
+    echo "  NeoVim Python venv already exists"
+    # Ensure pynvim is installed
+    "$NVIM_VENV/bin/pip" install --quiet pynvim
+fi
+print_success "NeoVim Python provider configured"
+
+# Step 3: oh-my-zsh and plugins
 print_step "Setting up Zsh..."
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     echo "  Installing oh-my-zsh..."
@@ -88,7 +104,7 @@ if [ "$SHELL" != "$(which zsh)" ]; then
 fi
 print_success "Zsh configured"
 
-# Step 3: fzf
+# Step 4: fzf
 print_step "Installing fzf..."
 if [ ! -d "$HOME/.fzf" ]; then
     git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
@@ -98,7 +114,7 @@ else
 fi
 print_success "fzf installed"
 
-# Step 4: tmux and TPM
+# Step 5: tmux and TPM
 print_step "Setting up Tmux..."
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
     echo "  Installing TPM..."
@@ -114,7 +130,7 @@ if command -v tmux &> /dev/null; then
 fi
 print_success "Tmux configured"
 
-# Step 5: NVM and Node.js
+# Step 6: NVM and Node.js
 print_step "Installing NVM..."
 export NVM_DIR="$HOME/.nvm"
 
@@ -135,9 +151,17 @@ if ! command -v node &> /dev/null; then
 else
     echo "  Node.js already installed: $(node --version)"
 fi
+
+# Install neovim npm package for Node.js provider
+if ! npm list -g neovim &> /dev/null; then
+    echo "  Installing neovim npm package..."
+    npm install -g neovim
+else
+    echo "  neovim npm package already installed"
+fi
 print_success "NVM configured"
 
-# Step 6: NeoVim
+# Step 7: NeoVim
 print_step "Installing NeoVim..."
 LATEST_VERSION=$(curl -s https://api.github.com/repos/neovim/neovim/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' || echo "v0.10.2")
 
@@ -178,7 +202,7 @@ fi
 
 print_success "NeoVim installed (plugins will install on first run)"
 
-# Step 7: eza (modern ls replacement)
+# Step 8: eza (modern ls replacement)
 print_step "Installing eza..."
 if ! command -v eza &> /dev/null; then
     echo "  Installing eza from GitHub..."
@@ -218,7 +242,7 @@ else
 fi
 print_success "eza configured"
 
-# Step 8: OpenCode configuration
+# Step 9: OpenCode configuration
 print_step "Setting up OpenCode..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -x "$SCRIPT_DIR/opencode-install.sh" ]; then
@@ -228,7 +252,7 @@ else
 fi
 print_success "OpenCode configured"
 
-# Step 9: Post-install verification
+# Step 10: Post-install verification
 print_step "Verifying installation..."
 echo "  Checking installed tools..."
 
@@ -266,6 +290,13 @@ if [ -d "$HOME/.tmux/plugins/tpm" ]; then
 else
     echo "  ✗ TPM: NOT FOUND"
     FAILED_TOOLS+=("tpm")
+fi
+
+if [ -d "$HOME/.local/share/nvim/venv" ]; then
+    echo "  ✓ NeoVim Python venv: $HOME/.local/share/nvim/venv"
+else
+    echo "  ✗ NeoVim Python venv: NOT FOUND"
+    FAILED_TOOLS+=("nvim-python-venv")
 fi
 
 if [ ${#FAILED_TOOLS[@]} -eq 0 ]; then
