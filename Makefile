@@ -2,7 +2,7 @@ CURRENT_DIR := $(shell basename $$PWD)
 CONTAINER := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES := shell tmux scripts cursor isort opencode
+STOW_PACKAGES := shell tmux scripts isort opencode
 STOW_TARGET := $(HOME)
 
 # OpenCode personality paths (resolved after stow)
