@@ -1,0 +1,17 @@
+# Stow local ignore file
+# These patterns are excluded when stowing packages
+
+# Repository infrastructure
+^Makefile$
+^README\.md$
+^\.git$
+^\.gitignore$
+
+# Bootstrap scripts and Docker (not dotfiles)
+^bootstrap$
+
+# Windows-only configs (managed separately)
+^windows$
+
+# This file
+^\.stow-local-ignore$

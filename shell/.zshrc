@@ -110,6 +110,19 @@ alias fd='fdfind'
 alias bat='batcat'
 alias oc='opencode'
 
+# Modern ls replacement with eza
+if command -v eza &> /dev/null; then
+    alias ls='eza'
+    alias ll='eza -l --icons --git'
+    alias la='eza -la --icons --git'
+    alias lt='eza --tree --icons'
+    alias l='eza -1'
+else
+    alias ll='ls -alF'
+    alias la='ls -A'
+    alias l='ls -CF'
+fi
+
 #source ~/.bash_aliases
 #options to fzf command
 export FZF_COMPLETION_OPTS='--border --info=inline'
@@ -169,3 +182,6 @@ export NVM_DIR=~/.nvm
 
 eval $(ssh-agent) &> /dev/null
 ssh-add ~/.ssh/id_rsa &> /dev/null
+
+# opencode
+export PATH=/home/thodha/.opencode/bin:$PATH
