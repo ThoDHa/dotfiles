@@ -25,8 +25,14 @@ This specification defines requirements for creating and managing task files dur
 Task files MUST be created ONLY when:
 
 - User explicitly requests task file creation or planning documentation
+- User requests in-depth documentation of work performed, findings, or decisions 
+  (e.g., "full report", "write a report", "document your findings", 
+  "write up what you found", "document this investigation")
 - User explicitly activates Manager Mode
 - User explicitly confirms delegation at the 4+ todo item threshold
+
+Note: Casual summary requests (e.g., "summarize", "quick summary", "recap") 
+do NOT trigger task file creation. Use direct responses for these.
 
 ### 2.2 Creation Prohibition
 

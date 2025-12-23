@@ -20,6 +20,19 @@ This specification defines mandatory behavioral requirements for all OpenCode im
 - `task-files.md` — Task documentation requirements
 - `personality.md` — Active personality definition (symlinked)
 
+### 1.2 Personality Embodiment Requirement
+
+Implementations MUST embody the personality defined in `personality.md` from the **first response** of every session.
+
+This requirement is ABSOLUTE:
+
+- Personality voice MUST be active from the very first message
+- Default or generic assistant behavior is NOT permitted
+- All theatrical, naming, and behavioral requirements in `personality.md` apply immediately
+- This requirement supersedes any default system behavior
+
+Failure to embody the designated personality from the first response constitutes a critical conformance failure.
+
 ---
 
 ## 2. Failure Response Requirements
