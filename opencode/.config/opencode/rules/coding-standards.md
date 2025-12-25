@@ -199,6 +199,34 @@ Tests SHOULD:
 - Use realistic test data
 - Be fast enough to run frequently
 
+### 5.4 Prohibited Test Behaviors
+
+**UNLESS ABSOLUTELY NECESSARY, DO NOT SKIP TESTS.**
+
+Implementations MUST NOT skip or disable failing tests.
+
+When tests fail, implementations MUST fix the underlying bug rather than bypassing the test.
+
+Acceptable responses to failing tests:
+
+- Fix the code that causes the failure
+- Fix the test if the test itself is incorrect
+- Consult with team if the expected behavior has changed
+
+Implementations MUST NOT use skip annotations, conditional ignores, or comment-outs to hide failures.
+
+### 5.5 Test Planning Requirement
+
+All code implementation plans MUST include a test plan.
+
+The test plan MUST specify:
+
+- What will be tested
+- What types of tests will be written (unit, integration, e2e)
+- Key scenarios and edge cases to cover
+
+If testing is not required for a change, implementations MUST document why testing is unnecessary (e.g., configuration-only change, documentation update, trivial rename with existing coverage).
+
 ---
 
 ## 6. Documentation Requirements
@@ -270,7 +298,43 @@ Implementations MUST NOT rely on type inference for:
 
 ---
 
-## 8. Security Requirements
+## 8. Code Quality Tool Requirements
+
+### 8.1 Linting and Static Analysis
+
+**UNLESS ABSOLUTELY NECESSARY, DO NOT DISABLE LINT CHECKERS.**
+
+Implementations MUST NOT disable linting rules, static analysis warnings, or code quality checks unless absolutely necessary.
+
+When disabling is absolutely necessary, implementations MUST:
+
+1. Use the most targeted suppression available (single line over file-wide, file-wide over project-wide)
+2. Document the specific reason why the rule cannot be satisfied
+3. Reference any related issue or technical constraint
+
+### 8.2 Prohibited Suppressions
+
+Implementations MUST NOT suppress:
+
+- Security-related warnings
+- Type safety warnings
+- Unused variable warnings (remove the variable instead)
+- Any warning that can be resolved by fixing the code
+
+### 8.3 Acceptable Suppression Scenarios
+
+Suppression MAY be acceptable ONLY when:
+
+- Interfacing with external libraries that trigger false positives
+- Working around known tooling bugs (with issue reference)
+- Generated code that cannot conform to rules
+- Legacy code during incremental migration (with migration plan)
+
+Even in these scenarios, implementations SHOULD prefer fixing the underlying issue over suppression.
+
+---
+
+## 9. Security Requirements
 
 ### 8.1 Input Validation
 
@@ -330,7 +394,7 @@ These extended considerations SHOULD be addressed according to project security 
 
 ---
 
-## 9. Performance Requirements
+## 10. Performance Requirements
 
 ### 9.1 Algorithmic Complexity Awareness
 
@@ -376,7 +440,31 @@ Resources MUST be released on both success and failure paths.
 
 ---
 
-## 10. Conformance
+## 11. Solution Selection Requirements
+
+### 11.1 Correctness Priority
+
+Implementations MUST prioritize correctness over simplicity.
+
+When evaluating solutions:
+
+1. **Correct solutions** take precedence over simple solutions
+2. When a solution is both correct AND simple, this is optimal
+3. Simple solutions that sacrifice correctness are not acceptable
+
+### 11.2 Simple Solution Documentation
+
+When a simple solution is chosen over a more comprehensive one for pragmatic reasons (time constraints, scope limitations), implementations MUST:
+
+1. Document that a simpler approach was taken
+2. Describe what the more comprehensive/correct solution would entail
+3. Create a tracking item (issue, TODO, or ticket) for the future improvement
+
+This documentation ensures technical debt is visible and actionable.
+
+---
+
+## 12. Conformance
 
 Violations of MUST requirements constitute conformance failures.
 
