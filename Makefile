@@ -2,7 +2,7 @@ CURRENT_DIR := $(shell basename $$PWD)
 CONTAINER := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES := shell tmux scripts isort opencode
+STOW_PACKAGES := shell tmux isort opencode
 STOW_TARGET := $(HOME)
 
 # OpenCode personality paths
@@ -72,10 +72,9 @@ clean-stow:
 	@rm -f $(STOW_TARGET)/.zshrc
 	@# tmux package
 	@rm -f $(STOW_TARGET)/.tmux.conf
-	@# scripts package
+	@# tmux scripts
 	@rm -f $(STOW_TARGET)/.local/bin/tmux-sessionizer
 	@rm -f $(STOW_TARGET)/.local/bin/tmux-windowizer
-	@rm -f $(STOW_TARGET)/.local/bin/opencode
 	@# isort package
 	@rm -f $(STOW_TARGET)/.config/isort/config.toml
 	@# opencode package
