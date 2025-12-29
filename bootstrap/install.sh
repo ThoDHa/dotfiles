@@ -242,22 +242,24 @@ else
 fi
 print_success "eza configured"
 
-# Step 9: OpenCode configuration
+# Step 9: OpenCode installation
 print_step "Setting up OpenCode..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -x "$SCRIPT_DIR/opencode-install.sh" ]; then
-    "$SCRIPT_DIR/opencode-install.sh"
+
+if ! command -v opencode &> /dev/null; then
+    echo "  Installing opencode..."
+    curl -fsSL https://opencode.ai/install | bash
 else
-    echo "  opencode-install.sh not found, skipping"
+    echo "  opencode already installed: $(which opencode)"
 fi
-print_success "OpenCode configured"
+
+print_success "OpenCode installed"
 
 # Step 10: Post-install verification
 print_step "Verifying installation..."
 echo "  Checking installed tools..."
 
 # Check critical tools
-TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "batcat" "eza" "stow" "tree")
+TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "batcat" "eza" "stow" "tree" "opencode")
 FAILED_TOOLS=()
 
 for tool in "${TOOLS_TO_CHECK[@]}"; do
