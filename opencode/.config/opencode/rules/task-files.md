@@ -1,6 +1,6 @@
 # Task File Protocol
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -21,8 +21,8 @@ Task files serve multiple purposes:
 
 ### 1.1 Related Specifications
 
-- `delegation.md` — Manager Mode and delegation requirements
-- `execution-standards.md` — Task execution requirements and task terminology context
+- `delegation.md`: Manager Mode and delegation requirements
+- `execution-standards.md`: Task execution requirements and task terminology context
 
 ---
 
@@ -165,7 +165,7 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 ### 4.3 Index Maintenance
 
-**CRITICAL REQUIREMENT — NON-NEGOTIABLE:** The master index (`tasks.md`) and individual task files MUST be synchronized at ALL times. This is ABSOLUTE.
+**CRITICAL REQUIREMENT (NON-NEGOTIABLE):** The master index (`tasks.md`) and individual task files MUST be synchronized at ALL times. This is ABSOLUTE.
 
 **Synchronization is NOT optional. It is NOT a "nice to have." It is NOT something to do "when you remember."**
 
@@ -282,7 +282,7 @@ Each task file MUST contain these sections:
 - **Option A rejected because:** [Specific reasoning]
 - **Option C rejected because:** [Specific reasoning]
 
-**Final Decision:** Option B — [Name]
+**Final Decision:** Option B: [Name]
 
 **Rationale:** [Full explanation of why this was chosen]
 
@@ -343,7 +343,7 @@ Each task file MUST contain these sections:
 
 This section tracks all work performed during to task, whether by agents/allies or by the manager.
 
-### 6.1 [Timestamp] — [Agent/Ally Name] — [Task ID or "Exploration"]
+### 6.1 [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
 
 **Purpose:** [Brief description of what this agent was asked to do]
 
@@ -356,7 +356,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 **Agent Report:**
 
 ```
-[Verbatim output returned by the agent — full findings, not summarized]
+[Verbatim output returned by the agent: full findings, not summarized]
 ```
 
 **Manager Analysis:**
@@ -368,7 +368,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 - [Action 1 triggered by this report]
 - [Action 2 triggered by this report]
 
-### 6.2 [Timestamp] — Manager — [Task ID or Activity Description]
+### 6.2 [Timestamp]: Manager: [Task ID or Activity Description]
 
 **Activity:** [What is manager was doing - e.g., "bug investigation", "implementation", "code review", "exploration"]
 
@@ -423,7 +423,7 @@ This section summarizes all work performed, whether by agents/allies or by to ma
 
 **Approach:** [Description of what was attempted]
 
-**Result:** [What happened — error messages, unexpected behavior]
+**Result:** [What happened: error messages, unexpected behavior]
 
 **Why It Failed:** [Root cause analysis]
 
@@ -500,7 +500,7 @@ Implementations MUST automatically transition task states when triggering events
 
 ### 7.2 Triage to Ready Planning Phase
 
-The transition from Triage to Ready is the **planning and clarification phase** — the critical stage where a sparse task skeleton becomes a fully-fleshed execution plan.
+The transition from Triage to Ready is the **planning and clarification phase**: the critical stage where a sparse task skeleton becomes a fully-fleshed execution plan.
 
 #### Purpose of Triage State
 
@@ -511,7 +511,7 @@ Tasks are created in Triage state **intentionally incomplete**:
 - Placeholders for investigation and discovery
 - Designed to require active planning work
 
-**Triage is NOT a work-ready state** — it is a signal that planning must happen before execution.
+**Triage is NOT a work-ready state** but rather a signal that planning must happen before execution.
 
 #### Planning Phase Activities
 

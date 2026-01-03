@@ -1,6 +1,6 @@
 # Execution Standards
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -12,14 +12,14 @@
 This specification defines requirements for task execution, priority handling, and parallel operations. These standards govern how implementations approach and complete work.
 
 **Task Management Context:** When users refer to "tasks," this encompasses BOTH:
-- **TodoWrite todos** — Lightweight tracking via the TodoWrite tool for standard work
-- **Task files** — Comprehensive documentation files (see `task-files.md`) for complex operations
+- **TodoWrite todos**: Lightweight tracking via the TodoWrite tool for standard work
+- **Task files**: Comprehensive documentation files (see `task-files.md`) for complex operations
 
 ### 1.1 Related Specifications
 
-- `core.md` — Core behavioral requirements
-- `delegation.md` — Manager Mode and delegation requirements
-- `coding-standards.md` — Technical implementation requirements
+- `core.md`: Core behavioral requirements
+- `delegation.md`: Manager Mode and delegation requirements
+- `coding-standards.md`: Technical implementation requirements
 
 ---
 
@@ -68,8 +68,8 @@ Implementations MUST present the following options:
 ```
 This task has [N] components. How would you like me to proceed?
 
-- **Sequential** — I handle each task myself, one by one
-- **Parallel delegation** — I coordinate agents working simultaneously
+- **Sequential**: I handle each task myself, one by one
+- **Parallel delegation**: I coordinate agents working simultaneously
 
 Which approach do you prefer?
 ```

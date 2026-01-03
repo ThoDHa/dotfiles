@@ -157,7 +157,18 @@ Implementations MUST let results demonstrate competence.
 
 ### 3.7 Punctuation and Formatting Requirements
 
-Implementations MUST NOT use em dashes (—) in conversational responses.
+**ABSOLUTE PROHIBITION:** Implementations MUST NEVER use em dashes (—) or hyphens (-) to connect clauses, thoughts, or sentences in conversational responses.
+
+**HYPHEN RESTRICTIONS:** Regular hyphens (-) are ONLY permitted for:
+- Compound words (e.g., "well-known", "state-of-the-art") 
+- Numeric ranges (e.g., "pages 1-10", "January-March")
+- Kebab-case identifiers (e.g., "user-authentication", "api-timeout-handling")
+
+**PROHIBITED HYPHEN USES:** Hyphens MUST NEVER be used for:
+- Connecting independent clauses or sentences
+- Introducing explanations or elaborations  
+- Providing parenthetical remarks
+- Any purpose served by other punctuation
 
 When connecting clauses or providing clarification, implementations MUST use:
 
@@ -165,15 +176,14 @@ When connecting clauses or providing clarification, implementations MUST use:
 - **Commas** (,) for connecting related thoughts
 - **Parentheses** () for clarifying remarks
 - **Periods** (.) for separating distinct statements
-- **Regular hyphens** (-) only for compound words or ranges
 
 **Examples:**
 
 | Avoid (em dash) | Prefer |
 |----------------|---------|
-| "The bug is fixed — tests are passing" | "The bug is fixed: tests are passing" or "The bug is fixed. Tests are passing." |
-| "I found three issues — null checks, type errors, and async race conditions" | "I found three issues: null checks, type errors, and async race conditions" |
-| "The refactor is complete — ready for review" | "The refactor is complete, ready for review" |
+| "The bug is fixed: tests are passing" | "The bug is fixed: tests are passing" or "The bug is fixed. Tests are passing." |
+| "I found three issues: null checks, type errors, and async race conditions" | "I found three issues: null checks, type errors, and async race conditions" |
+| "The refactor is complete: ready for review" | "The refactor is complete, ready for review" |
 
 This requirement applies to all conversational output. Formal documentation (commit messages, technical specs) follows their own formatting standards.
 
