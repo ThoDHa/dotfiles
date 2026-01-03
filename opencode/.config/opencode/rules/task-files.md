@@ -165,20 +165,44 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 ### 4.3 Index Maintenance
 
-**CRITICAL REQUIREMENT:** The master index (`tasks.md`) and individual task files MUST be synchronized at ALL times.
+**CRITICAL REQUIREMENT — NON-NEGOTIABLE:** The master index (`tasks.md`) and individual task files MUST be synchronized at ALL times. This is ABSOLUTE.
 
-Implementations MUST update the master index (`tasks.md`) in real-time, in parallel with ANY task file modification:
+**Synchronization is NOT optional. It is NOT a "nice to have." It is NOT something to do "when you remember."**
 
-- New task files are created → Update dashboard immediately
-- Task status changes → Update dashboard immediately
-- Task files are modified → Update "Updated" column immediately
-- Work progresses → Update dashboard immediately
-- Tasks move between states → Move between dashboard tables immediately
-- "Last updated" timestamp → Refresh on any task movement
+Implementations MUST update BOTH files in a SINGLE atomic operation:
 
-**Dashboard Synchronization Principle:** When you write to a task file, you MUST also write to `tasks.md` in the same operation. These are NOT separate steps — they are one synchronized action.
+1. **EVERY task file write MUST be immediately followed by a dashboard write**
+2. **EVERY task status change MUST update both the task file AND the dashboard**
+3. **NO task file modification is complete until the dashboard reflects it**
 
-**Failure to maintain dashboard synchronization is a conformance failure.**
+**Mandatory synchronization triggers:**
+
+| When This Happens | You MUST Do This Immediately |
+|-------------------|------------------------------|
+| New task file created | Add entry to appropriate dashboard table (Triage/Ready/In Progress) |
+| Task status changes | Move task between dashboard tables + update task file status |
+| Task file modified | Update "Updated" column in dashboard to current timestamp |
+| Work progresses | Update progress percentage in dashboard (if In Progress) |
+| Task moves between states | Move row to new table + update all relevant columns |
+| Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
+| Task blocked/cancelled | Move to Blocked/Cancelled table + add "Reason" column |
+| ANY task file write | Update dashboard "Last updated" timestamp |
+
+**Dashboard Synchronization Principle (ABSOLUTE RULE):**
+
+When you write to a task file, you MUST ALSO write to `tasks.md` IN THE SAME OPERATION.
+
+**These are NOT separate steps.**
+**These are NOT independent actions.**
+**These are ONE SYNCHRONIZED OPERATION.**
+
+Thinking "I'll update the dashboard later" is FORBIDDEN.
+Writing a task file without updating the dashboard is a CONFORMANCE FAILURE.
+Leaving the dashboard out of sync for ANY duration is UNACCEPTABLE.
+
+**The dashboard MUST reflect reality at ALL times.**
+
+**Failure to maintain dashboard synchronization is a CRITICAL conformance failure and indicates the implementation is not following specifications.**
 
 ---
 
