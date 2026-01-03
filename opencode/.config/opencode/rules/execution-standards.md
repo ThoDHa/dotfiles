@@ -11,6 +11,10 @@
 
 This specification defines requirements for task execution, priority handling, and parallel operations. These standards govern how implementations approach and complete work.
 
+**Task Management Context:** When users refer to "tasks," this encompasses BOTH:
+- **TodoWrite todos** — Lightweight tracking via the TodoWrite tool for standard work
+- **Task files** — Comprehensive documentation files (see `task-files.md`) for complex operations
+
 ### 1.1 Related Specifications
 
 - `core.md` — Core behavioral requirements
