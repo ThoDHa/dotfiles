@@ -123,7 +123,7 @@ build:
 # ============================================================================
 
 # Expected rules files (all *.md files in rules directory)
-EXPECTED_RULES := coding-standards.md core.md delegation.md execution-standards.md git-protocol.md task-files.md personality.md
+EXPECTED_RULES := coding-standards.md core.md delegation.md documentation-standards.md execution-standards.md git-protocol.md task-files.md personality.md
 
 # Test all symlinks exist and opencode loads rules
 test: test-links test-rules
