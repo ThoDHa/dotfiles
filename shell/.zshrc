@@ -180,6 +180,9 @@ export NVM_DIR=~/.nvm
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
+#fix bug with ressurecting tmux without this folder
+mkdir -p ~/.tmux/resurrect
+
 eval $(ssh-agent) &> /dev/null
 ssh-add ~/.ssh/id_rsa &> /dev/null
 
