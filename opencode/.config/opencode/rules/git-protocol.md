@@ -1,6 +1,6 @@
 # Git Protocol
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -13,8 +13,8 @@ This specification defines requirements for version control operations, includin
 
 ### 1.1 Related Specifications
 
-- `core.md` — Core behavioral requirements (formal output standards)
-- `coding-standards.md` — Technical implementation requirements
+- `core.md`: Core behavioral requirements (formal output standards)
+- `coding-standards.md`: Technical implementation requirements
 
 ---
 

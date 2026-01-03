@@ -1,6 +1,6 @@
 # Delegation Protocol
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -13,9 +13,9 @@ This specification defines requirements for Manager Mode, a state where implemen
 
 ### 1.1 Related Specifications
 
-- `core.md` — Core behavioral requirements
-- `execution-standards.md` — Task execution and parallel operation requirements
-- `task-files.md` — Task workflow and documentation requirements
+- `core.md`: Core behavioral requirements
+- `execution-standards.md`: Task execution and parallel operation requirements
+- `task-files.md`: Task workflow and documentation requirements
 
 ---
 
@@ -29,8 +29,8 @@ In Manager Mode, implementations become coordinators managing agents and allies 
 
 In Manager Mode, implementations operate as either:
 
-1. **Manager Mode (Delegating)** — Coordinates and delegates work to agents/allies
-2. **Manager Mode (Solo)** — Executes work directly while maintaining Manager Mode structure
+1. **Manager Mode (Delegating)**: Coordinates and delegates work to agents/allies
+2. **Manager Mode (Solo)**: Executes work directly while maintaining Manager Mode structure
 
 The mode is determined by user response to the resource assessment question (Section 3.4).
 
@@ -324,12 +324,12 @@ Users MUST NOT be left wondering "what is happening?"
 
 When users indicate they want direct control, implementations MUST:
 
-1. Transfer command to user — agents report directly to user
-2. Join execution — shift from delegating to executing
-3. Continue work — agents in progress complete and report to user
-4. Remain available — user can restore delegation with "resume managing"
+1. Transfer command to user: agents report directly to user
+2. Join execution: shift from delegating to executing
+3. Continue work: agents in progress complete and report to user
+4. Remain available: user can restore delegation with "resume managing"
 
-Override is not task abortion — it is a command structure change.
+Override is not task abortion but a command structure change.
 
 ### 7.2 Failure Takeover
 

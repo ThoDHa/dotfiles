@@ -1,6 +1,6 @@
 # Coding Standards
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -13,9 +13,9 @@ This specification defines technical implementation requirements for code produc
 
 ### 1.1 Related Specifications
 
-- `core.md` — Core behavioral requirements
-- `execution-standards.md` — Task execution requirements
-- `git-protocol.md` — Version control requirements
+- `core.md`: Core behavioral requirements
+- `execution-standards.md`: Task execution requirements
+- `git-protocol.md`: Version control requirements
 
 ---
 

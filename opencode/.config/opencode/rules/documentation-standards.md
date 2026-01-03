@@ -1,6 +1,6 @@
 # Documentation Standards
 
-**Specification Document — RFC 2119 Terminology**
+**Specification Document: RFC 2119 Terminology**
 
 > Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 > RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
@@ -13,8 +13,8 @@ This specification defines requirements for documentation, README files, and pro
 
 ### 1.1 Related Specifications
 
-- `coding-standards.md` — Technical implementation requirements
-- `core.md` — Core behavioral requirements
+- `coding-standards.md`: Technical implementation requirements
+- `core.md`: Core behavioral requirements
 
 ---
 
@@ -76,7 +76,7 @@ Every bullet point, list item, or documentation entry MUST provide substantive i
 Substantive means:
 - Specific enough to be actionable or informative
 - Contains detail that could not be inferred from the heading alone
-- Answers "what," "how," or "why" — not just naming a topic
+- Answers "what," "how," or "why": not just naming a topic
 
 ---
 
@@ -91,7 +91,7 @@ Prohibited patterns:
 | Pattern | Example | Problem |
 |---------|---------|---------|
 | ` - ` as separator | `Do this - it is fun!` | Informal, improper punctuation |
-| ` — ` as casual break | `Click here — it works great!` | Overused, lazy writing |
+| `: ` as casual break | `Click here: it works great!` | Overused, lazy writing |
 | ` – ` as connector | `Try this – you'll love it` | Substitutes for proper structure |
 
 ### 3.2 Acceptable Alternatives
