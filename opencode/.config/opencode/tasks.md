@@ -36,6 +36,11 @@
 
 ## Task Management
 
+**CRITICAL: Task File Updates**
+- **If task file exists:** MUST use Edit tool to update sections - NEVER recreate the file
+- **If task file does NOT exist:** Create new file using Write tool
+- **Preserving history is mandatory:** Recreating existing files destroys context and violates protocol
+
 **Task Creation:** Quick task files created in Triage, requires exploration and fleshing out
 **Triage → Ready:** Task fully fleshed out, all information collected
 **Ready → In Progress:** Work begins on task
