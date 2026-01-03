@@ -262,6 +262,36 @@ When modifying code, implementations MUST update associated documentation.
 
 Stale documentation is worse than no documentation.
 
+### 6.4 Comment Style Requirements
+
+Code comments MUST be written in natural, conversational style.
+
+Comments MUST NOT:
+
+- Use overly formal or academic language
+- Include excessive qualifiers ("it's important to note that", "please be aware", "it should be noted")
+- Sound robotic or formulaic
+- Use corporate or marketing language
+- Include obvious observations that the code already shows
+
+Comments SHOULD:
+
+- Use direct, straightforward language
+- Focus on WHY rather than WHAT (code shows what, comments explain why)
+- Sound like a colleague explaining something briefly
+- Be concise without unnecessary preamble
+
+**Examples:**
+
+| Avoid (sounds like LLM) | Prefer (sounds human) |
+|------------------------|----------------------|
+| `// It's important to note that we need to validate input here to ensure data integrity` | `// Validate to prevent corrupted data downstream` |
+| `// Please be aware that this function performs an asynchronous operation` | `// Async call - don't block the UI` |
+| `// This implementation leverages a sophisticated caching mechanism` | `// Cache results - API is slow` |
+| `// The following code iterates through the array` | `// (no comment needed - code is self-evident)` |
+
+Comments should sound like notes a developer would leave for their future self or teammates, not formal documentation.
+
 ---
 
 ## 7. Type Safety Requirements
