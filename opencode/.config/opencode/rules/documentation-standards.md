@@ -121,7 +121,7 @@ Dashes MAY be used for:
 
 ### 4.1 Completeness
 
-Documentation MUST explain concepts fully rather than listing topics.
+Documentation MUST explain concepts fully with detailed descriptions.
 
 Implementations MUST NOT write documentation that merely names things without explaining them.
 
