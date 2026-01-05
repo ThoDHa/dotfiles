@@ -137,15 +137,12 @@ The error-handling mechanism MUST:
 Error messages MUST:
 
 - Describe what operation failed
-- Include relevant context (identifiers, parameters, state)
+- Include relevant context (identifiers, parameters, state)  
 - Suggest remediation when possible
 - Be appropriate for the intended audience (user vs developer)
-
-Error messages MUST NOT:
-
-- Expose sensitive information (credentials, internal paths, stack traces to end users)
-- Be generic without actionable information
-- Blame the user for system failures
+- Protect sensitive information (credentials, internal paths, stack traces from end users)
+- Provide actionable information
+- Focus on the system issue rather than user fault
 
 ### 4.3 Error Propagation
 
@@ -205,7 +202,7 @@ Tests SHOULD:
 
 Implementations MUST NOT skip or disable failing tests.
 
-When tests fail, implementations MUST fix the underlying bug rather than bypassing the test.
+When tests fail, implementations MUST fix the underlying bug by addressing the code issue.
 
 Acceptable responses to failing tests:
 
@@ -266,31 +263,110 @@ Stale documentation is worse than no documentation.
 
 Code comments MUST be written in natural, conversational style.
 
-Comments MUST NOT:
+Comments MUST use direct, straightforward language that focuses on WHY rather than WHAT. Comments MUST sound like notes a developer would leave for their future self or teammates.
 
-- Use overly formal or academic language
-- Include excessive qualifiers ("it's important to note that", "please be aware", "it should be noted")
-- Sound robotic or formulaic
-- Use corporate or marketing language
-- Include obvious observations that the code already shows
+**Good comment characteristics:**
 
-Comments SHOULD:
-
-- Use direct, straightforward language
+- Direct, straightforward language
 - Focus on WHY rather than WHAT (code shows what, comments explain why)
 - Sound like a colleague explaining something briefly
-- Be concise without unnecessary preamble
+- Concise without unnecessary preamble
 
 **Examples:**
 
-| Avoid (sounds like LLM) | Prefer (sounds human) |
-|------------------------|----------------------|
-| `// It's important to note that we need to validate input here to ensure data integrity` | `// Validate to prevent corrupted data downstream` |
-| `// Please be aware that this function performs an asynchronous operation` | `// Async call - don't block the UI` |
-| `// This implementation leverages a sophisticated caching mechanism` | `// Cache results - API is slow` |
-| `// The following code iterates through the array` | `// (no comment needed - code is self-evident)` |
+| Comment Style | Example |
+|---------------|---------|
+| **Casual and direct** | `// Validate to prevent corrupted data downstream` |
+| **Context-focused** | `// Async call - don't block the UI` |
+| **Purpose-driven** | `// Cache results - API is slow` |
 
-Comments should sound like notes a developer would leave for their future self or teammates, not formal documentation.
+### 6.5 Comment Purpose Guidelines
+
+Comments serve to explain code context and non-obvious decisions, but should not document internal bug-fixing history.
+
+#### 6.5.1 What Comments SHOULD Explain
+
+Comments SHOULD document:
+
+- **External library workarounds** with full context
+- **Non-obvious implementation choices** and their reasoning
+- **Complex business logic** that requires domain knowledge
+- **Performance considerations** when optimization choices aren't obvious
+
+#### 6.5.2 External Library Workaround Documentation
+
+When working around external library bugs or limitations, comments MUST include:
+
+- Library name and version affected
+- Issue reference (if available)
+- Expected behavior vs. actual behavior
+- Conditions for removing the workaround
+
+**Examples:**
+
+```javascript
+// Working around React 18.2 hydration mismatch - useLayoutEffect runs 
+// twice on initial mount. See facebook/react#24430
+// Remove when React 18.3+ is stable
+```
+
+```python
+# Workaround for requests 2.28.x SSL verification bug with custom CA
+# Expected: verify=ca_bundle should work
+# Actual: throws SSLError on valid certificates  
+# Remove when requests 2.29+ fixes issue #6078
+```
+
+#### 6.5.3 What Comments SHOULD NOT Explain
+
+Comments MUST focus on code context and non-obvious decisions rather than documenting internal bug-fixing history.
+
+**Internal application bugs belong in commit messages and issue trackers, not in code comments.**
+
+For complex business rules, focus on the business context:
+
+```javascript
+// Customer tier determines discount calculation:
+// - Premium: 15% on orders >$100, 10% otherwise  
+// - Standard: 5% on orders >$50
+// - Basic: no discounts
+```
+
+### 6.6 Documentation Context Distribution
+
+Different types of information belong in different places. Choose the appropriate documentation context based on scope and audience.
+
+#### 6.6.1 Inline Comments
+
+Use inline comments for:
+
+- **Immediate code context** that affects the current function or block
+- **External library workarounds** (as specified in Section 6.5.2)
+- **Non-obvious algorithmic choices** within the implementation
+- **Performance optimizations** that aren't self-evident
+
+Inline comments should be casual and conversational (following Section 6.4 style requirements).
+
+#### 6.6.2 Commit Messages
+
+Use commit messages for:
+
+- **What changed** in this specific commit
+- **Why the change was necessary** (business justification)
+- **Impact scope** (what systems/features are affected)
+
+Follow formal commit message standards defined in `git-protocol.md`.
+
+#### 6.6.3 Formal Documentation
+
+Use formal documentation (README, API docs, architecture docs) for:
+
+- **High-level design decisions** and architectural tradeoffs
+- **API specifications** and usage examples
+- **System overviews** and integration patterns
+- **Deployment and configuration** guidance
+
+Formal documentation MUST maintain professional tone and structured format, suitable for external audiences or formal review.
 
 ---
 
