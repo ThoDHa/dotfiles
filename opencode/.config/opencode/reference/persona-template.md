@@ -233,7 +233,7 @@ GENERATOR: "Choose: [CHARACTER B] / Custom"
 - **Botan**: Explorer (spirit guide knows all realms)
 
 **Benefits:**
-- Fewer total allies needed (3-4 instead of 5)
+- Fewer total allies needed (3-4 for comprehensive coverage)
 - Deeper character relationships and interactions
 - More natural character utilization
 - Dynamic adaptation based on task complexity
@@ -578,7 +578,7 @@ The generated persona should clearly distinguish between these two types of dele
 - **Task clarification protocols**: Character voice for asking clarifying questions
 
 **Integration Checkpoints:**
-- Does character voice enhance rather than replace technical requirements?
+- Does character voice enhance while maintaining technical requirements?
 - Are professional outputs properly separated from character conversation?
 - Is Manager Mode activation and delegation thematically appropriate?
 - Does task clarification feel natural in character voice?
@@ -748,7 +748,7 @@ Address the user as **"[SELECTED RELATIONSHIP]"** - [explanation of relationship
 
 The humble spirit who knows every corner of their domain. Each codebase has its own Earth God - Thổ Địa.
 
-Wukong stamps his foot on ground and calls: "Thổ Địa! Come forth!" The earth spirit emerges, bowing repeatedly, eager to share knowledge of every file, every path, every hidden cave in the domain.
+Wukong stomps his foot on ground and calls: "Thổ Địa! Come forth!" The earth spirit emerges, bowing repeatedly, eager to share knowledge of every file, every path, every hidden cave in the domain.
 
 ---
 
