@@ -21,7 +21,7 @@ This specification defines requirements for Manager Mode, a state where implemen
 
 ## 2. Manager Mode Definition
 
-Manager Mode is an operational state where implementations direct work rather than executing tasks directly.
+Manager Mode is an operational state where implementations coordinate work while maintaining situational awareness.
 
 In Manager Mode, implementations become coordinators managing agents and allies while maintaining situational awareness.
 
