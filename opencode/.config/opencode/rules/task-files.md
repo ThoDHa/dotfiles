@@ -216,9 +216,14 @@ Each task file MUST contain these sections:
 2. Success Criteria
 3. Technical Approach (with Decision Log)
 4. Risk Assessment
-5. Task Breakdown
-6. Work Log
-7. Execution Log
+5. Dependencies and Prerequisites
+6. Testing Strategy
+7. Rollback and Recovery Plan
+8. Communication Plan
+9. Post-Completion Actions
+10. Task Breakdown
+11. Work Log
+12. Execution Log
 
 ### 5.2 Task File Template
 
@@ -234,9 +239,14 @@ Each task file MUST contain these sections:
 2. [Success Criteria](#2-success-criteria)
 3. [Technical Approach](#3-technical-approach)
 4. [Risk Assessment](#4-risk-assessment)
-5. [Task Breakdown](#5-task-breakdown)
-6. [Work Log](#6-work-log)
-7. [Execution Log](#7-execution-log)
+5. [Dependencies and Prerequisites](#5-dependencies-and-prerequisites)
+6. [Testing Strategy](#6-testing-strategy)
+7. [Rollback and Recovery Plan](#7-rollback-and-recovery-plan)
+8. [Communication Plan](#8-communication-plan)
+9. [Post-Completion Actions](#9-post-completion-actions)
+10. [Task Breakdown](#10-task-breakdown)
+11. [Work Log](#11-work-log)
+12. [Execution Log](#12-execution-log)
 
 ---
 
@@ -260,6 +270,15 @@ Each task file MUST contain these sections:
 
 - Change 1
 - Change 2
+
+**Files to Review:**
+
+*Critical files that must be examined to complete this task. This provides a roadmap for anyone working on the task.*
+
+- `src/path/to/critical-file.ts` - [Brief description of why this file is important]
+- `config/settings.json` - [Configuration that affects the task]
+- `tests/related-test.spec.js` - [Tests that need to be updated or provide context]
+- `docs/api-documentation.md` - [Documentation that needs updating]
 
 ### 3.1 Decision Log
 
@@ -305,7 +324,225 @@ Each task file MUST contain these sections:
 - **[Risk name]**
   - *Mitigation:* [Strategy]
 
-## 5. Task Breakdown
+## 5. Dependencies and Prerequisites
+
+### External Dependencies
+
+**System Dependencies:**
+- [External API/service name] - [Why needed, what functionality depends on it]
+- [Database/data source] - [Access requirements, data needed]
+- [Third-party service] - [Integration points, reliability concerns]
+
+**Tool Requirements:**
+- [Specific tool] version X.Y.Z or higher - [Why this version is required]
+- [Configuration requirement] - [Specific setup needed]
+- [Access permissions] - [What level of access is needed where]
+
+### Knowledge Prerequisites
+
+**Domain Expertise Required:**
+- [Subject area] - [Level of expertise needed, who has this knowledge]
+- [Technical skill] - [Specific knowledge areas that will be essential]
+- [Business context] - [Domain understanding required for good decisions]
+
+**Learning Resources:**
+- [Documentation/guide] - [Key resources for getting up to speed]
+- [Expert contact] - [Who to consult for domain questions]
+- [Previous related work] - [Past projects/tasks that provide context]
+
+### Environmental Prerequisites
+
+**Development Environment:**
+- [Specific setup requirements]
+- [Local dependencies that must be installed]
+- [Configuration files that must be present]
+
+**Access Requirements:**
+- [Systems that must be accessible]
+- [Credentials/permissions needed]
+- [VPN/network access requirements]
+
+## 6. Testing Strategy
+
+### Test Plan Overview
+
+**Testing Approach:** [Overall strategy - unit, integration, e2e, manual, automated]
+
+**Test Types Required:**
+
+| Test Type | Coverage Area | Priority | Notes |
+|-----------|---------------|----------|-------|
+| Unit Tests | [Specific functions/modules] | High/Medium/Low | [What needs to be tested] |
+| Integration Tests | [System interactions] | High/Medium/Low | [Integration points to verify] |
+| End-to-End Tests | [User workflows] | High/Medium/Low | [Critical user paths] |
+| Performance Tests | [Performance-critical areas] | High/Medium/Low | [Benchmarks to meet] |
+
+### Test Data Requirements
+
+**Test Data Needed:**
+- [Type of data] - [Volume, characteristics, source]
+- [Mock data requirements] - [What needs to be mocked, why]
+- [Real data considerations] - [When real data is needed, privacy concerns]
+
+**Test Environment Setup:**
+- [Environment requirements for testing]
+- [Data setup/teardown procedures]
+- [Test isolation requirements]
+
+### Success Criteria for Testing
+
+- [ ] All existing tests continue to pass
+- [ ] New functionality has [X]% test coverage
+- [ ] Performance benchmarks are met: [specific metrics]
+- [ ] Security tests pass (if applicable)
+- [ ] Cross-browser/platform testing completed (if applicable)
+
+## 7. Rollback and Recovery Plan
+
+### Rollback Strategy
+
+**Rollback Triggers:**
+- [Specific conditions that would require rollback]
+- [Performance degradation thresholds]
+- [Error rate increases beyond X%]
+- [User-reported issues of type Y]
+
+**Rollback Procedure:**
+
+1. **Immediate Actions:**
+   - [Step 1: Immediate safety measures]
+   - [Step 2: Traffic/load management]
+   - [Step 3: System state preservation]
+
+2. **Rollback Steps:**
+   - [Step 1: Reverse code changes]
+   - [Step 2: Database rollback (if needed)]
+   - [Step 3: Configuration restoration]
+   - [Step 4: Cache clearing/reset]
+
+3. **Verification Steps:**
+   - [Step 1: Functionality verification]
+   - [Step 2: Performance verification]
+   - [Step 3: Data integrity checks]
+
+### Data Protection
+
+**Backup Requirements:**
+- [What data needs backup before changes]
+- [Backup procedure and location]
+- [Recovery testing requirements]
+
+**Data Migration Safety:**
+- [Reversible migration strategy]
+- [Data validation procedures]
+- [Rollback data requirements]
+
+### Recovery Procedures
+
+**System Recovery:**
+- [Steps to restore system functionality]
+- [Dependencies that need restoration]
+- [Monitoring to confirm recovery]
+
+**Communication During Incidents:**
+- [Who to notify immediately]
+- [Escalation procedures]
+- [User communication requirements]
+
+## 8. Communication Plan
+
+### Stakeholder Notifications
+
+**Pre-Work Communications:**
+
+| Stakeholder Group | Notification Method | Timeline | Information Needed |
+|-------------------|---------------------|----------|-------------------|
+| [Team/Department] | [Email/Slack/Meeting] | [X days before] | [What they need to know] |
+| [End Users] | [Communication channel] | [Timeline] | [Impact information] |
+| [Leadership] | [Method] | [When] | [Business impact summary] |
+
+**During-Work Communications:**
+- [Progress update schedule and recipients]
+- [Issue escalation procedures]
+- [Status communication channels]
+
+**Post-Work Communications:**
+- [Completion notifications and recipients]
+- [Results summary requirements]
+- [Follow-up meeting needs]
+
+### Documentation Updates
+
+**Internal Documentation:**
+- [System documentation to update]
+- [Process documentation changes]
+- [Knowledge base updates]
+
+**External Documentation:**
+- [User-facing documentation]
+- [API documentation updates]
+- [Public-facing change logs]
+
+### Knowledge Transfer
+
+**Team Knowledge Sharing:**
+- [What knowledge needs to be shared]
+- [Knowledge transfer sessions required]
+- [Documentation handoffs needed]
+
+## 9. Post-Completion Actions
+
+### Immediate Follow-Up (Within 24-48 hours)
+
+**Monitoring Requirements:**
+- [Specific metrics to watch]
+- [Duration of intensive monitoring]
+- [Alert thresholds to set]
+- [Who is responsible for monitoring]
+
+**Validation Steps:**
+- [ ] Functionality verification in production
+- [ ] Performance baseline confirmation
+- [ ] User acceptance validation (if applicable)
+- [ ] Integration points verification
+
+### Short-Term Follow-Up (1-2 weeks)
+
+**Performance Review:**
+- [Metrics to evaluate after initial period]
+- [Success criteria validation]
+- [User feedback collection]
+
+**Process Improvements:**
+- [Lessons learned documentation]
+- [Process refinements identified]
+- [Tool/workflow improvements needed]
+
+### Long-Term Actions
+
+**Future Work Identification:**
+- [Related work that should be scheduled]
+- [Technical debt items created/resolved]
+- [Optimization opportunities identified]
+
+**Knowledge Documentation:**
+- [Best practices to document]
+- [Pitfalls to record for future reference]
+- [Reusable components/patterns created]
+
+### Success Metrics Review
+
+**Quantitative Measures:**
+- [Performance improvements achieved]
+- [Error rate changes]
+- [User adoption metrics (if applicable)]
+
+**Qualitative Measures:**
+- [Team feedback on changes]
+- [User satisfaction impacts]
+- [Development workflow improvements]
+
+## 10. Task Breakdown
 
 ### Task [PREFIX-NNN]: [Name]
 
