@@ -198,7 +198,6 @@ Tests SHOULD:
 
 ### 5.4 Prohibited Test Behaviors
 
-**UNLESS ABSOLUTELY NECESSARY, DO NOT SKIP TESTS.**
 
 Implementations MUST NOT skip or disable failing tests.
 
@@ -410,10 +409,9 @@ Implementations MUST NOT rely on type inference for:
 
 **UNLESS ABSOLUTELY NECESSARY, DO NOT DISABLE LINT CHECKERS.**
 
-Implementations MUST NOT disable linting rules, static analysis warnings, or code quality checks unless absolutely necessary.
+Implementations MUST NOT disable linting rules, static analysis warnings, or code quality checks EXCEPT when unavoidable and justified.
 
-When disabling is absolutely necessary, implementations MUST:
-
+When disabling is unavoidable, implementations MUST:
 1. Use the most targeted suppression available (single line over file-wide, file-wide over project-wide)
 2. Document the specific reason why the rule cannot be satisfied
 3. Reference any related issue or technical constraint
@@ -427,22 +425,20 @@ Implementations MUST NOT suppress:
 - Unused variable warnings (remove the variable instead)
 - Any warning that can be resolved by fixing the code
 
-### 8.3 Acceptable Suppression Scenarios
+### 8.4 Community Standards and Configuration
 
-Suppression MAY be acceptable ONLY when:
+Implementations MUST use widely accepted community coding standards, linters, and formatters for the target language and framework.
 
-- Interfacing with external libraries that trigger false positives
-- Working around known tooling bugs (with issue reference)
-- Generated code that cannot conform to rules
-- Legacy code during incremental migration (with migration plan)
+- Start from official or recommended rule sets and default configurations.
+- Minimize deviations; when deviations are necessary, document specific justifications.
+- Commit lint and format configurations to version control and enforce them in CI.
+- Where a standard formatter exists, use it consistently rather than introducing competing tools.
+- Prefer stable, well‑maintained tools with broad adoption.
 
-Even in these scenarios, implementations SHOULD prefer fixing the underlying issue over suppression.
-
----
 
 ## 9. Security Requirements
 
-### 8.1 Input Validation
+### 9.1 Input Validation
 
 Implementations MUST validate all external input before processing:
 
@@ -457,7 +453,7 @@ Validation MUST include:
 - Format validation (pattern matching for structured strings)
 - Whitelist validation for enumerated values
 
-### 8.2 Output Sanitization
+### 9.2 Output Sanitization
 
 Implementations MUST sanitize output when:
 
@@ -470,7 +466,7 @@ Implementations MUST use parameterized queries or prepared statements for databa
 
 Implementations MUST NOT construct queries or commands via string concatenation with user input.
 
-### 8.3 Secrets Management
+### 9.3 Secrets Management
 
 Implementations MUST NOT:
 
@@ -485,7 +481,7 @@ Secrets MUST be loaded from:
 - Dedicated secrets management systems
 - Encrypted configuration (with proper key management)
 
-### 8.4 Extended Security Considerations
+### 9.4 Extended Security Considerations
 
 For security-sensitive applications, implementations SHOULD also consider:
 
@@ -572,9 +568,9 @@ This documentation ensures technical debt is visible and actionable.
 
 ## 12. Conformance
 
-Violations of MUST requirements constitute conformance failures.
+ALL strong requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
-Violations of SHOULD requirements may result in suboptimal code quality but do not constitute conformance failures.
+Violations of SHOULD requirements may result in suboptimal code quality but are not conformance failures.
 
 ---
 

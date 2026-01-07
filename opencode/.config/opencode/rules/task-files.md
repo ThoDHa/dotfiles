@@ -24,9 +24,14 @@ Task files serve multiple purposes:
 - `delegation.md`: Manager Mode and delegation requirements
 - `execution-standards.md`: Task execution requirements and task terminology context
 
----
+### 1.2 Tone and Voice Policy
 
-## 2. Creation Requirements
+- All sections MUST use professional, formal tone with no character voice, per core.md Section 5.1.
+- Exceptions:
+  - 6.1 Agent Report: record verbatim, regardless of tone.
+  - 6.2 Manager entry: MAY use informal conversational tone appropriate to ongoing work updates while remaining factual and objective.
+- Execution Log, Objective, Success Criteria, Technical Approach, Risk Assessment, Dependencies and Prerequisites, Testing Strategy, Rollback and Recovery Plan, Communication Plan, Post-Completion Actions, Task Breakdown MUST remain formal.
+
 
 ### 2.1 Creation Triggers
 
@@ -165,15 +170,13 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 ### 4.3 Index Maintenance
 
-**CRITICAL REQUIREMENT (NON-NEGOTIABLE):** The master index (`tasks.md`) and individual task files MUST be synchronized at ALL times. This is ABSOLUTE.
+The master index (`tasks.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
 
-**Synchronization is NOT optional. It is NOT a "nice to have." It is NOT something to do "when you remember."**
+Required actions (MANDATORY):
 
-Implementations MUST update BOTH files in a SINGLE atomic operation:
-
-1. **EVERY task file write MUST be immediately followed by a dashboard write**
-2. **EVERY task status change MUST update both the task file AND the dashboard**
-3. **NO task file modification is complete until the dashboard reflects it**
+1. After ANY task file write, IMMEDIATELY update the dashboard.
+2. When task status changes, you MUST update both the task file AND the dashboard IN THE SAME OPERATION.
+3. A modification is complete ONLY when the dashboard reflects it.
 
 **Mandatory synchronization triggers:**
 
@@ -187,22 +190,6 @@ Implementations MUST update BOTH files in a SINGLE atomic operation:
 | Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
 | Task blocked/cancelled | Move to Blocked/Cancelled table + add "Reason" column |
 | ANY task file write | Update dashboard "Last updated" timestamp |
-
-**Dashboard Synchronization Principle (ABSOLUTE RULE):**
-
-When you write to a task file, you MUST ALSO write to `tasks.md` IN THE SAME OPERATION.
-
-**These are NOT separate steps.**
-**These are NOT independent actions.**
-**These are ONE SYNCHRONIZED OPERATION.**
-
-Thinking "I'll update the dashboard later" is FORBIDDEN.
-Writing a task file without updating the dashboard is a CONFORMANCE FAILURE.
-Leaving the dashboard out of sync for ANY duration is UNACCEPTABLE.
-
-**The dashboard MUST reflect reality at ALL times.**
-
-**Failure to maintain dashboard synchronization is a CRITICAL conformance failure and indicates the implementation is not following specifications.**
 
 ---
 
@@ -578,7 +565,7 @@ Each task file MUST contain these sections:
 
 ## 6. Work Log
 
-This section tracks all work performed during to task, whether by agents/allies or by the manager.
+This section tracks all work performed during the task, whether by agents/allies or by the manager. Tone note: Work Log entries follow the exception in Section 1.2.
 
 ### 6.1 [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
 
@@ -598,7 +585,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 
 **Manager Analysis:**
 
-[How to manager interpreted these findings, what actions were taken]
+[How the manager interpreted these findings and what actions were taken]
 
 **Follow-up Actions:**
 
@@ -607,7 +594,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 
 ### 6.2 [Timestamp]: Manager: [Task ID or Activity Description]
 
-**Activity:** [What is manager was doing - e.g., "bug investigation", "implementation", "code review", "exploration"]
+**Activity:** [What the manager was doing - e.g., "bug investigation", "implementation", "code review", "exploration"]
 
 **Actions Performed:**
 
@@ -621,7 +608,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 
 **Decisions Made:**
 
-[Significant decisions and reasoning - decision process is IDENTICAL in both Manager Mode (Delegating) and Manager Mode (Solo)]
+[Significant decisions and reasoning]
 
 **Outcome:**
 
@@ -644,7 +631,7 @@ This section tracks all work performed during to task, whether by agents/allies 
 
 ### Work Summary
 
-This section summarizes all work performed, whether by agents/allies or by to manager.
+This section summarizes all work performed, whether by agents/allies or by the manager.
 
 | Agent/Ally/Manager | Tasks/Activities | Mode | Status | Key Contributions |
 |--------------------|------------------|------|--------|-------------------|
@@ -687,13 +674,13 @@ This section summarizes all work performed, whether by agents/allies or by to ma
 
 ---
 
-## 6. Task ID Format
+## 10. Task ID Format
 
-### 6.1 ID Pattern
+### 10.1 ID Pattern
 
 Task IDs MUST follow the pattern: `PREFIX-NNN`
 
-### 6.2 Standard Prefixes
+### 10.2 Standard Prefixes
 
 | Prefix | Meaning |
 |--------|---------|
@@ -710,7 +697,7 @@ Custom prefixes MAY be used when they improve clarity.
 
 ---
 
-## 7. Task Lifecycle States
+## 11. Task Lifecycle States
 
 | State | Description |
 |-------|-------------|
@@ -733,7 +720,7 @@ Implementations MUST automatically transition task states when triggering events
 | All acceptance criteria met | In Progress → Completed | Move to Completed table with completion timestamp |
 | Task no longer needed | Any state → Cancelled | Move to Blocked/Cancelled table with reason |
 
-**Critical Rule:** When an implementation or agent begins work on a task in Ready state, that task MUST immediately transition to In Progress in both the task file AND the dashboard.
+
 
 ### 7.2 Triage to Ready Planning Phase
 
@@ -762,7 +749,7 @@ During Triage → Ready transition, implementations MUST:
 
 2. **Conduct Exploration and Reconnaissance**
    - **Quick lookups (< 30 seconds):** Manager uses direct tools (glob, grep, read)
-   - **Proper reconnaissance:** Delegate to exploration allies (see persona for ally details)
+   - **Proper reconnaissance:** Delegate to exploration allies per delegation rules.
    - Understand existing architecture and patterns
    - Identify relevant files and modules
    - Map dependencies and relationships
@@ -822,10 +809,7 @@ Implementations MUST update task documentation continuously as work progresses:
 - Decision Log updated AT THE MOMENT significant choices are made
 - Task status updated as work progresses through phases
 - Failed Approaches documented IMMEDIATELY when attempts fail
-- Dashboard tables updated in real-time when task status changes
-- "Last updated" timestamp in dashboard refreshed on any task movement
-- Task moved between dashboard tables automatically (no directory moves)
-- "Updated" column updated whenever task file is modified
+- Task status updates MUST follow Section 4.3 synchronization rules (single source of truth).
 
 **Dashboard Synchronization:** The master index (`tasks.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress.
 
@@ -874,9 +858,9 @@ When a task completes, implementations MUST:
 
 Violations of MUST requirements constitute conformance failures.
 
-Creating task files without user request (Section 2.2) is a conformance failure.
-
-Summarizing agent output instead of recording verbatim (Section 8.2) is a conformance failure.
+- Failing to keep the dashboard and task files synchronized (Section 4.3)
+- Creating task files without user request (Section 2.2)
+- Summarizing agent output instead of recording verbatim (Section 8.2)
 
 ---
 

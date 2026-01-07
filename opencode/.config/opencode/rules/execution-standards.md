@@ -142,7 +142,7 @@ If conflicts are unavoidable, implementations MUST run tasks sequentially.
 
 ## 7. Conformance
 
-Violations of MUST requirements constitute conformance failures.
+ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
 Violations of the Task Complexity Protocol (Section 4) are considered serious conformance failures as they remove user control over execution strategy.
 
