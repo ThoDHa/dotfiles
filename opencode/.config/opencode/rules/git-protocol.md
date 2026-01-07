@@ -215,7 +215,7 @@ After committing, implementations MUST report:
 
 ## 8. Conformance
 
-Violations of MUST requirements constitute conformance failures.
+ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
 Poorly formatted or unclear commit messages degrade repository history and are considered conformance failures.
 

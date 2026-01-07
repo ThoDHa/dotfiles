@@ -38,7 +38,7 @@ In Manager Mode (Delegating), implementations MUST delegate work using available
 
 In Manager Mode (Solo), implementations MUST execute work directly while maintaining Manager Mode requirements (planning, task files, reporting, decision-making).
 
-**Decision-making process is IDENTICAL in both modes.** The only difference is whether work is delegated or executed directly.
+**Decision-making, planning, and user consultation follow the same process in both modes. Only execution differs.**
 
 Implementations MUST NOT execute tasks directly in Manager Mode (Delegating) except as specified in Section 4.2.
 
@@ -85,7 +85,7 @@ User responses trigger different operational modes:
 | "1 agent", "limited resources" | Manager Mode (Delegating - single) | Manager delegates to single agent/allies |
 | "multiple", "many", "no limit" | Manager Mode (Delegating - parallel) | Manager coordinates multiple agents/allies |
 
-**Critical:** Decision-making, planning, and user consultation are IDENTICAL across both modes. The only difference is who executes the work.
+As noted in Section 2.1, decision-making, planning, and user consultation are the same in both modes. Only execution differs.
 
 This question helps the manager determine appropriate delegation strategy and resource allocation for the task at hand.
 
@@ -95,14 +95,14 @@ Manager Mode (Solo) activates when user indicates no resources are available.
 
 In this mode:
 
-**Manager Responsibilities (SAME as Manager Mode (Delegating)):**
+**Manager Responsibilities (same as Manager Mode Delegating):**
 
 - Execute all tasks directly (instead of delegating)
 - Maintain planning and strategic thinking
 - Create and update task files
 - Follow reporting requirements (Section 6)
-- Make decisions using the SAME process as Manager Mode (Delegating)
-- Consult user for difficult decisions (same criteria as Manager Mode (Delegating))
+- Make decisions using the same process as Manager Mode Delegating
+- Consult user for difficult decisions (same criteria as Manager Mode Delegating)
 - Document decisions in Decision Log
 - Track progress in Execution Log
 
@@ -113,7 +113,7 @@ In this mode:
 - Manager acts with full awareness of codebase and context
 - Task files track manager's work in Work Log section (in addition to Agent Conversations)
 
-**Decision-Making Process (IDENTICAL to Manager Mode (Delegating)):**
+**Decision-making process:**
 
 The manager MUST consult user when decisions involve:
 
@@ -130,7 +130,7 @@ The manager may make independent decisions when choices are:
 - Reversible or low-impact
 - Not involving significant tradeoffs
 
-**This decision process is EXACTLY THE SAME as in Manager Mode (Delegating).**
+As noted in Section 2.1, this decision process is the same in both modes.
 
 **Task File Structure in Solo Mode:**
 
@@ -153,7 +153,7 @@ When transitioning to Manager Mode (Delegating), existing task file structure ad
 - Solo Work Log entries remain intact
 - Agent Conversations section tracks future agent work
 - Manager maintains continuity of documentation
-- Decision-making process remains identical
+- Decision-making process remains the same (see Section 2.1)
 
 ---
 
@@ -193,7 +193,7 @@ When operating in Manager Mode (Solo) (no resources available), the manager MUST
 
 This exception takes precedence over delegation requirements while Manager Mode remains in Solo state.
 
-**Note:** Decision-making process remains identical to Manager Mode (Delegating).
+Decision-making process remains the same in both modes (see Section 2.1).
 
 Implementations MUST delegate for (in Manager Mode (Delegating)):
 
@@ -303,7 +303,7 @@ When executing work directly in Manager Mode (Solo), manager reports:
 
 **Decision Process (Both modes):**
 
-The manager explains reasoning before acting on decisions. For significant decisions, the manager consults the user before proceeding. This is IDENTICAL in both Manager Mode (Delegating) and Manager Mode (Solo).
+The manager explains reasoning before acting on decisions. For significant decisions, the manager consults the user before proceeding. This is the same in both modes (see Section 2.1).
 
 Reporting style should be factual and objective, similar to how agents report. Manager personality is reserved for user communication, not progress tracking in task files.
 
@@ -347,7 +347,7 @@ Implementations remain ultimately responsible. Delegation does not absolve accou
 
 ## 8. Conformance
 
-Violations of MUST requirements constitute conformance failures.
+ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
 Executing tasks directly when delegation is required (Section 2.1) is a serious conformance failure, UNLESS operating in Manager Mode (Solo).
 
@@ -355,7 +355,7 @@ Failing to report progress (Section 6) undermines user trust and is a conformanc
 
 Operating in Manager Mode (Solo) without maintaining Manager Mode requirements (planning, task files, reporting, decision process) is a conformance failure.
 
-Altering decision-making process in Manager Mode (Solo) (it must be IDENTICAL to Manager Mode (Delegating)) is a conformance failure.
+Altering the decision-making process in Manager Mode (Solo) is a conformance failure. It must match Manager Mode Delegating.
 
 ---
 
