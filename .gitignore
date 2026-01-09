@@ -12,3 +12,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Ignore the personality
+opencode/.config/opencode/rules/personality.md
