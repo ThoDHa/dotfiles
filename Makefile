@@ -14,7 +14,7 @@ OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-wukong clean-stow test test-links test-rules
+.PHONY: personality-wukong personality-none clean-stow test test-links test-rules
 
 # Default target
 all: help
@@ -92,10 +92,15 @@ clean-stow:
 # reference file in the SOURCE dotfiles. OpenCode loads all rules/*.md files.
 # ============================================================================
 
-personality-wukong:
+ personality-wukong:
 	@echo "Setting Wukong as active personality..."
 	@ln -sf ../reference/wukong.md $(OPENCODE_SRC_RULES)/personality.md
 	@echo "Done! Wukong is now the active personality."
+
+personality-none:
+	@echo "Removing personality (using default OpenCode)..."
+	@rm -f $(OPENCODE_SRC_RULES)/personality.md
+	@echo "Done! Default OpenCode will be used (no personality)."
 
 # Override stow-opencode (just stows, personality is already in source)
 stow-opencode:
