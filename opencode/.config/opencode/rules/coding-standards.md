@@ -223,6 +223,17 @@ The test plan MUST specify:
 
 If testing is not required for a change, implementations MUST document why testing is unnecessary (e.g., configuration-only change, documentation update, trivial rename with existing coverage).
 
+### 5.6 Separation of Code and Test Changes
+
+Implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
+
+When a behavioral change is required because a bug is fixed, implementations MUST follow one of these approaches:
+
+- Separate commits and pull requests: submit the production code fix in one commit or PR and the test update that documents the new expected behavior in a follow-up commit or PR, referencing the related issue or the original change.
+- Single change only when inseparable: if the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation, include them together, but document the rationale in the PR description and ensure reviewers approve the combined change.
+
+All exceptions to the separation rule MUST be explicitly documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only changes that alter expected behavior without accompanying production code changes MUST reference an issue, design decision, or reviewer approval that authorizes the behavioral change.
+
 ---
 
 ## 6. Documentation Requirements
