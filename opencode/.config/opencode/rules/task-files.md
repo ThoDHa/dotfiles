@@ -797,6 +797,13 @@ The Triage → Ready phase embodies "think first, do second":
 
 ### 8.1 Real-Time Updates
 
+**Absolute Update Mandate:**
+For any work done related to a task file, the task file MUST be updated immediately and thoroughly, in real time, as the work occurs. This includes actions, discoveries, decisions, status changes, and progress, with no exceptions.
+
+It is strictly prohibited to defer, batch, or omit updates. Task files are the single, authoritative, living record for the related work. The master index dashboard must also be updated in parallel with each change, per Section 4.3.
+
+Failure to update the task file for any related work is a critical conformance failure and will be treated as such.
+
 Task files are **living documents** updated DURING work execution, not historical records written afterward.
 
 Implementations MUST update task documentation continuously as work progresses:
@@ -861,6 +868,7 @@ Violations of MUST requirements constitute conformance failures.
 - Failing to keep the dashboard and task files synchronized (Section 4.3)
 - Creating task files without user request (Section 2.2)
 - Summarizing agent output instead of recording verbatim (Section 8.2)
+- Failure to immediately and thoroughly update the associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
 
 ---
 
