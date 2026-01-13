@@ -223,6 +223,19 @@ The test plan MUST specify:
 
 If testing is not required for a change, implementations MUST document why testing is unnecessary (e.g., configuration-only change, documentation update, trivial rename with existing coverage).
 
+### 5.7 Test Change Intent Verification
+
+When modifying tests with the goal of making them pass (rather than in the course of developing new features), implementers MUST verify that the proposed change accurately reflects intended system behavior and not an accidental regression, side effect, or masking of a real defect.
+
+Specifically, implementers MUST:
+
+1. Review relevant git history, commit messages, and project documentation to determine the original intent behind the test and the logic it validates.
+2. Analyze whether the failing test indicates a real bug in the production code, a deliberate business rule change, or an obsolete expectation.
+3. Update tests ONLY when the intended behavior has changed, and NOT as a byproduct of regression or unintentional side effect.
+4. Document the rationale for any test change in the commit message, referencing relevant git history or stakeholder decision as appropriate.
+
+If the intent behind a test is unclear or disputed, implementers MUST escalate the question to relevant reviewers, stakeholders, or product owners before altering the test.
+
 ### 5.6 Separation of Code and Test Changes
 
 Implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
