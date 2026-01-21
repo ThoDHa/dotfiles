@@ -213,11 +213,59 @@ After committing, implementations MUST report:
 
 ---
 
-## 8. Conformance
+## 8. Destructive Operation Safety
+
+### 8.1 Force Push Protection
+
+Implementations MUST NOT execute force pushes (`git push --force` or `git push -f`) without explicit user confirmation.
+
+Before proceeding with a force push, implementations MUST:
+
+1. Warn the user about the destructive nature of the operation
+2. Explain what will be overwritten (if detectable)
+3. Ask for explicit confirmation to proceed
+
+Required confirmation prompt:
+
+```
+WARNING: Force push will overwrite remote history. This action cannot be undone.
+
+Continue with force push? (y/n): _
+```
+
+### 8.2 No-Verify Protection
+
+Implementations MUST NOT execute commits with `--no-verify` flag without explicit user confirmation.
+
+Before proceeding with a no-verify commit, implementations MUST:
+
+1. Warn the user that pre-commit and commit-msg hooks will be bypassed
+2. Explain what hooks are being skipped
+3. Ask for explicit confirmation to proceed
+
+Required confirmation prompt:
+
+```
+WARNING: Commit with --no-verify will bypass all git hooks (pre-commit, commit-msg, etc.).
+
+Continue with no-verify commit? (y/n): _
+```
+
+### 8.3 Safe Push Behavior
+
+Implementations MAY use `git push --force-with-lease` instead of `git push --force` when appropriate.
+
+`force-with-lease` is safer because it checks if the remote branch has been updated by others before overwriting.
+
+---
+
+## 9. Conformance
 
 ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
 Poorly formatted or unclear commit messages degrade repository history and are considered conformance failures.
+
+Proceeding with force pushes or --no-verify commits without user confirmation is a critical safety violation and constitutes immediate conformance failure.
 
 ---
 
