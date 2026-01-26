@@ -235,21 +235,27 @@ Continue with force push? (y/n): _
 
 ### 8.2 No-Verify Protection
 
-Implementations MUST NOT execute commits with `--no-verify` flag without explicit user confirmation.
+Strict enforcement: `--no-verify` is a dangerous operation that bypasses important quality and security checks. The following rules are mandatory and non-negotiable.
 
-Before proceeding with a no-verify commit, implementations MUST:
+Strict enforcement: `--no-verify` is a dangerous operation that bypasses important quality and security checks. The following rules apply.
 
-1. Warn the user that pre-commit and commit-msg hooks will be bypassed
-2. Explain what hooks are being skipped
-3. Ask for explicit confirmation to proceed
+1. Automated processes prohibition: Automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use the `--no-verify` flag under any circumstances. Any automated attempt to bypass hooks must fail the job and be treated as a security incident.
 
-Required confirmation prompt:
+2. Human interactive usage: Human users MUST NOT use `--no-verify` except when all of the following conditions are met:
 
-```
-WARNING: Commit with --no-verify will bypass all git hooks (pre-commit, commit-msg, etc.).
+   a. The user is shown an explicit warning that pre-commit and commit-msg hooks will be bypassed.
 
-Continue with no-verify commit? (y/n): _
-```
+   b. The user supplies a non-empty, clear justification for bypassing hooks. The exact justification text MUST be recorded verbatim in the commit message body as a footer line with the format:
+
+   `No-Verify-Reason: <reason text>`
+
+   c. The interactive confirmation flow echoes the justification back to the user and requires explicit acceptance. If the justification is blank or the user declines, the commit MUST be aborted.
+
+3. Mandatory logging: The act of using `--no-verify` MUST be recorded immediately in the repository under `.opencode/no-verify.log`. Each log entry MUST include: ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash. The repository MUST track this file in source control or via an auditable mechanism.
+
+4. Repository enforcement: Repositories and CI systems MUST implement checks that reject commits or pushes that use `--no-verify` without the required `No-Verify-Reason` footer and a matching log entry. Hooks or CI jobs that enforce this policy are REQUIRED.
+
+5. Escalation and conformance: Any use of `--no-verify` that does not follow these rules is a critical conformance failure. Such incidents MUST be reported immediately to repository maintainers and operational security contacts. A maintainer-level investigation MUST occur and a remediation plan documented.
 
 ### 8.3 Safe Push Behavior
 
