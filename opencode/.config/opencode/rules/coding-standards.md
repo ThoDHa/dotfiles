@@ -183,6 +183,32 @@ Implementations SHOULD maintain existing test coverage when modifying code.
 
 ### 5.3 Test Standards
 
+**Test Naming Requirements:**
+
+Test names MUST describe WHAT is being tested and the EXPECTED behavior, NOT how the test was created or what bug it fixes.
+
+**Descriptive Test Names (Required):**
+- `test_user_authentication_with_valid_credentials_succeeds`
+- `test_api_returns_404_when_user_not_found`
+- `test_calculate_total_with_multiple_discounts_applies_correctly`
+- `test_password_reset_token_expires_after_24_hours`
+
+**Prohibited Test Names:**
+- `test_fixing_bug_asd_123` (use descriptive name instead)
+- `test_temp_fix` (describe the behavior being tested)
+- `test_working` (too vague - what works?)
+- `test_1`, `test_test123` (non-descriptive identifiers)
+
+**Test Name Guidelines:**
+- Use snake_case or camelCase consistent with project convention
+- Include the system/component being tested
+- Include the scenario or condition
+- Include the expected result
+- Keep names reasonably concise but descriptive
+- Focus on behavior and business logic, not implementation details
+
+**Test Structure Requirements:**
+
 Tests MUST:
 
 - Have descriptive names indicating expected behavior
@@ -195,6 +221,7 @@ Tests SHOULD:
 - Include edge cases and boundary conditions
 - Use realistic test data
 - Be fast enough to run frequently
+- Use AAA pattern (Arrange, Act, Assert) when appropriate
 
 ### 5.4 Prohibited Test Behaviors
 
