@@ -205,12 +205,13 @@ Each task file MUST contain these sections:
 4. Risk Assessment
 5. Dependencies and Prerequisites
 6. Testing Strategy
-7. Rollback and Recovery Plan
-8. Communication Plan
-9. Post-Completion Actions
-10. Task Breakdown
-11. Work Log
-12. Execution Log
+7. TDD Workflow
+8. Rollback and Recovery Plan
+9. Communication Plan
+10. Post-Completion Actions
+11. Task Breakdown
+12. Work Log
+13. Execution Log
 
 ### 5.2 Task File Template
 
@@ -228,12 +229,13 @@ Each task file MUST contain these sections:
 4. [Risk Assessment](#4-risk-assessment)
 5. [Dependencies and Prerequisites](#5-dependencies-and-prerequisites)
 6. [Testing Strategy](#6-testing-strategy)
-7. [Rollback and Recovery Plan](#7-rollback-and-recovery-plan)
-8. [Communication Plan](#8-communication-plan)
-9. [Post-Completion Actions](#9-post-completion-actions)
-10. [Task Breakdown](#10-task-breakdown)
-11. [Work Log](#11-work-log)
-12. [Execution Log](#12-execution-log)
+7. [TDD Workflow](#7-tdd-workflow)
+8. [Rollback and Recovery Plan](#8-rollback-and-recovery-plan)
+9. [Communication Plan](#9-communication-plan)
+10. [Post-Completion Actions](#10-post-completion-actions)
+11. [Task Breakdown](#11-task-breakdown)
+12. [Work Log](#12-work-log)
+13. [Execution Log](#13-execution-log)
 
 ---
 
@@ -384,7 +386,134 @@ Each task file MUST contain these sections:
 - [ ] Security tests pass (if applicable)
 - [ ] Cross-browser/platform testing completed (if applicable)
 
-## 7. Rollback and Recovery Plan
+## 7. TDD Workflow
+
+### TDD Execution Protocol
+
+**Mandatory TDD Sequence:** When working on any task, implementations MUST follow this sequence:
+
+1. **Check Existing Tests:** Run test suite to identify currently failing tests
+2. **Update Tests First:** Modify or create tests to reflect expected behavior for the task
+3. **Verify Tests Fail:** Confirm tests fail with current implementation (demonstrates test validity)
+4. **Implement Solution:** Write production code to make tests pass
+5. **Run Tests:** Execute test suite to verify all tests pass
+6. **Refactor If Needed:** Improve code quality while maintaining test coverage
+7. **Final Verification:** Run tests again to ensure no regressions
+
+**TDD Requirements:**
+
+| Phase | Action | Validation | Documentation |
+|-------|--------|-------------|----------------|
+| **Check Tests** | Run existing test suite | Identify failing tests and pass count | Document baseline test results |
+| **Update/Create Tests** | Write/modify tests for expected behavior | Tests MUST fail before implementation | Document test changes in Work Log |
+| **Verify Failures** | Run tests to confirm failures | Confirms tests detect missing behavior | Record failure messages |
+| **Implement** | Write production code | Code focused on making tests pass | Update code with implementation |
+| **Verify Pass** | Run full test suite | All tests MUST pass | Record passing results |
+| **Refactor** | Improve code quality | Tests must continue passing | Document refactoring if significant |
+| **Final Run** | Complete test suite execution | Zero failures | Final test results documented |
+
+### TDD Decision Points
+
+**When Tests Already Exist:**
+- If existing tests cover the functionality: Update tests to match new expected behavior
+- If tests need extension: Add new test cases for edge cases and requirements
+- If tests are obsolete: Document deprecation and replace with new tests
+
+**When No Tests Exist:**
+- Write tests that define expected behavior BEFORE any implementation
+- Focus on testing public interfaces and critical paths
+- Include edge cases, error conditions, and boundary values
+- Document why tests couldn't be written (if applicable) for future reference
+
+**When Test Execution Fails:**
+- Determine if failure is due to environment, dependencies, or test code
+- Fix infrastructure issues before proceeding with implementation
+- Document infrastructure problems and resolutions
+- Do not proceed to implementation if test infrastructure is broken
+
+### TDD Work Log Entry Format
+
+When following TDD workflow, Work Log entries MUST include:
+
+**Example TDD Work Log Entry:**
+
+```
+[Timestamp] TDD Phase 1: Check Existing Tests
+- Command: `npm test` / `pytest` / [test command]
+- Result: [X] passing, [Y] failing
+- Failing tests: [list test names/IDs]
+
+[Timestamp] TDD Phase 2: Update Tests
+- File modified: `tests/example.test.js`
+- Changes: Added test case [name] to verify [behavior]
+- Expected behavior: [description of what should happen]
+
+[Timestamp] TDD Phase 3: Verify Tests Fail
+- Command: `npm test` / [test command]
+- Result: [X] passing, [Y] failing (including new test)
+- Failure message: [specific error confirming test works]
+
+[Timestamp] TDD Phase 4: Implement Solution
+- File modified: `src/example.js`
+- Changes: [description of implementation]
+
+[Timestamp] TDD Phase 5: Verify Tests Pass
+- Command: `npm test` / [test command]
+- Result: All tests passing
+- Coverage: [X]% (if measured)
+```
+
+### TDD Exceptions and Edge Cases
+
+**Exceptions Requiring Documented Justification:**
+
+Implementations MAY deviate from TDD workflow ONLY when:
+
+- **Emergency Hotfixes:** Document the production fix, THEN write regression tests
+- **Exploratory Work:** When behavior is unknown, write tests after understanding system
+- **Infrastructure Changes:** When no production code changes (only test infrastructure)
+- **External API Integration:** When external dependencies prevent test-first approach
+
+**Exception Documentation Requirement:**
+
+When deviating from TDD workflow, implementions MUST:
+1. Document the exception in the Work Log with justification
+2. Explain why TDD workflow couldn't be followed
+3. Document when tests will be written (if deferred)
+4. Get explicit approval if the exception is significant
+
+**Example Exception Entry:**
+
+```
+[Timestamp] TDD Exception: Emergency Production Hotfix
+- Justification: Production outage requires immediate fix, cannot run tests in prod
+- Action: Applied fix to [file], deferring tests to follow-up
+- Follow-up required: Write regression tests for this fix within 24 hours
+```
+
+### TDD Integration with Task Lifecycle
+
+**Ready → In Progress Transition Requirements:**
+
+Before transitioning to In Progress, task file MUST have:
+- [ ] Test command identified (how to run tests)
+- [ ] Test framework documented
+- [ ] Test file locations identified
+- [ ] Existing test baseline recorded
+
+**In Progress Work Execution:**
+
+All work MUST follow TDD sequence documented in Section 7. Work Log MUST track each phase with timestamps and results.
+
+**Completion Validation:**
+
+Task CANNOT be marked Completed unless:
+- All tests pass (including newly written tests)
+- Test coverage meets or exceeds target percentage (if specified)
+- TDD workflow is documented in Work Log
+- No TDD exceptions exist without justification and follow-up plan
+
+## 8. Rollback and Recovery Plan
 
 ### Rollback Strategy
 
@@ -436,7 +565,7 @@ Each task file MUST contain these sections:
 - [Escalation procedures]
 - [User communication requirements]
 
-## 8. Communication Plan
+## 9. Communication Plan
 
 ### Stakeholder Notifications
 
@@ -477,7 +606,7 @@ Each task file MUST contain these sections:
 - [Knowledge transfer sessions required]
 - [Documentation handoffs needed]
 
-## 9. Post-Completion Actions
+## 10. Post-Completion Actions
 
 ### Immediate Follow-Up (Within 24-48 hours)
 
@@ -529,7 +658,7 @@ Each task file MUST contain these sections:
 - [User satisfaction impacts]
 - [Development workflow improvements]
 
-## 10. Task Breakdown
+## 11. Task Breakdown
 
 ### Task [PREFIX-NNN]: [Name]
 
@@ -563,7 +692,7 @@ Each task file MUST contain these sections:
 
 ---
 
-## 6. Work Log
+## 12. Work Log
 
 This section tracks all work performed during the task, whether by agents/allies or by the manager. Tone note: Work Log entries follow the exception in Section 1.2.
 
@@ -859,16 +988,120 @@ When a task completes, implementations MUST:
 7. Populate "Completed" and "Duration" columns in dashboard
 8. Update dashboard "Last updated" timestamp
 
+### 8.5 Content Preservation
+
+**Absolute Preservation Mandate:**
+
+Implementations MUST NEVER delete, clear, or overwrite any previously written content in task files. Task files are cumulative records that only grow, never shrink.
+
+**Prohibited Operations:**
+
+- **NEVER** delete Work Log entries when switching tasks or contexts
+- **NEVER** clear Decision Log entries
+- **NEVER** overwrite Task Breakdown sections
+- **NEVER** remove completed Progress Log entries
+- **NEVER** reset task file content when moving between tasks
+- **NEVER** use file write operations that replace entire content
+
+**Required Operations:**
+
+- **ALWAYS** use append operations for new content
+- **ALWAYS** preserve all existing sections when updating
+- **ALWAYS** maintain chronological order of Work Log entries
+- **ALWAYS** keep all historical decisions in Decision Log
+- **ALWAYS** maintain completed task information even when switching focus
+
+**Multi-Task Scenarios:**
+
+When working on multiple tasks sequentially:
+
+1. **Task Switching:** Switching between tasks MUST NOT affect previously written content in other task files
+2. **Context Preservation:** Each task file's content remains intact regardless of which task is currently active
+3. **Dashboard Accuracy:** Master index MUST accurately reflect state of ALL tasks, not just the active one
+4. **Work Continuity:** When returning to a task, all previous work MUST be present and accessible
+
+**Task File Update Pattern:**
+
+When updating a task file, implementations MUST:
+
+```markdown
+## 12. Work Log
+
+### 12.1 [Timestamp]: Manager: Task AUTH-001
+
+**Activity:** Authentication flow investigation
+
+[Content written for AUTH-001]
+
+### 12.2 [Timestamp]: Manager: Task AUTH-002
+
+**Activity:** Token refresh implementation
+
+[Content written for AUTH-002 - AUTH-001 content above MUST be preserved]
+```
+
+**Prohibited Update Pattern:**
+
+```markdown
+## 12. Work Log
+
+### 12.1 [Timestamp]: Manager: Task AUTH-002
+
+**Activity:** Token refresh implementation
+
+[ONLY AUTH-002 content - AUTH-001 content DELETED - PROHIBITED]
+```
+
+**Verification Requirements:**
+
+Before and after any task file update, implementations MUST verify:
+
+- [ ] All previous Work Log entries remain present
+- [ ] All Decision Log entries remain present
+- [ ] Task Breakdown sections remain intact
+- [ ] Progress Log entries preserve chronological history
+- [ ] No sections have been removed or truncated
+
+**Dashboard Synchronization:**
+
+When updating master index:
+
+- [ ] All task files represented in dashboard remain listed
+- [ ] No task entries removed from dashboard tables
+- [ ] Task statuses update WITHOUT removing task references
+- [ ] All task information preserved regardless of active task
+
+**Failure to Preserve Content:**
+
+Any deletion of previously written task file content is a critical conformance failure. This includes:
+
+- Intentional deletion (prohibited)
+- Accidental deletion due to poor file handling (prohibited)
+- Deletion when switching between tasks (prohibited)
+- Deletion when updating content (prohibited)
+- Deletion during task transitions (prohibited)
+
+**Exception: Explicit User Command:**
+
+The ONLY permissible content deletion is when a user explicitly commands it:
+
+- "Delete this task file"
+- "Remove this entry"
+- "Clear this section"
+
+User requests MUST be explicit and specific. Ambiguous instructions must NOT trigger content deletion.
+
 ---
 
 ## 9. Conformance
 
 Violations of MUST requirements constitute conformance failures.
 
-- Failing to keep the dashboard and task files synchronized (Section 4.3)
+- Failing to keep dashboard and task files synchronized (Section 4.3)
 - Creating task files without user request (Section 2.2)
 - Summarizing agent output instead of recording verbatim (Section 8.2)
-- Failure to immediately and thoroughly update the associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
+- Failure to immediately and thoroughly update associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
+- Deleting or overwriting previously written task file content (Section 8.5) is a critical conformance failure with zero tolerance for exceptions.
 
 ---
 
