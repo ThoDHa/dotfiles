@@ -332,11 +332,11 @@ Comments MUST use direct, straightforward language that focuses on WHY rather th
 
 ### 6.5 Comment Purpose Guidelines
 
-Comments serve to explain code context and non-obvious decisions, but should not document internal bug-fixing history.
+Comments MUST explain code context and non-obvious decisions. Comments MUST NEVER document internal bug-fixing history.
 
-#### 6.5.1 What Comments SHOULD Explain
+#### 6.5.1 What Comments MUST Explain
 
-Comments SHOULD document:
+Comments MUST document:
 
 - **External library workarounds** with full context
 - **Non-obvious implementation choices** and their reasoning
@@ -344,6 +344,11 @@ Comments SHOULD document:
 - **Performance considerations** when optimization choices aren't obvious
 
 #### 6.5.2 External Library Workaround Documentation
+
+**CRITICAL DISTINCTION:**
+
+- **External library bugs/issues:** MUST be documented in code comments with full context
+- **Internal application bugs:** FORBIDDEN in code comments - belong in commit messages and issue trackers only
 
 When working around external library bugs or limitations, comments MUST include:
 
@@ -367,17 +372,45 @@ When working around external library bugs or limitations, comments MUST include:
 # Remove when requests 2.29+ fixes issue #6078
 ```
 
-#### 6.5.3 What Comments SHOULD NOT Explain
+#### 6.5.3 What Comments MUST NOT Explain
 
-Comments MUST focus on code context and non-obvious decisions rather than documenting internal bug-fixing history.
+**Internal application bug-fixing history is FORBIDDEN in code comments.**
 
-**Internal application bugs belong in commit messages and issue trackers, not in code comments.**
+Comments MUST NOT include:
 
-For complex business rules, focus on the business context:
+- **Historical bug references** - bug IDs, issue numbers, or ticket references
+- **Attribution** - who fixed something, when it was fixed, or why
+- **Fix chronology** - when problems occurred, how they evolved over time
+- **Deprecated behavior** - explanations of removed functionality
+- **Temporal context** - "before the fix", "after the change", "previously", etc.
+
+**Internal application bugs belong EXCLUSIVELY in commit messages and issue trackers. NEVER in code comments.**
+
+Code comments explain the current state, not the history of how we got there.
+
+**PROHIBITED comment patterns:**
 
 ```javascript
+// ❌ FORBIDDEN
+// Fixed bug #1234 where users couldn't login (removed by John on 2024-01-15)
+
+// ❌ FORBIDDEN
+// This was broken until v2.1 when we fixed the timeout issue
+
+// ❌ FORBIDDEN
+// Previously returned null, now throws exception as per PR #456
+```
+
+**ACCEPTABLE comment patterns:**
+
+```javascript
+// ✅ Acceptable: explains current behavior
+// Validate session token before accessing protected resources
+// (prevents auth bypass attempts when tokens expire mid-request)
+
+// ✅ Acceptable: documents business context
 // Customer tier determines discount calculation:
-// - Premium: 15% on orders >$100, 10% otherwise  
+// - Premium: 15% on orders >$100, 10% otherwise
 // - Standard: 5% on orders >$50
 // - Basic: no discounts
 ```
@@ -404,6 +437,9 @@ Use commit messages for:
 - **What changed** in this specific commit
 - **Why the change was necessary** (business justification)
 - **Impact scope** (what systems/features are affected)
+- **Bug fix history** - what was broken, what the fix was, and why
+
+**Commit messages are the EXCLUSIVE place for internal application bug history.**
 
 Follow formal commit message standards defined in `git-protocol.md`.
 
