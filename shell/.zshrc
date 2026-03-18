@@ -188,3 +188,4 @@ ssh-add ~/.ssh/id_rsa &> /dev/null
 
 # opencode
 export PATH=/home/thodha/.opencode/bin:$PATH
+export KUBECONFIG=$HOME/.kube/config
