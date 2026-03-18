@@ -71,8 +71,12 @@ if [ ! -d "$NVIM_VENV" ]; then
     "$NVIM_VENV/bin/pip" install pynvim
 else
     echo "  NeoVim Python venv already exists"
-    # Ensure pynvim is installed
-    "$NVIM_VENV/bin/pip" install --quiet pynvim
+    # Ensure pynvim is installed (only if pip works)
+    if "$NVIM_VENV/bin/python" -c "import pip" 2>/dev/null; then
+        "$NVIM_VENV/bin/pip" install --quiet pynvim
+    else
+        echo "  Skipping pynvim installation (pip is broken, recreate venv manually if needed)"
+    fi
 fi
 print_success "NeoVim Python provider configured"
 
