@@ -8,8 +8,5 @@
         "~/.config/opencode/rules/delegation.md",
         "~/.config/opencode/rules/git-protocol.md",
         "~/.config/opencode/rules/task-files.md"
-    ],
-    "keybinds": {
-        "leader": "ctrl+w"
-    }
+    ]
 }
