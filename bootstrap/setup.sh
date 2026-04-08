@@ -284,7 +284,15 @@ if ! command -v opencode &> /dev/null; then
     echo "  Installing opencode..."
     curl -fsSL https://opencode.ai/install | bash
 else
-    echo "  opencode already installed ($(command -v opencode))"
+    PREV_VERSION=$(opencode version 2>/dev/null | head -1 || echo "unknown")
+    echo "  opencode $PREV_VERSION installed, checking for updates..."
+    curl -fsSL https://opencode.ai/install | bash
+    NEW_VERSION=$(opencode version 2>/dev/null | head -1 || echo "unknown")
+    if [ "$PREV_VERSION" != "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
+        echo "  opencode updated: $PREV_VERSION -> $NEW_VERSION"
+    else
+        echo "  opencode already up to date ($PREV_VERSION)"
+    fi
 fi
 print_success "OpenCode configured"
 
@@ -294,7 +302,15 @@ if ! command -v claude &> /dev/null; then
     echo "  Installing claude..."
     curl -fsSL https://claude.ai/install.sh | bash
 else
-    echo "  claude already installed ($(command -v claude))"
+    PREV_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    echo "  claude $PREV_VERSION installed, checking for updates..."
+    curl -fsSL https://claude.ai/install.sh | bash
+    NEW_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+    if [ "$PREV_VERSION" != "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
+        echo "  claude updated: $PREV_VERSION -> $NEW_VERSION"
+    else
+        echo "  claude already up to date ($PREV_VERSION)"
+    fi
 fi
 print_success "Claude Code configured"
 
