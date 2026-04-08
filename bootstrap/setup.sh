@@ -213,7 +213,10 @@ if [ ! -d "$HOME/.config/nvim" ]; then
     mkdir -p "$HOME/.config"
     git clone https://github.com/ThoDHa/nvim.git "$HOME/.config/nvim"
 else
-    echo "  NeoVim config already exists"
+    echo "  Updating NeoVim config..."
+    if ! git -C "$HOME/.config/nvim" pull --ff-only 2>/dev/null; then
+        print_error "NeoVim config pull failed (local changes or conflicts). Manual resolution required."
+    fi
 fi
 
 print_success "NeoVim installed (plugins will install on first run)"
