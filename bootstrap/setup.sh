@@ -58,6 +58,12 @@ sudo apt-get install -y \
     zsh tmux \
     gcc python3 python3-venv python3-dev python3-pip default-jdk \
     ripgrep fd-find bat
+# Create bat symlink (Debian installs as batcat)
+if command -v batcat &> /dev/null && ! command -v bat &> /dev/null; then
+    sudo ln -sf "$(command -v batcat)" /usr/local/bin/bat
+    echo "  Created bat -> batcat symlink"
+fi
+
 print_success "System packages up to date"
 
 # Step 2: NeoVim Python provider
@@ -152,11 +158,10 @@ export NVM_DIR="$HOME/.nvm"
 
 if [ ! -d "$NVM_DIR" ]; then
     echo "  Installing NVM..."
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 else
     echo "  Updating NVM..."
-    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 fi
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 
 # Load NVM
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
@@ -275,15 +280,23 @@ print_success "eza configured"
 
 # Step 9: OpenCode installation
 print_step "Setting up OpenCode..."
-echo "  Installing/updating opencode..."
-curl -fsSL https://opencode.ai/install | bash
-print_success "OpenCode installed"
+if ! command -v opencode &> /dev/null; then
+    echo "  Installing opencode..."
+    curl -fsSL https://opencode.ai/install | bash
+else
+    echo "  opencode already installed ($(command -v opencode))"
+fi
+print_success "OpenCode configured"
 
 # Step 10: Claude Code installation
 print_step "Setting up Claude Code..."
-echo "  Installing/updating claude..."
-curl -fsSL https://claude.ai/install.sh | bash
-print_success "Claude Code installed"
+if ! command -v claude &> /dev/null; then
+    echo "  Installing claude..."
+    curl -fsSL https://claude.ai/install.sh | bash
+else
+    echo "  claude already installed ($(command -v claude))"
+fi
+print_success "Claude Code configured"
 
 # Step 11: Stow claudecode package and sync config
 print_step "Stowing Claude Code configuration..."
@@ -302,7 +315,7 @@ print_step "Verifying installation..."
 echo "  Checking installed tools..."
 
 # Check critical tools
-TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "batcat" "eza" "stow" "tree" "opencode" "claude")
+TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "bat" "eza" "stow" "tree" "opencode" "claude")
 FAILED_TOOLS=()
 
 for tool in "${TOOLS_TO_CHECK[@]}"; do
