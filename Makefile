@@ -2,7 +2,7 @@ CURRENT_DIR := $(shell basename $$PWD)
 CONTAINER := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES := shell tmux isort opencode
+STOW_PACKAGES := shell tmux isort opencode claudecode
 STOW_TARGET := $(HOME)
 
 # OpenCode personality paths
@@ -13,8 +13,15 @@ OPENCODE_SRC_REF := $(CURDIR)/opencode/.config/opencode/reference
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
+# Claude Code paths
+CLAUDECODE_SRC := $(CURDIR)/claudecode/.claude
+CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
+CLAUDECODE_OUTPUT := $(STOW_TARGET)/.claude/CLAUDE.md
+
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
 .PHONY: personality-wukong personality-none clean-stow test test-links test-rules
+.PHONY: sync-claudecode stow-claudecode unstow-claudecode
+.PHONY: restow-shell unstow-shell
 
 # Default target
 all: help
@@ -45,6 +52,18 @@ restow:
 		stow -v --no-folding -R -t $(STOW_TARGET) $$pkg; \
 	done
 	@echo "Done! All packages restowed."
+
+# Restow shell package only
+restow-shell:
+	@echo "Restowing shell package..."
+	stow -v --no-folding -R -t $(STOW_TARGET) shell
+	@echo "Done! Shell package restowed."
+
+# Unstow shell package only
+unstow-shell:
+	@echo "Unstowing shell package..."
+	stow -v -D -t $(STOW_TARGET) shell
+	@echo "Done! Shell package unstowed."
 
 # Stow individual packages
 stow-%:
@@ -108,9 +127,39 @@ stow-opencode:
 	stow -v --no-folding -t $(STOW_TARGET) opencode
 	@echo "Done! OpenCode stowed."
 
-# Full bootstrap - install all dev tools
+# ============================================================================
+# Claude Code Configuration
+# ============================================================================
+# Generates CLAUDE.md from opencode rules for Claude Code to use
+# Usage:
+#   make sync-claudecode    - Regenerate CLAUDE.md from opencode rules
+#   make stow-claudecode     - Stow claudecode package
+#   make unstow-claudecode   - Unstow claudecode package
+# ============================================================================
+
+# Sync Claude Code config with opencode rules
+sync-claudecode:
+	@echo "Syncing Claude Code with opencode rules..."
+	@test -f $(CLAUDECODE_GENERATOR) || (echo "ERROR: Generator script not found at $(CLAUDECODE_GENERATOR)" && exit 1)
+	@$(CLAUDECODE_GENERATOR)
+	@echo "Done! Claude Code now shares opencode configuration."
+
+# Stow claudecode package
+stow-claudecode:
+	@echo "Stowing claudecode..."
+	stow -v --no-folding -t $(STOW_TARGET) claudecode
+	@echo "Done! Claude Code configuration stowed."
+	@$(MAKE) sync-claudecode
+
+# Unstow claudecode package
+unstow-claudecode:
+	@echo "Unstowing claudecode..."
+	stow -v -D -t $(STOW_TARGET) claudecode
+	@echo "Done! Claude Code configuration unstowed."
+
+# Full bootstrap - install/update all dev tools
 bootstrap:
-	@./bootstrap/install.sh
+	@./bootstrap/setup.sh
 
 # Aliases
 install: stow
@@ -185,6 +234,11 @@ help:
 	@echo "  make stow-opencode       - Stow opencode + set Wukong as default"
 	@echo "  make personality-wukong  - Switch to Wukong personality"
 	@echo "  make personality-none    - Remove personality (use default)"
+	@echo ""
+	@echo "Claude Code Configuration:"
+	@echo "  make sync-claudecode    - Sync CLAUDE.md with opencode rules"
+	@echo "  make stow-claudecode     - Stow claudecode package (auto-syncs)"
+	@echo "  make unstow-claudecode   - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test        - Run all tests (symlinks + rules loading)"
