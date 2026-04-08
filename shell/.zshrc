@@ -187,5 +187,5 @@ eval $(ssh-agent) &> /dev/null
 ssh-add ~/.ssh/id_rsa &> /dev/null
 
 # opencode
-export PATH=/home/thodha/.opencode/bin:$PATH
+export PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH
 export KUBECONFIG=$HOME/.kube/config
