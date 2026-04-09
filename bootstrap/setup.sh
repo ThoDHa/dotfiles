@@ -280,36 +280,56 @@ print_success "eza configured"
 
 # Step 9: OpenCode installation
 print_step "Setting up OpenCode..."
+
+get_opencode_latest() {
+    local v
+    v=$(curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest 2>/dev/null \
+        | grep '"tag_name"' \
+        | sed -E 's/.*"([^"]+)".*/\1/' \
+        | head -1)
+    echo "${v#v}"
+}
+
 if ! command -v opencode &> /dev/null; then
     echo "  Installing opencode..."
     curl -fsSL https://opencode.ai/install | bash
 else
-    PREV_VERSION=$(opencode version 2>/dev/null | head -1 || echo "unknown")
-    echo "  opencode $PREV_VERSION installed, checking for updates..."
-    curl -fsSL https://opencode.ai/install | bash
-    NEW_VERSION=$(opencode version 2>/dev/null | head -1 || echo "unknown")
-    if [ "$PREV_VERSION" != "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
-        echo "  opencode updated: $PREV_VERSION -> $NEW_VERSION"
+    OPENCODE_CURRENT=$(opencode --version 2>/dev/null | head -1)
+    OPENCODE_LATEST=$(get_opencode_latest)
+    if [ -z "$OPENCODE_LATEST" ]; then
+        echo "  Could not check opencode upstream version, skipping update"
+    elif [ "$OPENCODE_CURRENT" = "$OPENCODE_LATEST" ]; then
+        echo "  opencode $OPENCODE_CURRENT is already up to date"
     else
-        echo "  opencode already up to date ($PREV_VERSION)"
+        echo "  opencode $OPENCODE_CURRENT found, upgrading to $OPENCODE_LATEST..."
+        curl -fsSL https://opencode.ai/install | bash
     fi
 fi
 print_success "OpenCode configured"
 
 # Step 10: Claude Code installation
 print_step "Setting up Claude Code..."
+
+get_claude_latest() {
+    curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-code/latest 2>/dev/null \
+        | grep -o '"version":"[^"]*"' \
+        | head -1 \
+        | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
 if ! command -v claude &> /dev/null; then
     echo "  Installing claude..."
     curl -fsSL https://claude.ai/install.sh | bash
 else
-    PREV_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
-    echo "  claude $PREV_VERSION installed, checking for updates..."
-    curl -fsSL https://claude.ai/install.sh | bash
-    NEW_VERSION=$(claude --version 2>/dev/null | head -1 || echo "unknown")
-    if [ "$PREV_VERSION" != "$NEW_VERSION" ] && [ "$NEW_VERSION" != "unknown" ]; then
-        echo "  claude updated: $PREV_VERSION -> $NEW_VERSION"
+    CLAUDE_CURRENT=$(claude --version 2>/dev/null | awk '{print $1}')
+    CLAUDE_LATEST=$(get_claude_latest)
+    if [ -z "$CLAUDE_LATEST" ]; then
+        echo "  Could not check claude upstream version, skipping update"
+    elif [ "$CLAUDE_CURRENT" = "$CLAUDE_LATEST" ]; then
+        echo "  claude $CLAUDE_CURRENT is already up to date"
     else
-        echo "  claude already up to date ($PREV_VERSION)"
+        echo "  claude $CLAUDE_CURRENT found, upgrading to $CLAUDE_LATEST..."
+        curl -fsSL https://claude.ai/install.sh | bash
     fi
 fi
 print_success "Claude Code configured"
