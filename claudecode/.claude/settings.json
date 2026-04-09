@@ -1,5 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "model": "opus",
   "outputStyle": "Concise",
   "language": "english",
   "spinnerTipsEnabled": false,
@@ -14,5 +15,5 @@
   },
   "defaultMode": "acceptEdits",
   "showTurnDuration": false,
-  "model": "opus"
+  "effortLevel": "high"
 }
