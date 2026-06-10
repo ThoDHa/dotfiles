@@ -399,6 +399,7 @@ Each task file MUST contain these sections:
 5. **Run Tests:** Execute test suite to verify all tests pass
 6. **Refactor If Needed:** Improve code quality while maintaining test coverage
 7. **Final Verification:** Run tests again to ensure no regressions
+8. **Simplify and Review Loop:** Run a simplify pass, then a review pass, fix every finding, and repeat the cycle as long as any iteration still produces fixes (see "Simplify and Review Loop" below)
 
 **TDD Requirements:**
 
@@ -411,6 +412,40 @@ Each task file MUST contain these sections:
 | **Verify Pass** | Run full test suite | All tests MUST pass | Record passing results |
 | **Refactor** | Improve code quality | Tests must continue passing | Document refactoring if significant |
 | **Final Run** | Complete test suite execution | Zero failures | Final test results documented |
+| **Simplify and Review Loop** | Iterate simplify pass then review pass, applying fixes | Clean iteration: zero fixes produced | Document each iteration in Work Log |
+
+### Simplify and Review Loop
+
+**Mandatory Convergence Requirement:** After tests pass, implementations MUST iterate a simplify-then-review cycle over the task's changes before the task may be marked Completed. The loop runs as long as any iteration still produces fixes, and stops only when a full iteration produces none.
+
+**Each iteration MUST perform both passes, in this order:**
+
+1. **Simplify Pass (cleanup):** Review the changed code for reuse opportunities, simplification, dead code, redundancy, and efficiency improvements. Where the environment provides the `/simplify` command, implementations MUST use it; otherwise perform an equivalent manual cleanup. Apply every accepted improvement.
+
+2. **Review Pass (bug hunt):** Review the changed code for correctness bugs, logic errors, missing error handling, edge cases, and security issues. Where the environment provides the `/code-review` command, implementations MUST use it; otherwise perform an equivalent manual review. Fix every confirmed finding.
+
+A "fix" means any change applied during the iteration, whether from the simplify pass or the review pass.
+
+**Loop Control:**
+
+- After applying any fix, implementations MUST re-run the test suite to confirm no regressions were introduced.
+- The loop repeats as long as an iteration produced at least one fix (a fix can introduce a new bug or a new simplification opportunity).
+- The loop **converges** when one complete iteration (simplify pass then review pass) produces **no fixes**. Only then is the loop satisfied.
+- Implementations MUST cap the loop at a reasonable iteration count (default: 5 iterations). If the loop has not converged at the cap, implementations MUST stop, document the outstanding findings in the Work Log, and consult the user before marking the task Completed.
+
+**Loop Work Log Entry Format:**
+
+Each iteration MUST be recorded in the Work Log:
+
+```
+[Timestamp] Simplify and Review Loop: Iteration [N]
+- Simplify pass: [N simplifications found] / [list findings or "none"]
+- Simplifications applied: [description or "none"]
+- Review pass: [N bugs found] / [list findings or "none"]
+- Fixes applied: [description or "none"]
+- Tests re-run: [pass/fail result]
+- Converged: [yes/no - yes only when the iteration produced no fixes]
+```
 
 ### TDD Decision Points
 
@@ -512,6 +547,8 @@ Task CANNOT be marked Completed unless:
 - Test coverage meets or exceeds target percentage (if specified)
 - TDD workflow is documented in Work Log
 - No TDD exceptions exist without justification and follow-up plan
+- The Simplify and Review Loop has converged (a full iteration produced no fixes), or the iteration cap was reached and outstanding findings were documented and accepted by the user
+- Each loop iteration is documented in the Work Log
 
 ## 8. Rollback and Recovery Plan
 
@@ -846,7 +883,7 @@ Implementations MUST automatically transition task states when triggering events
 | Work begins on a Ready task | Ready → In Progress | Move from Ready table to In Progress table |
 | Task becomes blocked | In Progress → Blocked | Move to Blocked/Cancelled table with reason |
 | Blocked task can proceed | Blocked → Ready or In Progress | Move back to appropriate table |
-| All acceptance criteria met | In Progress → Completed | Move to Completed table with completion timestamp |
+| All acceptance criteria met AND Simplify and Review Loop converged | In Progress → Completed | Move to Completed table with completion timestamp |
 | Task no longer needed | Any state → Cancelled | Move to Blocked/Cancelled table with reason |
 
 
@@ -979,14 +1016,15 @@ All significant decisions MUST include:
 
 When a task completes, implementations MUST:
 
-1. Update task status to "Completed"
-2. Check all acceptance criteria boxes
-3. Add final progress log entry with summary
-4. Complete the Final Summary section
-5. Update master index with completion date
-6. Move task from In Progress table to Completed table in dashboard
-7. Populate "Completed" and "Duration" columns in dashboard
-8. Update dashboard "Last updated" timestamp
+1. Confirm the Simplify and Review Loop has converged (see Section 7) before declaring completion
+2. Update task status to "Completed"
+3. Check all acceptance criteria boxes
+4. Add final progress log entry with summary
+5. Complete the Final Summary section
+6. Update master index with completion date
+7. Move task from In Progress table to Completed table in dashboard
+8. Populate "Completed" and "Duration" columns in dashboard
+9. Update dashboard "Last updated" timestamp
 
 ### 8.5 Content Preservation
 
@@ -1100,6 +1138,7 @@ Violations of MUST requirements constitute conformance failures.
 - Failing to keep dashboard and task files synchronized (Section 4.3)
 - Creating task files without user request (Section 2.2)
 - Summarizing agent output instead of recording verbatim (Section 8.2)
+- Marking a task Completed before the Simplify and Review Loop has converged, or without documenting each loop iteration in the Work Log (Section 7), is a conformance failure.
 - Failure to immediately and thoroughly update associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
 - Deleting or overwriting previously written task file content (Section 8.5) is a critical conformance failure with zero tolerance for exceptions.
 
