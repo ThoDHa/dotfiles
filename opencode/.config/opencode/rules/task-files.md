@@ -126,9 +126,11 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 ## In Progress
 
-| Task | Progress | Updated | Priority |
-|------|----------|---------|----------|
-| [Task Name](./tasks/20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
+| Task | Progress | What Was Done | Updated | Priority |
+|------|----------|---------------|---------|----------|
+| [Task Name](./tasks/20241222-0710-task-name.md) | 45% | Token refresh wired up; session store integration pending | 2024-12-31 19:45 | High |
+
+**Note:** "What Was Done" is a concise snapshot of the current state, overwritten on each update. It MUST NOT be a running list of every change.
 
 ## Blocked/Cancelled
 
@@ -185,7 +187,7 @@ Required actions (MANDATORY):
 | New task file created | Add entry to appropriate dashboard table (Triage/Ready/In Progress) |
 | Task status changes | Move task between dashboard tables + update task file status |
 | Task file modified | Update "Updated" column in dashboard to current timestamp |
-| Work progresses | Update progress percentage in dashboard (if In Progress) |
+| Work progresses | Update progress percentage and overwrite the "What Was Done" snapshot in dashboard (if In Progress) |
 | Task moves between states | Move row to new table + update all relevant columns |
 | Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
 | Task blocked/cancelled | Move to Blocked/Cancelled table + add "Reason" column |
