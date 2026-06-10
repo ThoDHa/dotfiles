@@ -13,7 +13,8 @@
       "Testing"
     ]
   },
-  "defaultMode": "acceptEdits",
+  "effortLevel": "high",
   "showTurnDuration": false,
-  "effortLevel": "high"
+  "defaultMode": "bypassPermissions",
+  "skipDangerousModePermissionPrompt": true
 }
