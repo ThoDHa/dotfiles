@@ -38,15 +38,25 @@ echo -e "${GREEN}║               Dev Environment Setup & Update               
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Check if configs are stowed
+# Put user-local install dirs on PATH for this script's command -v checks.
+# .zshrc normally adds these, but setup.sh runs in bash without sourcing it.
+export PATH="$HOME/.fzf/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+
+# Install stow first if missing; the make stow/restow targets below need it
+# and a fresh system won't have it.
+if ! command -v stow &> /dev/null; then
+    print_step "Installing stow..."
+    sudo apt-get update
+    sudo apt-get install -y stow
+    print_success "stow installed"
+fi
+
+# Stow configs automatically if not done yet, so this script bootstraps a
+# fresh system end-to-end instead of requiring a separate 'make stow' first.
 if [ ! -L "$HOME/.zshrc" ] && [ ! -f "$HOME/.zshrc" ]; then
-    print_error "Configs not found! Run 'make stow' first."
-    echo ""
-    echo "  cd ~/dotfiles"
-    echo "  make stow"
-    echo "  ./bootstrap/setup.sh"
-    echo ""
-    exit 1
+    print_step "Stowing packages..."
+    make stow
+    print_success "Packages stowed"
 fi
 
 # Step 1: System packages
