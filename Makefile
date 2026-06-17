@@ -98,6 +98,10 @@ clean-stow:
 	@rm -f $(STOW_TARGET)/.config/isort/config.toml
 	@# opencode package
 	@rm -rf $(STOW_TARGET)/.config/opencode
+	@# claudecode package (targeted removal: ~/.claude also holds runtime data)
+	@rm -f $(STOW_TARGET)/.claude/generate-claude-md.sh
+	@rm -f $(STOW_TARGET)/.claude/settings.json
+	@rm -f $(STOW_TARGET)/.claude/.gitignore
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
 # ============================================================================
