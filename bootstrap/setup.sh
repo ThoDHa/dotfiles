@@ -356,12 +356,52 @@ fi
 
 print_success "Claude Code configuration set up"
 
-# Step 12: Post-install verification
+# Step 12: Docker
+print_step "Setting up Docker..."
+
+# Detect distro (sets $ID and $VERSION_CODENAME) for the correct Docker repo
+. /etc/os-release
+
+# Prerequisites for Docker's apt repository
+sudo apt-get install -y ca-certificates curl gnupg
+
+# Docker's official GPG key (skip if already present)
+sudo install -m 0755 -d /etc/apt/keyrings
+if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+    curl -fsSL "https://download.docker.com/linux/$ID/gpg" \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
+fi
+
+# Docker apt repository (rewritten each run so arch/codename stay current)
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update
+
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+    docker-buildx-plugin docker-compose-plugin
+
+# Let the current user run docker without sudo (takes effect on next login)
+if ! id -nG "$USER" | grep -qw docker; then
+    sudo usermod -aG docker "$USER"
+    echo "  Added $USER to docker group (run 'newgrp docker' or log out/in to activate)"
+else
+    echo "  $USER already in docker group"
+fi
+
+# Start the daemon now when possible (containers/WSL may lack systemd)
+sudo systemctl enable --now docker 2>/dev/null \
+    || sudo service docker start 2>/dev/null \
+    || echo "  Could not auto-start docker; start it manually if needed"
+
+print_success "Docker configured"
+
+# Step 13: Post-install verification
 print_step "Verifying installation..."
 echo "  Checking installed tools..."
 
 # Check critical tools
-TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "bat" "eza" "stow" "tree" "opencode" "claude")
+TOOLS_TO_CHECK=("git" "zsh" "tmux" "nvim" "node" "fzf" "rg" "fdfind" "bat" "eza" "stow" "tree" "docker" "opencode" "claude")
 FAILED_TOOLS=()
 
 for tool in "${TOOLS_TO_CHECK[@]}"; do
@@ -419,7 +459,8 @@ echo "Next steps:"
 echo "  1. Restart your shell:         exec zsh"
 echo "  2. Open tmux and press:        prefix + I (to install plugins)"
 echo "  3. Open nvim:                  Lazy will auto-install plugins"
+echo "  4. Activate docker (if new):   newgrp docker  (or log out and back in)"
 echo ""
 echo "All Node.js tools are now available for NeoVim plugins!"
-echo "Modern tools installed: stow, eza (ls replacement), fzf, ripgrep, fd, bat, tree"
+echo "Modern tools installed: stow, eza (ls replacement), fzf, ripgrep, fd, bat, tree, docker"
 echo ""
