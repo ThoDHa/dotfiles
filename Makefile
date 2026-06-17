@@ -1,145 +1,110 @@
-CURRENT_DIR := $(shell basename $$PWD)
-CONTAINER := base_dev
+CURRENT_DIR := $(notdir $(CURDIR))
+CONTAINER   := base_dev
 
 # Stow packages (Linux dotfiles)
 STOW_PACKAGES := shell tmux isort opencode claudecode
-STOW_TARGET := $(HOME)
+STOW_TARGET   := $(HOME)
 
 # OpenCode personality paths
-# Source paths (in dotfiles repo) - used for personality switching
 OPENCODE_SRC_RULES := $(CURDIR)/opencode/.config/opencode/rules
-OPENCODE_SRC_REF := $(CURDIR)/opencode/.config/opencode/reference
-# Target paths (after stow) - used for testing
+# Target paths (after stow) — used for testing
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
-OPENCODE_REF := $(STOW_TARGET)/.config/opencode/reference
 
 # Claude Code paths
-CLAUDECODE_SRC := $(CURDIR)/claudecode/.claude
+CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
-CLAUDECODE_OUTPUT := $(STOW_TARGET)/.claude/CLAUDE.md
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-wukong personality-none clean-stow test test-links test-rules
-.PHONY: sync-claudecode stow-claudecode unstow-claudecode
-.PHONY: restow-shell unstow-shell
+.PHONY: personality-none clean-stow test test-links test-rules
+.PHONY: sync-claudecode stow-claudecode
 
 # Default target
 all: help
 
+# ── Loop macro ────────────────────────────────────────────────────────────────
+# $(call stow_all, STOW_FLAGS, VERB) — iterate $(STOW_PACKAGES) with given flags
+define stow_all
+@for pkg in $(STOW_PACKAGES); do \
+    echo "  $(2)ing $$pkg..."; \
+    stow -v $(1) -t $(STOW_TARGET) $$pkg; \
+done
+endef
+
 # Stow all packages to home directory
 stow:
 	@echo "Stowing packages to $(STOW_TARGET)..."
-	@for pkg in $(STOW_PACKAGES); do \
-		echo "  Stowing $$pkg..."; \
-		stow -v --no-folding -t $(STOW_TARGET) $$pkg; \
-	done
+	$(call stow_all,--no-folding,Stow)
 	@echo "Done! All packages stowed."
 
 # Unstow all packages
 unstow:
 	@echo "Unstowing packages from $(STOW_TARGET)..."
-	@for pkg in $(STOW_PACKAGES); do \
-		echo "  Unstowing $$pkg..."; \
-		stow -v -D -t $(STOW_TARGET) $$pkg; \
-	done
+	$(call stow_all,-D,Unstow)
 	@echo "Done! All packages unstowed."
 
 # Restow (unstow then stow) - useful for updating
 restow:
 	@echo "Restowing packages to $(STOW_TARGET)..."
-	@for pkg in $(STOW_PACKAGES); do \
-		echo "  Restowing $$pkg..."; \
-		stow -v --no-folding -R -t $(STOW_TARGET) $$pkg; \
-	done
+	$(call stow_all,--no-folding -R,Restow)
 	@echo "Done! All packages restowed."
 
-# Restow shell package only
-restow-shell:
-	@echo "Restowing shell package..."
-	stow -v --no-folding -R -t $(STOW_TARGET) shell
-	@echo "Done! Shell package restowed."
-
-# Unstow shell package only
-unstow-shell:
-	@echo "Unstowing shell package..."
-	stow -v -D -t $(STOW_TARGET) shell
-	@echo "Done! Shell package unstowed."
-
-# Stow individual packages
+# Stow / unstow / restow individual packages
 stow-%:
 	@echo "Stowing $*..."
 	stow -v --no-folding -t $(STOW_TARGET) $*
 
-# Unstow individual packages
 unstow-%:
 	@echo "Unstowing $*..."
 	stow -v -D -t $(STOW_TARGET) $*
+
+restow-%:
+	@echo "Restowing $*..."
+	stow -v --no-folding -R -t $(STOW_TARGET) $*
 
 # Dry run - preview what would be stowed
 dry-run:
 	@echo "Dry run - showing what would be stowed..."
 	@for pkg in $(STOW_PACKAGES); do \
-		echo "\n=== $$pkg ==="; \
+		printf '\n=== %s ===\n' "$$pkg"; \
 		stow -n -v --no-folding -t $(STOW_TARGET) $$pkg 2>&1 || true; \
 	done
 
-# Clean up conflicting files/symlinks before stowing
-# Removes any existing files that would conflict with stow
+# Clean up files that external tools are known to clobber before stowing.
+# Each entry is intentional — do not remove without understanding the conflict:
+#   .zshrc                     — overwritten by oh-my-zsh --unattended installer
+#   .tmux.conf                 — may exist from a prior manual tmux setup
+#   tmux-sessionizer/windowizer — may exist from a prior manual install
+#   isort config               — may exist from a prior isort install
+#   .config/opencode           — may exist from a prior opencode install
+#   .claude/{...}              — targeted removal: ~/.claude also holds runtime data
 clean-stow:
 	@echo "Cleaning up conflicting files for stow..."
-	@# shell package
-	@rm -f $(STOW_TARGET)/.zshrc
-	@# tmux package
-	@rm -f $(STOW_TARGET)/.tmux.conf
-	@# tmux scripts
-	@rm -f $(STOW_TARGET)/.local/bin/tmux-sessionizer
-	@rm -f $(STOW_TARGET)/.local/bin/tmux-windowizer
-	@# isort package
-	@rm -f $(STOW_TARGET)/.config/isort/config.toml
-	@# opencode package
+	@rm -f \
+		$(STOW_TARGET)/.zshrc \
+		$(STOW_TARGET)/.tmux.conf \
+		$(STOW_TARGET)/.local/bin/tmux-sessionizer \
+		$(STOW_TARGET)/.local/bin/tmux-windowizer \
+		$(STOW_TARGET)/.config/isort/config.toml \
+		$(STOW_TARGET)/.claude/generate-claude-md.sh \
+		$(STOW_TARGET)/.claude/settings.json \
+		$(STOW_TARGET)/.claude/.gitignore
 	@rm -rf $(STOW_TARGET)/.config/opencode
-	@# claudecode package (targeted removal: ~/.claude also holds runtime data)
-	@rm -f $(STOW_TARGET)/.claude/generate-claude-md.sh
-	@rm -f $(STOW_TARGET)/.claude/settings.json
-	@rm -f $(STOW_TARGET)/.claude/.gitignore
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
-# ============================================================================
-# OpenCode Personality Switching
-# ============================================================================
-# Usage:
-#   make personality-wukong   # Set Wukong as active personality
-#   make personality-none     # Remove personality (use default OpenCode)
-#
-# The personality is set by symlinking rules/personality.md to the desired
-# reference file in the SOURCE dotfiles. OpenCode loads all rules/*.md files.
-# ============================================================================
+# ── OpenCode Personality ──────────────────────────────────────────────────────
 
- personality-wukong:
-	@echo "Setting Wukong as active personality..."
-	@ln -sf ../reference/wukong.md $(OPENCODE_SRC_RULES)/personality.md
-	@echo "Done! Wukong is now the active personality."
+# Set active personality by name — must match a file in reference/
+personality-%:
+	@echo "Setting $* as active personality..."
+	@ln -sf ../reference/$*.md $(OPENCODE_SRC_RULES)/personality.md
+	@echo "Done! $* is now the active personality."
 
 personality-none:
 	@echo "Removing personality (using default OpenCode)..."
 	@rm -f $(OPENCODE_SRC_RULES)/personality.md
 	@echo "Done! Default OpenCode will be used (no personality)."
 
-# Override stow-opencode (just stows, personality is already in source)
-stow-opencode:
-	@echo "Stowing opencode..."
-	stow -v --no-folding -t $(STOW_TARGET) opencode
-	@echo "Done! OpenCode stowed."
-
-# ============================================================================
-# Claude Code Configuration
-# ============================================================================
-# Generates CLAUDE.md from opencode rules for Claude Code to use
-# Usage:
-#   make sync-claudecode    - Regenerate CLAUDE.md from opencode rules
-#   make stow-claudecode     - Stow claudecode package
-#   make unstow-claudecode   - Unstow claudecode package
-# ============================================================================
+# ── Claude Code Configuration ─────────────────────────────────────────────────
 
 # Sync Claude Code config with opencode rules
 sync-claudecode:
@@ -148,18 +113,14 @@ sync-claudecode:
 	@$(CLAUDECODE_GENERATOR)
 	@echo "Done! Claude Code now shares opencode configuration."
 
-# Stow claudecode package
+# Stow claudecode package then sync.
+# $(MAKE) sync-claudecode is a recipe command (not a prerequisite) because stow
+# must complete before sync writes to the stowed symlink target.
 stow-claudecode:
 	@echo "Stowing claudecode..."
 	stow -v --no-folding -t $(STOW_TARGET) claudecode
 	@echo "Done! Claude Code configuration stowed."
 	@$(MAKE) sync-claudecode
-
-# Unstow claudecode package
-unstow-claudecode:
-	@echo "Unstowing claudecode..."
-	stow -v -D -t $(STOW_TARGET) claudecode
-	@echo "Done! Claude Code configuration unstowed."
 
 # Full bootstrap - install/update all dev tools
 bootstrap:
@@ -176,12 +137,10 @@ run:
 build:
 	docker build -t $(CONTAINER) --no-cache -f bootstrap/Dockerfile .
 
-# ============================================================================
-# Testing
-# ============================================================================
+# ── Testing ───────────────────────────────────────────────────────────────────
 
-# Expected rules files (all *.md files in rules directory)
-EXPECTED_RULES := coding-standards.md core.md delegation.md documentation-standards.md execution-standards.md git-protocol.md task-files.md personality.md
+# Discover expected rules from the source directory automatically
+EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 
 # Test all symlinks exist and opencode loads rules
 test: test-links test-rules
@@ -231,18 +190,18 @@ help:
 	@echo "  make restow      - Update symlinks (unstow + stow)"
 	@echo "  make dry-run     - Preview what would be stowed"
 	@echo "  make clean-stow  - Remove conflicting files before stowing"
-	@echo "  make stow-PKG    - Stow a single package (e.g., make stow-shell)"
-	@echo "  make unstow-PKG  - Unstow a single package"
+	@echo "  make stow-PKG    - Stow a single package   (e.g., make stow-shell)"
+	@echo "  make unstow-PKG  - Unstow a single package (e.g., make unstow-shell)"
+	@echo "  make restow-PKG  - Restow a single package (e.g., make restow-shell)"
 	@echo ""
 	@echo "OpenCode Personality:"
-	@echo "  make stow-opencode       - Stow opencode + set Wukong as default"
-	@echo "  make personality-wukong  - Switch to Wukong personality"
-	@echo "  make personality-none    - Remove personality (use default)"
+	@echo "  make personality-THEME  - Set personality (e.g., make personality-wukong)"
+	@echo "  make personality-none   - Remove personality (use default)"
 	@echo ""
 	@echo "Claude Code Configuration:"
 	@echo "  make sync-claudecode    - Sync CLAUDE.md with opencode rules"
-	@echo "  make stow-claudecode     - Stow claudecode package (auto-syncs)"
-	@echo "  make unstow-claudecode   - Unstow claudecode package"
+	@echo "  make stow-claudecode    - Stow claudecode package (auto-syncs)"
+	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test        - Run all tests (symlinks + rules loading)"
