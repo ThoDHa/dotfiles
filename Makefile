@@ -35,6 +35,7 @@ stow:
 	@echo "Stowing packages to $(STOW_TARGET)..."
 	$(call stow_all,--no-folding,Stow)
 	@echo "Done! All packages stowed."
+	@$(MAKE) sync-claudecode
 
 # Unstow all packages
 unstow:
@@ -46,6 +47,7 @@ unstow:
 restow:
 	@echo "Restowing packages to $(STOW_TARGET)..."
 	$(call stow_all,--no-folding -R,Restow)
+	@$(MAKE) sync-claudecode
 	@echo "Done! All packages restowed."
 
 # Stow / unstow / restow individual packages
