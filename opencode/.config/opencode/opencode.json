@@ -10,6 +10,6 @@
     "~/.config/opencode/rules/task-files.md"
   ],
   "plugin": [
-    "/home/thodha/.nvm/versions/node/v24.14.1/lib/node_modules/@rynfar/meridian/plugin/meridian.ts"
+    "~/.nvm/versions/node/v24.16.0/lib/node_modules/@rynfar/meridian/plugin/meridian.ts"
   ]
 }
