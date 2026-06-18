@@ -454,6 +454,127 @@ Use formal documentation (README, API docs, architecture docs) for:
 
 Formal documentation MUST maintain professional tone and structured format, suitable for external audiences or formal review.
 
+### 6.7 Comment Minimalism Requirements
+
+Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, Section 6.4 governs its style.
+
+#### 6.7.1 Default Absence Principle
+
+Comments MUST be absent by default. The baseline rule is simple: do not write comments unless asked.
+
+Implementations MUST NOT add comments unless one of the following is true:
+
+1. **The user explicitly requests commentary** — this is the primary and expected path for any comment.
+2. **The narrow autonomous exception** in Section 6.7.1.1 applies.
+
+When the user has not explicitly asked for comments, implementations MUST assume no comments are wanted and produce clean, self-explanatory code instead.
+
+#### 6.7.1.1 Autonomous Comment Exception
+
+A comment MAY be added without an explicit user request ONLY when ALL of the following are true:
+
+- The code genuinely cannot express its intent on its own
+- The attempts below to make the code self-explanatory have been exhausted
+- The comment explains non-obvious WHY, not WHAT (per Section 6.4)
+- Removing the comment would leave a future reader genuinely confused
+
+Before writing an autonomous comment, implementations MUST first attempt to make the code self-explanatory through:
+
+- Renaming variables, functions, or types for clarity
+- Extracting logic into named functions
+- Simplifying complex expressions
+- Introducing named constants for magic values
+
+If intent remains non-obvious ONLY after these attempts AND the comment explains WHY (not WHAT), the comment is permitted. Otherwise, no comment is written.
+
+#### 6.7.2 Redundant Comment Prohibition
+
+Implementations MUST NOT write comments that restate what the code already expresses. Redundant comments are noise that adds maintenance burden without insight.
+
+**Prohibited redundancy:**
+
+```python
+# ❌ Prohibited: restates the code
+counter = 0  # Initialize counter to zero
+
+# ❌ Prohibited: narrates obvious control flow
+for item in items:
+    process(item)  # Process each item
+
+# ❌ Prohibited: restates the function name
+def validate_email(address):
+    # Validate the email address
+    ...
+```
+
+If a comment can be deleted and the code remains equally clear, the comment MUST be deleted.
+
+#### 6.7.3 Prohibited Comment Patterns
+
+Implementations MUST NOT use filler markers or formulaic comment conventions. These add no information and read as padding.
+
+**Prohibited markers and patterns:**
+
+- Imperative preambles: `Note:`, `Important:`, `Consider:`, `NB:`, `FYI:`, `Remember:`, `Warning:`
+- Signature restatement: `This function...`, `This method...`, `Here we...`, `Below we...`, `Now we...`
+- Section banners: `# ---------- Setup ----------`, `# ============ Helpers ============`, `# ### Main ###`
+- Placeholder TODOs lacking owner, context, or tracking reference: `# TODO: improve this`, `# FIXME later`, `# refactor at some point`
+
+A bare `TODO` or `FIXME` is acceptable ONLY when it includes a concrete description AND a tracking reference (issue number, ticket, or design doc).
+
+```python
+# ❌ Prohibited: empty placeholder
+# TODO: improve
+data = load()
+
+# ✅ Acceptable: concrete and tracked
+# TODO(#142): stream from disk once files exceed 1 GB
+data = load()
+```
+
+#### 6.7.4 Comment Density as a Complexity Signal
+
+If a function, block, or module requires many comments to be understood, the code is too complex. Implementations MUST treat dense comments as a signal to refactor, not as a reason to annotate.
+
+Required response to dense comments:
+
+1. Simplify the code first (extract functions, rename, reduce branching)
+2. Move explanatory context to commit messages or formal documentation where appropriate
+3. Keep only comments that explain non-obvious WHY after simplification
+
+Comments MUST NOT compensate for poor naming, deep nesting, or tangled control flow. If a comment exists to explain HOW the code works, the code MUST be rewritten until the comment becomes unnecessary.
+
+#### 6.7.5 Over-Documentation Prohibition
+
+Implementations MUST NOT add docstrings or comments to trivial constructs:
+
+- Getters, setters, and simple property accessors
+- One-line functions whose name fully describes their behavior
+- Obvious return statements
+- Standard language idioms familiar to the target audience
+
+Trivial constructs that speak for themselves require zero commentary.
+
+#### 6.7.6 Section Commentary Prohibition
+
+Implementations MUST NOT decorate code with ornamental section headers, file-level manifestos, or closing summaries.
+
+**Prohibited:**
+
+```python
+# ============================================
+# IMPORTS
+# ============================================
+
+# --------------------------------------------
+# Public API
+# --------------------------------------------
+
+# End of file - everything above is tested
+```
+
+Standard language conventions for module organization (package declarations, import grouping enforced by linters) are exempt. Hand-written banner comments are not.
+
 ---
 
 ## 7. Type Safety Requirements
