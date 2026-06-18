@@ -4,12 +4,10 @@
     "~/.config/opencode/rules/core.md",
     "~/.config/opencode/rules/personality.md",
     "~/.config/opencode/rules/coding-standards.md",
+    "~/.config/opencode/rules/documentation-standards.md",
     "~/.config/opencode/rules/execution-standards.md",
     "~/.config/opencode/rules/delegation.md",
     "~/.config/opencode/rules/git-protocol.md",
     "~/.config/opencode/rules/task-files.md"
-  ],
-  "plugin": [
-    "~/.nvm/versions/node/v24.16.0/lib/node_modules/@rynfar/meridian/plugin/meridian.ts"
   ]
 }
