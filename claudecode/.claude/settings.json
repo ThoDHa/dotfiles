@@ -13,7 +13,10 @@
     ]
   },
   "effortLevel": "high",
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
   "showTurnDuration": false,
-  "defaultMode": "bypassPermissions",
-  "skipDangerousModePermissionPrompt": true
+  "permissions": {
+    "defaultMode": "auto"
+  }
 }
