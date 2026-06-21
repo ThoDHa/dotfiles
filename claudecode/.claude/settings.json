@@ -16,6 +16,7 @@
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
   "showTurnDuration": false,
+  "includeCoAuthoredBy": false,
   "permissions": {
     "defaultMode": "auto"
   }
