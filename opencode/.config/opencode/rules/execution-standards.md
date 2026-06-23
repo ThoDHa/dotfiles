@@ -13,13 +13,13 @@ This specification defines requirements for task execution, priority handling, a
 
 **Task Management Context:** When users refer to "tasks," this encompasses BOTH:
 - **TodoWrite todos**: Lightweight tracking via the TodoWrite tool for standard work
-- **Task files**: Comprehensive documentation files (see `task-files.md`) for complex operations
+- **Task files**: Comprehensive documentation files (see [`task-files.md`](task-files.md)) for complex operations
 
 ### 1.1 Related Specifications
 
-- `core.md`: Core behavioral requirements
-- `delegation.md`: Manager Mode and delegation requirements
-- `coding-standards.md`: Technical implementation requirements
+- [`core.md`](core.md): Core behavioral requirements
+- [`delegation.md`](delegation.md): Manager Mode and delegation requirements
+- [`coding-standards.md`](coding-standards.md): Technical implementation requirements
 
 ---
 
@@ -39,6 +39,8 @@ When user requirements conflict with this hierarchy, user requirements take prec
 ---
 
 ## 3. Required Behaviors
+
+This table summarizes behaviors defined authoritatively elsewhere: clarification follows the ["Clarification Protocol" in `core.md`](core.md#31-clarification-protocol), and honesty, persistence, transparency, and help-seeking follow the corresponding requirements in [`core.md`](core.md). The execution-specific rows govern priority and authority during task execution.
 
 Implementations MUST maintain these behavioral standards:
 
@@ -81,7 +83,9 @@ Implementations MUST wait for user response before proceeding.
 | User Response Pattern | Required Action |
 |----------------------|-----------------|
 | "sequential", "yourself", "one by one", or similar | Continue in normal execution mode |
-| "parallel", "delegate", "manager", or similar | Activate Manager Mode (see `delegation.md`) |
+| "parallel", "delegate", "manager", or similar | Activate Manager Mode (see [`delegation.md`](delegation.md)) |
+
+The keywords in each row are accepted synonyms for the two options presented in the [Section 4.2](#42-required-prompt) prompt ("Sequential" and "Parallel delegation"). Any answer matching a row's synonyms maps to that option's action.
 
 Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
 
@@ -89,19 +93,15 @@ Implementations MUST NOT proceed with complex tasks without user direction on ex
 
 ## 5. Standard Parallel Operations
 
-### 5.1 Parallel Execution Requirement
+### 5.1 Parallelization Conditions
 
-Even outside Manager Mode, implementations MUST parallelize work when conditions permit.
-
-### 5.2 Parallelization Conditions
-
-Implementations MUST spawn parallel agents when ALL of the following are true:
+Even outside Manager Mode, implementations MUST spawn parallel agents when ALL of the following are true:
 
 - 2-3 independent tasks exist that do not depend on each other
 - Tasks can be completed faster in parallel
 - No risk of file conflicts between agents exists
 
-### 5.3 Execution Protocol
+### 5.2 Execution Protocol
 
 For small parallelization (2-3 agents), implementations MUST proceed directly without:
 
@@ -109,34 +109,18 @@ For small parallelization (2-3 agents), implementations MUST proceed directly wi
 - Entering Manager Mode
 - Asking "should I parallelize?"
 
-### 5.4 Mode Distinction
+### 5.3 Mode Distinction
 
 | Mode | Behavior |
 |------|----------|
 | **Standard + Parallel** | Implementation remains primary worker, spawning helpers for specific subtasks |
-| **Manager Mode** | Implementation coordinates entirely, delegating all execution to agents |
+| **Manager Mode** | As defined in the ["Manager Mode Definition" section of `delegation.md`](delegation.md#2-manager-mode-definition) |
 
 ---
 
 ## 6. Parallel Safety Requirements
 
-### 6.1 File Conflict Prevention
-
-Implementations MUST NOT spawn parallel agents that modify the same file.
-
-### 6.2 Dependency Respect
-
-If Task B depends on Task A's output, implementations MUST run them sequentially.
-
-### 6.3 Pre-Dispatch Verification
-
-Before dispatching parallel agents, implementations MUST verify:
-
-1. Each agent has distinct territory (files/modules it will modify)
-2. No two agents will write to the same file
-3. Task dependencies are respected
-
-If conflicts are unavoidable, implementations MUST run tasks sequentially.
+The authoritative parallel-safety requirements (file-conflict prevention, dependency sequencing, boundary isolation, and pre-dispatch verification) are defined in the ["Safety Requirements" section of `delegation.md`](delegation.md#5-safety-requirements). Those requirements apply to ALL parallel operations, including standard parallel operations performed outside Manager Mode.
 
 ---
 
@@ -144,7 +128,7 @@ If conflicts are unavoidable, implementations MUST run tasks sequentially.
 
 ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
-Violations of the Task Complexity Protocol (Section 4) are considered serious conformance failures as they remove user control over execution strategy.
+Violations of the Task Complexity Protocol ([Section 4](#4-task-complexity-protocol)) are considered serious conformance failures as they remove user control over execution strategy.
 
 ---
 

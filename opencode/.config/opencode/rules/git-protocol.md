@@ -13,8 +13,8 @@ This specification defines requirements for version control operations, includin
 
 ### 1.1 Related Specifications
 
-- `core.md`: Core behavioral requirements (formal output standards)
-- `coding-standards.md`: Technical implementation requirements
+- [`core.md`](core.md): Core behavioral requirements (formal output standards)
+- [`coding-standards.md`](coding-standards.md): Technical implementation requirements
 
 ---
 
@@ -32,15 +32,7 @@ Implementations MUST NOT create commits without analyzing the full scope of chan
 
 ### 2.2 Change Identification
 
-Implementations MUST identify and categorize all changes by type:
-
-- Features (new functionality)
-- Fixes (bug corrections)
-- Refactors (structural changes without behavior change)
-- Documentation (docs, comments, README)
-- Tests (test additions or modifications)
-- Chores (dependencies, tooling, configuration)
-- Style (formatting, whitespace)
+Implementations MUST identify and categorize all changes by type, using the canonical type taxonomy defined in [Section 5.2](#52-type-prefixes) "Type Prefixes" (feat, fix, docs, refactor, test, chore, style).
 
 ---
 
@@ -56,9 +48,11 @@ Each commit MUST represent one complete, coherent logical change.
 
 Related changes MUST be grouped together in the same commit:
 
-- A feature with its tests
+- A feature with its new tests
 - A refactor with its updated documentation
-- A fix with its regression test
+- A fix with its new regression test
+
+**Exception:** Changes that ALTER the expected behavior of EXISTING tests MUST be committed separately from the production code, per [`coding-standards.md` "Separation of Code and Test Changes"](coding-standards.md#56-separation-of-code-and-test-changes). New tests written for new code still group with that code.
 
 ### 3.3 Concern Separation
 
@@ -162,14 +156,7 @@ Implementations MUST use this branch naming format:
 
 ### 6.2 Branch Type Prefixes
 
-| Prefix | Purpose |
-|--------|---------|
-| `feat/` | New features |
-| `fix/` | Bug fixes |
-| `refactor/` | Code restructuring |
-| `docs/` | Documentation |
-| `test/` | Test additions |
-| `chore/` | Maintenance tasks |
+Branch prefixes use the same type taxonomy as commit messages (see [Section 5.2](#52-type-prefixes) "Type Prefixes"), written in slash form: `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`.
 
 ### 6.3 Description Requirements
 
@@ -222,7 +209,7 @@ Implementations MUST NOT execute force pushes (`git push --force` or `git push -
 Before proceeding with a force push, implementations MUST:
 
 1. Warn the user about the destructive nature of the operation
-2. Explain what will be overwritten (if detectable)
+2. Attempt to determine and explain what will be overwritten; if it cannot be detected, explicitly state that the overwritten content could not be determined
 3. Ask for explicit confirmation to proceed
 
 Required confirmation prompt:
@@ -237,11 +224,13 @@ Continue with force push? (y/n): _
 
 Strict enforcement: `--no-verify` is a dangerous operation that bypasses important quality and security checks. The following rules are mandatory and non-negotiable.
 
-Strict enforcement: `--no-verify` is a dangerous operation that bypasses important quality and security checks. The following rules apply.
+#### 8.2.1 Automated Processes Prohibition
 
-1. Automated processes prohibition: Automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use the `--no-verify` flag under any circumstances. Any automated attempt to bypass hooks must fail the job and be treated as a security incident.
+Automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use the `--no-verify` flag under any circumstances. Any automated attempt to bypass hooks must fail the job and be treated as a security incident.
 
-2. Human interactive usage: Human users MUST NOT use `--no-verify` except when all of the following conditions are met:
+#### 8.2.2 Human Interactive Usage
+
+Human users MUST NOT use `--no-verify` except when all of the following conditions are met:
 
    a. The user is shown an explicit warning that pre-commit and commit-msg hooks will be bypassed.
 
@@ -251,15 +240,23 @@ Strict enforcement: `--no-verify` is a dangerous operation that bypasses importa
 
    c. The interactive confirmation flow echoes the justification back to the user and requires explicit acceptance. If the justification is blank or the user declines, the commit MUST be aborted.
 
-3. Mandatory logging: The act of using `--no-verify` MUST be recorded immediately in the repository under `.opencode/no-verify.log`. Each log entry MUST include: ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash. The repository MUST track this file in source control or via an auditable mechanism.
+#### 8.2.3 Mandatory Logging
 
-4. Repository enforcement: Repositories and CI systems MUST implement checks that reject commits or pushes that use `--no-verify` without the required `No-Verify-Reason` footer and a matching log entry. Hooks or CI jobs that enforce this policy are REQUIRED.
+The act of using `--no-verify` MUST be recorded immediately in the repository under `.opencode/no-verify.log`. Each log entry MUST include: ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash. The repository MUST track this file in source control or via an auditable mechanism.
 
-5. Escalation and conformance: Any use of `--no-verify` that does not follow these rules is a critical conformance failure. Such incidents MUST be reported immediately to repository maintainers and operational security contacts. A maintainer-level investigation MUST occur and a remediation plan documented.
+**Note:** Because `.opencode/` is recommended for gitignore (see [`task-files.md`](task-files.md#33-gitignore-recommendation)), this audit log MUST be explicitly un-ignored (for example, a `!.opencode/no-verify.log` negation rule) or stored in an equivalent auditable location, so the log remains tracked and tamper-evident.
+
+#### 8.2.4 Repository Enforcement
+
+Repositories and CI systems MUST implement checks that reject commits or pushes that use `--no-verify` without the required `No-Verify-Reason` footer and a matching log entry. Hooks or CI jobs that enforce this policy are REQUIRED.
+
+#### 8.2.5 Escalation and Conformance
+
+Any use of `--no-verify` that does not follow these rules is a critical conformance failure. Such incidents MUST be reported immediately to repository maintainers and operational security contacts. A maintainer-level investigation MUST occur and a remediation plan documented.
 
 ### 8.3 Safe Push Behavior
 
-Implementations MAY use `git push --force-with-lease` instead of `git push --force` when appropriate.
+When a force push is unavoidable and approved per [Section 8.1](#81-force-push-protection), implementations MUST use `git push --force-with-lease` instead of `git push --force` (or `git push -f`), except where `--force-with-lease` cannot establish the remote's expected ref-state, in which case the explicit `--force-with-lease=<refname>:<expected>` form MUST be used.
 
 `force-with-lease` is safer because it checks if the remote branch has been updated by others before overwriting.
 
@@ -267,11 +264,9 @@ Implementations MAY use `git push --force-with-lease` instead of `git push --for
 
 ## 9. Conformance
 
-ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
+ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure, including the message quality requirements in [Section 5.5](#55-message-quality) and the destructive operation safety requirements in [Section 8](#8-destructive-operation-safety).
 
-Poorly formatted or unclear commit messages degrade repository history and are considered conformance failures.
-
-Proceeding with force pushes or --no-verify commits without user confirmation is a critical safety violation and constitutes immediate conformance failure.
+Proceeding with a force push without the explicit user confirmation required by [Section 8.1](#81-force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [Section 8.2](#82-no-verify-protection), is a critical safety violation and constitutes immediate conformance failure.
 
 ---
 
