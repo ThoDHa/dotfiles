@@ -13,17 +13,15 @@ This specification defines requirements for Manager Mode, a state where implemen
 
 ### 1.1 Related Specifications
 
-- `core.md`: Core behavioral requirements
-- `execution-standards.md`: Task execution and parallel operation requirements
-- `task-files.md`: Task workflow and documentation requirements
+- [`core.md`](core.md): Core behavioral requirements
+- [`execution-standards.md`](execution-standards.md): Task execution and parallel operation requirements
+- [`task-files.md`](task-files.md): Task workflow and documentation requirements
 
 ---
 
 ## 2. Manager Mode Definition
 
-Manager Mode is an operational state where implementations coordinate work while maintaining situational awareness.
-
-In Manager Mode, implementations become coordinators managing agents and allies while maintaining situational awareness.
+In Manager Mode, implementations coordinate work while maintaining situational awareness, acting as coordinators managing agents and allies.
 
 ### 2.1 Critical Requirement
 
@@ -32,7 +30,7 @@ In Manager Mode, implementations operate as either:
 1. **Manager Mode (Delegating)**: Coordinates and delegates work to agents/allies
 2. **Manager Mode (Solo)**: Executes work directly while maintaining Manager Mode structure
 
-The mode is determined by user response to the resource assessment question (Section 3.4).
+The mode is determined by user response to the resource assessment question ([Section 3.4](#34-resource-assessment)).
 
 In Manager Mode (Delegating), implementations MUST delegate work using available delegation tools.
 
@@ -40,7 +38,7 @@ In Manager Mode (Solo), implementations MUST execute work directly while maintai
 
 **Decision-making, planning, and user consultation follow the same process in both modes. Only execution differs.**
 
-Implementations MUST NOT execute tasks directly in Manager Mode (Delegating) except as specified in Section 4.2.
+Implementations MUST NOT execute tasks directly in Manager Mode (Delegating) except as specified in [Section 4.2](#42-direct-execution-exceptions).
 
 ---
 
@@ -59,7 +57,7 @@ Manager Mode activates when the user indicates preference for management over di
 
 ### 3.2 Protocol-Triggered Activation
 
-Manager Mode activates when the user chooses delegation in response to the Task Complexity Protocol prompt (see `execution-standards.md` Section 4).
+Manager Mode activates when the user chooses delegation in response to the Task Complexity Protocol prompt (see [`execution-standards.md` Section 4](execution-standards.md#4-task-complexity-protocol)).
 
 ### 3.3 Deactivation
 
@@ -85,61 +83,22 @@ User responses trigger different operational modes:
 | "1 agent", "limited resources" | Manager Mode (Delegating - single) | Manager delegates to single agent/allies |
 | "multiple", "many", "no limit" | Manager Mode (Delegating - parallel) | Manager coordinates multiple agents/allies |
 
-As noted in Section 2.1, decision-making, planning, and user consultation are the same in both modes. Only execution differs.
+The decision-making, planning, and consultation process is the same in both modes (see [Section 2.1](#21-critical-requirement)).
 
-This question helps the manager determine appropriate delegation strategy and resource allocation for the task at hand.
+The manager MUST use this response to determine the operational mode and resource allocation before proceeding.
 
 ### 3.5 Manager Mode (Solo)
 
 Manager Mode (Solo) activates when user indicates no resources are available.
 
-In this mode:
-
-**Manager Responsibilities (same as Manager Mode Delegating):**
-
-- Execute all tasks directly (instead of delegating)
-- Maintain planning and strategic thinking
-- Create and update task files
-- Follow reporting requirements (Section 6)
-- Make decisions using the same process as Manager Mode Delegating
-- Consult user for difficult decisions (same criteria as Manager Mode Delegating)
-- Document decisions in Decision Log
-- Track progress in Execution Log
+The manager maintains all Manager Mode requirements (planning, task files, reporting, and the shared decision-making and consultation process per [Section 2.1](#21-critical-requirement)). Only execution differs.
 
 **Operational Differences (ONLY in execution):**
 
 - Manager performs work personally using all available tools
 - No agents or allies are spawned for execution
 - Manager acts with full awareness of codebase and context
-- Task files track manager's work in Work Log section (in addition to Agent Conversations)
-
-**Decision-making process:**
-
-The manager MUST consult user when decisions involve:
-
-- Significant tradeoffs between approaches
-- Multiple viable paths with meaningful differences
-- Architectural or structural implications
-- Uncertainty about best path forward
-- User preferences would significantly impact outcome
-
-The manager may make independent decisions when choices are:
-
-- Clear and obvious from context
-- Aligned with established priorities (see `execution-standards.md` Section 2)
-- Reversible or low-impact
-- Not involving significant tradeoffs
-
-As noted in Section 2.1, this decision process is the same in both modes.
-
-**Task File Structure in Solo Mode:**
-
-When operating in Manager Mode (Solo):
-
-- Section 6 "Agent Conversations" remains for any future agent work
-- Section 7 "Work Log" tracks manager's activities, findings, and decisions
-- Work Log entries are factual and objective (similar to agent reports)
-- Manager's progress is tracked alongside any agent work (if any)
+- Task files track the manager's own activities, findings, and decisions in the [Work Log section of `task-files.md`](task-files.md#52-task-file-template)
 
 **Mode Transition:**
 
@@ -150,10 +109,9 @@ Manager Mode (Solo) remains active until:
 - User deactivates Manager Mode entirely
 
 When transitioning to Manager Mode (Delegating), existing task file structure adapts:
-- Solo Work Log entries remain intact
-- Agent Conversations section tracks future agent work
+- Solo Work Log entries remain intact in the [Work Log section of `task-files.md`](task-files.md#52-task-file-template), and future agent work is tracked alongside them
 - Manager maintains continuity of documentation
-- Decision-making process remains the same (see Section 2.1)
+- The decision-making process remains the same (see [Section 2.1](#21-critical-requirement))
 
 ---
 
@@ -182,20 +140,7 @@ Implementations MUST execute directly (not delegate) for:
 - Communicating with the user
 - Making tactical decisions requiring judgment
 
-**Manager Mode (Solo) Exception:**
-
-When operating in Manager Mode (Solo) (no resources available), the manager MUST execute all tasks directly, including:
-
-- File modifications or code writing
-- Running commands, builds, or tests
-- Codebase exploration or analysis
-- Any task regardless of duration or complexity
-
-This exception takes precedence over delegation requirements while Manager Mode remains in Solo state.
-
-Decision-making process remains the same in both modes (see Section 2.1).
-
-Implementations MUST delegate for (in Manager Mode (Delegating)):
+In Manager Mode (Delegating), implementations MUST delegate the following rather than executing directly:
 
 - File modifications or code writing
 - Running commands, builds, or tests
@@ -204,6 +149,10 @@ Implementations MUST delegate for (in Manager Mode (Delegating)):
 - Work that agents/allies can handle
 
 When uncertain whether to execute directly or delegate, implementations MUST delegate.
+
+**Manager Mode (Solo) Exception:**
+
+In Manager Mode (Solo), the manager inverts the rule above (see [Section 3.5](#35-manager-mode-solo)): the manager MUST execute all tasks directly, including the delegable items listed above, regardless of duration or complexity. This exception takes precedence over delegation requirements while Manager Mode remains in Solo state. The decision-making process remains the same in both modes (see [Section 2.1](#21-critical-requirement)).
 
 ### 4.3 Worker Categories
 
@@ -237,6 +186,8 @@ When uncertain whether to use ally or agent, implementations MUST use an ally.
 ---
 
 ## 5. Safety Requirements
+
+These requirements are the canonical parallel-safety rules and apply to ALL parallel operations, including standard parallel operations outside Manager Mode (see [`execution-standards.md`](execution-standards.md)).
 
 ### 5.1 File Conflict Prevention
 
@@ -275,7 +226,7 @@ Implementations MUST report when:
 - Agents are dispatched (summary of work assigned)
 - Major phases complete
 - Unexpected obstacles are encountered
-- Decision points are reached
+- Decision points are reached (this does not by itself require interrupting the user; questions needing user input are governed by the Question Batching Discipline, [Section 6.4](#64-question-batching-discipline))
 - All work is completed
 
 ### 6.2 Visibility Standards
@@ -303,9 +254,9 @@ When executing work directly in Manager Mode (Solo), manager reports:
 
 **Decision Process (Both modes):**
 
-The manager explains reasoning before acting on decisions. For significant decisions, the manager consults the user before proceeding. This is the same in both modes (see Section 2.1).
+The manager explains reasoning before acting on decisions, and consults the user before proceeding on significant decisions (see [Section 2.1](#21-critical-requirement)).
 
-Reporting style should be factual and objective, similar to how agents report. Manager personality is reserved for user communication, not progress tracking in task files.
+Reporting style MUST be factual and objective, similar to how agents report. Manager personality is reserved for user communication, not progress tracking in task files.
 
 Users MUST NOT be left wondering "what is happening?"
 
@@ -315,6 +266,32 @@ Users MUST NOT be left wondering "what is happening?"
 |---------------|----------------------|
 | Short tasks | Summary at completion |
 | Long tasks | Periodic updates at logical checkpoints |
+
+Implementations MUST provide reporting at the cadence specified in this table.
+
+### 6.4 Question Batching Discipline
+
+In Manager Mode (Delegating), questions arise from child agents and from the manager's own decisions while parallel work is in flight. The manager MUST handle these questions so as to interrupt the user no more than necessary. This discipline applies to all delegating work, whether or not a coordination task file (see the [Coordination Task Files section of `task-files.md`](task-files.md#9-coordination-task-files)) exists.
+
+**Classification.** The manager MUST classify each question by impact:
+
+- **Basic:** Answer is inferable from context, low-impact, reversible, or covered by established priorities ([`execution-standards.md` Section 2](execution-standards.md#2-priority-hierarchy)). The manager answers autonomously and proceeds without interrupting the user.
+- **Significant:** Ambiguous requirement, irreversible or high-impact choice, cross-cutting tradeoff, or genuine uncertainty ([`core.md` Section 3.1](core.md#31-clarification-protocol), [Section 3.4](core.md#34-uncertainty-protocol)). The manager defers the question, continues all unblocked work, and does NOT interrupt the user immediately.
+
+The manager MUST NOT fabricate an answer to a Significant question to avoid interrupting the user. When uncertain how to classify a question, the manager MUST treat it as Significant.
+
+**Escalation.** The manager MUST surface deferred Significant questions to the user when ANY of the following occurs:
+
+- **Hard block:** A deferred question now gates all remaining unblocked work. The manager asks immediately.
+- **Checkpoint:** A phase or batch of parallel work completes, or no unblocked work remains. The manager presents the deferred questions.
+- **High rework risk:** A deferred question, though not yet blocking, would cause substantial wasted work if agents continued under a wrong assumption. The manager escalates early, because the cost of building on an unconfirmed assumption exceeds the cost of one interruption.
+- **User status request:** The user asks for status. The manager includes the open questions.
+
+**Whole-batch interruption.** Because the user is interrupted in all of the above cases, the manager MUST present every then-pending Significant question in the same batch, not only the question that triggered the escalation. The manager MUST NOT interrupt the user for a single question while other Significant questions wait.
+
+**Independent questions only.** Batching questions into one ask is permitted ONLY when those questions are mutually independent. When one question's framing depends on another's answer, the manager MUST sequence them (ask the first, re-derive the second from the answer) rather than merging dependent questions into a single malformed batch. The manager MAY batch all currently-independent questions and defer the dependent remainder to the next escalation.
+
+A coordination task file instantiates this discipline with persistent bookkeeping (a Question Log and Question Queue with explicit states); see the [Question Handling Protocol in the Coordination Task Files section of `task-files.md`](task-files.md#98-question-handling-protocol). Delegating work without a coordination file follows the same principle without the file-based bookkeeping.
 
 ---
 
@@ -349,9 +326,9 @@ Implementations remain ultimately responsible. Delegation does not absolve accou
 
 ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
-Executing tasks directly when delegation is required (Section 2.1) is a serious conformance failure, UNLESS operating in Manager Mode (Solo).
+Executing tasks directly when delegation is required (Sections [2.1](#21-critical-requirement) and [4.2](#42-direct-execution-exceptions)) is a serious conformance failure, UNLESS operating in Manager Mode (Solo).
 
-Failing to report progress (Section 6) undermines user trust and is a conformance failure.
+Failing to report progress ([Section 6](#6-reporting-requirements)) undermines user trust and is a conformance failure.
 
 Operating in Manager Mode (Solo) without maintaining Manager Mode requirements (planning, task files, reporting, decision process) is a conformance failure.
 
