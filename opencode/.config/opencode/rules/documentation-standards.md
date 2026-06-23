@@ -13,12 +13,14 @@ This specification defines requirements for documentation, README files, and pro
 
 ### 1.1 Related Specifications
 
-- `coding-standards.md`: Technical implementation requirements
-- `core.md`: Core behavioral requirements
+- [`coding-standards.md`](coding-standards.md): Technical implementation requirements
+- [`core.md`](core.md): Core behavioral requirements
 
 ---
 
 ## 2. Prohibited Writing Patterns
+
+**Scope of Sections [2](#2-prohibited-writing-patterns) and [3](#3-punctuation-requirements):** These rules govern prose. They do NOT apply to table cells, fenced code examples, or `term: definition` reference lists (including the illustrative tables, code fences, and reference lists within this document itself). Those structures are exempt, since they exist to demonstrate patterns or define terms concisely rather than to read as continuous prose.
 
 ### 2.1 Vague Bullet Lists
 
@@ -73,10 +75,10 @@ Changes:
 
 Every bullet point, list item, or documentation entry MUST provide substantive information.
 
-Substantive means:
+An entry MUST satisfy ALL of the following to be substantive:
 - Specific enough to be actionable or informative
 - Contains detail that could not be inferred from the heading alone
-- Answers "what," "how," or "why": not just naming a topic
+- Answers "what," "how," or "why," rather than merely naming a topic
 
 ---
 
@@ -86,12 +88,14 @@ Substantive means:
 
 Implementations MUST NOT use hyphens or dashes as casual separators in prose.
 
+Implementations MUST NOT use a colon as a casual enthusiasm break that splices an unrelated exclamation onto a clause (for example, `Click here: it works great!`). This restriction targets ONLY the lazy break. The colon remains the CORRECT punctuation for introducing a genuine explanation or list, as prescribed in [Section 3.2](#32-acceptable-alternatives).
+
 Prohibited patterns:
 
 | Pattern | Example | Problem |
 |---------|---------|---------|
 | ` - ` as separator | `Do this - it is fun!` | Informal, improper punctuation |
-| `: ` as casual break | `Click here: it works great!` | Overused, lazy writing |
+| `: ` as enthusiasm break | `Click here: it works great!` | Lazy break splicing an unrelated exclamation, not introducing an explanation |
 | ` – ` as connector | `Try this – you'll love it` | Substitutes for proper structure |
 
 ### 3.2 Acceptable Alternatives
@@ -115,15 +119,15 @@ Dashes MAY be used for:
 - CLI flags and options: `--verbose`, `-h`
 - Code identifiers: `my-component`, `api-gateway`
 
+An en-dash (`–`) is permitted ONLY tight-bound between the endpoints of a numeric range (for example, `pages 5–12`). It MUST NEVER be space-flanked as a clause connector (for example, `Try this – you'll love it`), which [Section 3.1](#31-dash-as-separator-prohibition) prohibits.
+
 ---
 
 ## 4. Prose Quality Requirements
 
 ### 4.1 Completeness
 
-Documentation MUST explain concepts fully with detailed descriptions.
-
-Implementations MUST NOT write documentation that merely names things without explaining them.
+Documentation MUST explain concepts fully with detailed descriptions, and MUST NOT name a concept without explaining it. This prohibition is consistent with [Section 2](#2-prohibited-writing-patterns) (Prohibited Writing Patterns).
 
 ### 4.2 Specificity
 
@@ -139,11 +143,7 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ## 5. Conformance
 
-Violations of MUST requirements constitute conformance failures.
-
-Lazy bullet lists that name topics without explanation fail to serve their documentary purpose and are conformance failures.
-
-Casual dash usage as separators produces informal, unprofessional documentation and is a conformance failure.
+Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Section 2](#2-prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Section 3](#3-punctuation-requirements) (casual dash and colon separators).
 
 ---
 

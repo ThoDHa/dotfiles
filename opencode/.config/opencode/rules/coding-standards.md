@@ -13,9 +13,9 @@ This specification defines technical implementation requirements for code produc
 
 ### 1.1 Related Specifications
 
-- `core.md`: Core behavioral requirements
-- `execution-standards.md`: Task execution requirements
-- `git-protocol.md`: Version control requirements
+- [`core.md`](core.md): Core behavioral requirements
+- [`execution-standards.md`](execution-standards.md): Task execution requirements
+- [`git-protocol.md`](git-protocol.md): Version control requirements
 
 ---
 
@@ -138,7 +138,7 @@ Error messages MUST:
 
 - Describe what operation failed
 - Include relevant context (identifiers, parameters, state)  
-- Suggest remediation when possible
+- Suggest remediation when a known remediation exists
 - Be appropriate for the intended audience (user vs developer)
 - Protect sensitive information (credentials, internal paths, stack traces from end users)
 - Provide actionable information
@@ -148,7 +148,7 @@ Error messages MUST:
 
 Implementations MUST propagate errors appropriately:
 
-- Errors SHOULD bubble up to appropriate handling boundaries
+- Errors MUST bubble up to appropriate handling boundaries unless handled completely at the point of capture
 - Errors MUST be caught at module/service boundaries for logging and transformation
 - Errors MUST NOT cross API boundaries without sanitization
 
@@ -179,7 +179,7 @@ Critical path tests MUST verify both success and failure conditions.
 
 Implementations SHOULD write tests for all new functionality.
 
-Implementations SHOULD maintain existing test coverage when modifying code.
+Implementations MUST NOT reduce existing test coverage when modifying code, except where the covered code is itself removed.
 
 ### 5.3 Test Standards
 
@@ -196,7 +196,7 @@ Test names MUST describe WHAT is being tested and the EXPECTED behavior, NOT how
 **Prohibited Test Names:**
 - `test_fixing_bug_asd_123` (use descriptive name instead)
 - `test_temp_fix` (describe the behavior being tested)
-- `test_working` (too vague - what works?)
+- `test_working` (too vague: what works?)
 - `test_1`, `test_test123` (non-descriptive identifiers)
 
 **Test Name Guidelines:**
@@ -250,6 +250,19 @@ The test plan MUST specify:
 
 If testing is not required for a change, implementations MUST document why testing is unnecessary (e.g., configuration-only change, documentation update, trivial rename with existing coverage).
 
+### 5.6 Separation of Code and Test Changes
+
+This separation rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests. NEW tests written for NEW feature code are grouped WITH that code per [`git-protocol.md` Relationship Preservation](git-protocol.md#32-relationship-preservation), and are NOT subject to this separation requirement.
+
+For behavior-changing test updates, implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
+
+When a behavioral change is required because a bug is fixed, implementations MUST follow one of these approaches:
+
+- Separate commits and pull requests: submit the production code fix in one commit or PR and the test update that documents the new expected behavior in a follow-up commit or PR, referencing the related issue or the original change.
+- Single change only when inseparable: if the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation, include them together, but document the rationale in the PR description and ensure reviewers approve the combined change.
+
+All exceptions to the separation rule MUST be explicitly documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only changes that alter expected behavior without accompanying production code changes MUST reference an issue, design decision, or reviewer approval that authorizes the behavioral change.
+
 ### 5.7 Test Change Intent Verification
 
 When modifying tests with the goal of making them pass (rather than in the course of developing new features), implementers MUST verify that the proposed change accurately reflects intended system behavior and not an accidental regression, side effect, or masking of a real defect.
@@ -262,17 +275,6 @@ Specifically, implementers MUST:
 4. Document the rationale for any test change in the commit message, referencing relevant git history or stakeholder decision as appropriate.
 
 If the intent behind a test is unclear or disputed, implementers MUST escalate the question to relevant reviewers, stakeholders, or product owners before altering the test.
-
-### 5.6 Separation of Code and Test Changes
-
-Implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
-
-When a behavioral change is required because a bug is fixed, implementations MUST follow one of these approaches:
-
-- Separate commits and pull requests: submit the production code fix in one commit or PR and the test update that documents the new expected behavior in a follow-up commit or PR, referencing the related issue or the original change.
-- Single change only when inseparable: if the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation, include them together, but document the rationale in the PR description and ensure reviewers approve the combined change.
-
-All exceptions to the separation rule MUST be explicitly documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only changes that alter expected behavior without accompanying production code changes MUST reference an issue, design decision, or reviewer approval that authorizes the behavioral change.
 
 ---
 
@@ -307,7 +309,7 @@ Implementations SHOULD document:
 
 When modifying code, implementations MUST update associated documentation.
 
-Stale documentation is worse than no documentation.
+Implementations MUST NOT leave documentation stale after a code change; stale documentation is worse than no documentation.
 
 ### 6.4 Comment Style Requirements
 
@@ -348,7 +350,7 @@ Comments MUST document:
 **CRITICAL DISTINCTION:**
 
 - **External library bugs/issues:** MUST be documented in code comments with full context
-- **Internal application bugs:** FORBIDDEN in code comments - belong in commit messages and issue trackers only
+- **Internal application bugs:** FORBIDDEN in code comments (these belong in commit messages and issue trackers only)
 
 When working around external library bugs or limitations, comments MUST include:
 
@@ -378,11 +380,11 @@ When working around external library bugs or limitations, comments MUST include:
 
 Comments MUST NOT include:
 
-- **Historical bug references** - bug IDs, issue numbers, or ticket references
-- **Attribution** - who fixed something, when it was fixed, or why
-- **Fix chronology** - when problems occurred, how they evolved over time
-- **Deprecated behavior** - explanations of removed functionality
-- **Temporal context** - "before the fix", "after the change", "previously", etc.
+- **Historical bug references**: bug IDs, issue numbers, or ticket references
+- **Attribution**: who fixed something, when it was fixed, or why
+- **Fix chronology**: when problems occurred, how they evolved over time
+- **Deprecated behavior**: explanations of removed functionality
+- **Temporal context**: "before the fix", "after the change", "previously", etc.
 
 **Internal application bugs belong EXCLUSIVELY in commit messages and issue trackers. NEVER in code comments.**
 
@@ -424,11 +426,11 @@ Different types of information belong in different places. Choose the appropriat
 Use inline comments for:
 
 - **Immediate code context** that affects the current function or block
-- **External library workarounds** (as specified in Section 6.5.2)
+- **External library workarounds** (governed by [External Library Workaround Documentation](#652-external-library-workaround-documentation), which is canonical for this topic)
 - **Non-obvious algorithmic choices** within the implementation
 - **Performance optimizations** that aren't self-evident
 
-Inline comments should be casual and conversational (following Section 6.4 style requirements).
+Inline comments should be casual and conversational (following [Section 6.4](#64-comment-style-requirements) style requirements).
 
 #### 6.6.2 Commit Messages
 
@@ -437,11 +439,9 @@ Use commit messages for:
 - **What changed** in this specific commit
 - **Why the change was necessary** (business justification)
 - **Impact scope** (what systems/features are affected)
-- **Bug fix history** - what was broken, what the fix was, and why
+- **Bug fix history** (what was broken, what the fix was, and why), which per [What Comments MUST NOT Explain](#653-what-comments-must-not-explain) belongs EXCLUSIVELY in commit messages and issue trackers
 
-**Commit messages are the EXCLUSIVE place for internal application bug history.**
-
-Follow formal commit message standards defined in `git-protocol.md`.
+Follow formal commit message standards defined in [`git-protocol.md`](git-protocol.md).
 
 #### 6.6.3 Formal Documentation
 
@@ -456,7 +456,7 @@ Formal documentation MUST maintain professional tone and structured format, suit
 
 ### 6.7 Comment Minimalism Requirements
 
-Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, Section 6.4 governs its style.
+Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, [Section 6.4](#64-comment-style-requirements) governs its style.
 
 #### 6.7.1 Default Absence Principle
 
@@ -464,8 +464,8 @@ Comments MUST be absent by default. The baseline rule is simple: do not write co
 
 Implementations MUST NOT add comments unless one of the following is true:
 
-1. **The user explicitly requests commentary** — this is the primary and expected path for any comment.
-2. **The narrow autonomous exception** in Section 6.7.1.1 applies.
+1. **The user explicitly requests commentary**: this is the primary and expected path for any comment.
+2. **The narrow autonomous exception** in [Section 6.7.1.1](#6711-autonomous-comment-exception) applies.
 
 When the user has not explicitly asked for comments, implementations MUST assume no comments are wanted and produce clean, self-explanatory code instead.
 
@@ -475,7 +475,7 @@ A comment MAY be added without an explicit user request ONLY when ALL of the fol
 
 - The code genuinely cannot express its intent on its own
 - The attempts below to make the code self-explanatory have been exhausted
-- The comment explains non-obvious WHY, not WHAT (per Section 6.4)
+- The comment explains non-obvious WHY, not WHAT (per [Section 6.4](#64-comment-style-requirements))
 - Removing the comment would leave a future reader genuinely confused
 
 Before writing an autonomous comment, implementations MUST first attempt to make the code self-explanatory through:
@@ -517,7 +517,7 @@ Implementations MUST NOT use filler markers or formulaic comment conventions. Th
 
 - Imperative preambles: `Note:`, `Important:`, `Consider:`, `NB:`, `FYI:`, `Remember:`, `Warning:`
 - Signature restatement: `This function...`, `This method...`, `Here we...`, `Below we...`, `Now we...`
-- Section banners: `# ---------- Setup ----------`, `# ============ Helpers ============`, `# ### Main ###`
+- Section banners (governed canonically by [Section Commentary Prohibition](#676-section-commentary-prohibition) below)
 - Placeholder TODOs lacking owner, context, or tracking reference: `# TODO: improve this`, `# FIXME later`, `# refactor at some point`
 
 A bare `TODO` or `FIXME` is acceptable ONLY when it includes a concrete description AND a tracking reference (issue number, ticket, or design doc).
@@ -633,15 +633,15 @@ Implementations MUST NOT suppress:
 - Unused variable warnings (remove the variable instead)
 - Any warning that can be resolved by fixing the code
 
-### 8.4 Community Standards and Configuration
+### 8.3 Community Standards and Configuration
 
 Implementations MUST use widely accepted community coding standards, linters, and formatters for the target language and framework.
 
 - Start from official or recommended rule sets and default configurations.
 - Minimize deviations; when deviations are necessary, document specific justifications.
 - Commit lint and format configurations to version control and enforce them in CI.
-- Where a standard formatter exists, use it consistently rather than introducing competing tools.
-- Prefer stable, well‑maintained tools with broad adoption.
+- Where a standard formatter exists, implementations MUST use it consistently rather than introducing competing tools.
+- Implementations SHOULD prefer stable, well‑maintained tools with broad adoption.
 
 
 ## 9. Security Requirements
@@ -691,7 +691,7 @@ Secrets MUST be loaded from:
 
 ### 9.4 Extended Security Considerations
 
-For security-sensitive applications, implementations SHOULD also consider:
+For security-sensitive applications, implementations MUST address the following according to project security requirements:
 
 - Authentication and authorization patterns
 - Session management and token handling
@@ -700,13 +700,13 @@ For security-sensitive applications, implementations SHOULD also consider:
 - Dependency vulnerability scanning
 - Security audit logging
 
-These extended considerations SHOULD be addressed according to project security requirements.
+Each consideration MUST be either implemented or explicitly documented as not applicable, with justification.
 
 ---
 
 ## 10. Performance Requirements
 
-### 9.1 Algorithmic Complexity Awareness
+### 10.1 Algorithmic Complexity Awareness
 
 Implementations MUST consider algorithmic complexity for operations on collections.
 
@@ -714,11 +714,11 @@ When implementing algorithms:
 
 - O(n²) or worse algorithms MUST be documented with justification
 - Nested loops over the same collection MUST be reviewed for optimization
-- Large dataset operations SHOULD use streaming or pagination patterns
+- Large dataset operations MUST use streaming or pagination patterns when the dataset can exceed available memory or is unbounded
 
 Implementations MUST NOT use inefficient algorithms when efficient alternatives are readily available.
 
-### 9.2 Async and Concurrent Patterns
+### 10.2 Async and Concurrent Patterns
 
 Implementations MUST use asynchronous patterns for:
 
@@ -734,7 +734,7 @@ When parallelizing work, implementations MUST:
 - Handle partial failures gracefully
 - Provide cancellation mechanisms for long-running operations
 
-### 9.3 Resource Cleanup
+### 10.3 Resource Cleanup
 
 Implementations MUST ensure cleanup of:
 
