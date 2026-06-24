@@ -7,11 +7,11 @@
 
 ---
 
-## 1. Scope
+## Scope
 
 This specification defines technical implementation requirements for code produced by OpenCode implementations. These standards ensure maintainable, secure, and performant code across all projects.
 
-### 1.1 Related Specifications
+### Related Specifications
 
 - [`core.md`](core.md): Core behavioral requirements
 - [`execution-standards.md`](execution-standards.md): Task execution requirements
@@ -19,9 +19,9 @@ This specification defines technical implementation requirements for code produc
 
 ---
 
-## 2. Code Reuse Requirements
+## Code Reuse Requirements
 
-### 2.1 Library Precedence
+### Library Precedence
 
 Implementations MUST search for existing solutions before implementing custom code.
 
@@ -37,7 +37,7 @@ Implementations MUST NOT create custom implementations when adequate solutions e
 - Existing solutions introduce unacceptable dependencies
 - The limitation is documented in a code comment
 
-### 2.2 Project Utility Reuse
+### Project Utility Reuse
 
 Implementations MUST check for existing project utilities before creating new ones.
 
@@ -49,7 +49,7 @@ When equivalent functionality exists in the project, implementations MUST:
 
 Implementations MUST NOT create duplicate utility functions.
 
-### 2.3 Utility Creation Requirement
+### Utility Creation Requirement
 
 When implementations identify repeated code patterns (3+ occurrences), they MUST:
 
@@ -63,7 +63,7 @@ When repeated patterns span multiple projects or services, implementations SHOUL
 - Extract to a dedicated SDK when appropriate
 - Document in a central location for team discovery
 
-### 2.4 Shared Code Organization
+### Shared Code Organization
 
 Implementations MUST place reusable code in designated shared locations:
 
@@ -75,9 +75,9 @@ Implementations MUST use named exports with descriptive identifiers over default
 
 ---
 
-## 3. Literal Value Requirements
+## Literal Value Requirements
 
-### 3.1 Numeric Literal Restrictions
+### Numeric Literal Restrictions
 
 Implementations MUST NOT use literal numeric values in code except:
 
@@ -87,7 +87,7 @@ Implementations MUST NOT use literal numeric values in code except:
 
 All other numeric literals MUST be extracted to named constants with descriptive identifiers.
 
-### 3.2 String Literal Restrictions
+### String Literal Restrictions
 
 Implementations MUST NOT use literal strings for:
 
@@ -99,7 +99,7 @@ Implementations MUST NOT use literal strings for:
 
 These MUST be extracted to constants, enums, or configuration files.
 
-### 3.3 Configuration Externalization
+### Configuration Externalization
 
 Implementations MUST externalize configuration values:
 
@@ -111,9 +111,9 @@ Implementations MUST NOT hardcode values that may vary between environments.
 
 ---
 
-## 4. Error Handling Requirements
+## Error Handling Requirements
 
-### 4.1 External Call Protection
+### External Call Protection
 
 Implementations MUST wrap all external calls in error-handling constructs appropriate to the language.
 
@@ -132,7 +132,7 @@ The error-handling mechanism MUST:
 3. Clean up resources on failure paths
 4. Log errors at appropriate severity levels
 
-### 4.2 Error Message Standards
+### Error Message Standards
 
 Error messages MUST:
 
@@ -144,7 +144,7 @@ Error messages MUST:
 - Provide actionable information
 - Focus on the system issue rather than user fault
 
-### 4.3 Error Propagation
+### Error Propagation
 
 Implementations MUST propagate errors appropriately:
 
@@ -161,9 +161,9 @@ Implementations MUST NOT catch errors only to log and ignore them.
 
 ---
 
-## 5. Testing Requirements
+## Testing Requirements
 
-### 5.1 Critical Path Coverage
+### Critical Path Coverage
 
 Implementations MUST write tests for:
 
@@ -175,13 +175,13 @@ Implementations MUST write tests for:
 
 Critical path tests MUST verify both success and failure conditions.
 
-### 5.2 General Test Coverage
+### General Test Coverage
 
 Implementations SHOULD write tests for all new functionality.
 
 Implementations MUST NOT reduce existing test coverage when modifying code, except where the covered code is itself removed.
 
-### 5.3 Test Standards
+### Test Standards
 
 **Test Naming Requirements:**
 
@@ -223,7 +223,7 @@ Tests SHOULD:
 - Be fast enough to run frequently
 - Use AAA pattern (Arrange, Act, Assert) when appropriate
 
-### 5.4 Prohibited Test Behaviors
+### Prohibited Test Behaviors
 
 
 Implementations MUST NOT skip or disable failing tests.
@@ -238,7 +238,7 @@ Acceptable responses to failing tests:
 
 Implementations MUST NOT use skip annotations, conditional ignores, or comment-outs to hide failures.
 
-### 5.5 Test Planning Requirement
+### Test Planning Requirement
 
 All code implementation plans MUST include a test plan.
 
@@ -250,9 +250,9 @@ The test plan MUST specify:
 
 If testing is not required for a change, implementations MUST document why testing is unnecessary (e.g., configuration-only change, documentation update, trivial rename with existing coverage).
 
-### 5.6 Separation of Code and Test Changes
+### Separation of Code and Test Changes
 
-This separation rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests. NEW tests written for NEW feature code are grouped WITH that code per [`git-protocol.md` Relationship Preservation](git-protocol.md#32-relationship-preservation), and are NOT subject to this separation requirement.
+This separation rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests. NEW tests written for NEW feature code are grouped WITH that code per [`git-protocol.md` Relationship Preservation](git-protocol.md#relationship-preservation), and are NOT subject to this separation requirement.
 
 For behavior-changing test updates, implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
 
@@ -263,7 +263,7 @@ When a behavioral change is required because a bug is fixed, implementations MUS
 
 All exceptions to the separation rule MUST be explicitly documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only changes that alter expected behavior without accompanying production code changes MUST reference an issue, design decision, or reviewer approval that authorizes the behavioral change.
 
-### 5.7 Test Change Intent Verification
+### Test Change Intent Verification
 
 When modifying tests with the goal of making them pass (rather than in the course of developing new features), implementers MUST verify that the proposed change accurately reflects intended system behavior and not an accidental regression, side effect, or masking of a real defect.
 
@@ -278,9 +278,9 @@ If the intent behind a test is unclear or disputed, implementers MUST escalate t
 
 ---
 
-## 6. Documentation Requirements
+## Documentation Requirements
 
-### 6.1 Non-Obvious Function Documentation
+### Non-Obvious Function Documentation
 
 Implementations MUST document functions when:
 
@@ -297,7 +297,7 @@ Documentation MUST include:
 - Side effects (if any)
 - Exceptions/errors that may be thrown
 
-### 6.2 General Documentation
+### General Documentation
 
 Implementations SHOULD document:
 
@@ -305,13 +305,13 @@ Implementations SHOULD document:
 - Complex algorithms with explanatory comments
 - Non-obvious implementation decisions
 
-### 6.3 Code-Documentation Synchronization
+### Code-Documentation Synchronization
 
 When modifying code, implementations MUST update associated documentation.
 
 Implementations MUST NOT leave documentation stale after a code change; stale documentation is worse than no documentation.
 
-### 6.4 Comment Style Requirements
+### Comment Style Requirements
 
 Code comments MUST be written in natural, conversational style.
 
@@ -332,11 +332,11 @@ Comments MUST use direct, straightforward language that focuses on WHY rather th
 | **Context-focused** | `// Async call - don't block the UI` |
 | **Purpose-driven** | `// Cache results - API is slow` |
 
-### 6.5 Comment Purpose Guidelines
+### Comment Purpose Guidelines
 
 Comments MUST explain code context and non-obvious decisions. Comments MUST NEVER document internal bug-fixing history.
 
-#### 6.5.1 What Comments MUST Explain
+#### What Comments MUST Explain
 
 Comments MUST document:
 
@@ -345,7 +345,7 @@ Comments MUST document:
 - **Complex business logic** that requires domain knowledge
 - **Performance considerations** when optimization choices aren't obvious
 
-#### 6.5.2 External Library Workaround Documentation
+#### External Library Workaround Documentation
 
 **CRITICAL DISTINCTION:**
 
@@ -374,7 +374,7 @@ When working around external library bugs or limitations, comments MUST include:
 # Remove when requests 2.29+ fixes issue #6078
 ```
 
-#### 6.5.3 What Comments MUST NOT Explain
+#### What Comments MUST NOT Explain
 
 **Internal application bug-fixing history is FORBIDDEN in code comments.**
 
@@ -417,33 +417,33 @@ Code comments explain the current state, not the history of how we got there.
 // - Basic: no discounts
 ```
 
-### 6.6 Documentation Context Distribution
+### Documentation Context Distribution
 
 Different types of information belong in different places. Choose the appropriate documentation context based on scope and audience.
 
-#### 6.6.1 Inline Comments
+#### Inline Comments
 
 Use inline comments for:
 
 - **Immediate code context** that affects the current function or block
-- **External library workarounds** (governed by [External Library Workaround Documentation](#652-external-library-workaround-documentation), which is canonical for this topic)
+- **External library workarounds** (governed by [External Library Workaround Documentation](#external-library-workaround-documentation), which is canonical for this topic)
 - **Non-obvious algorithmic choices** within the implementation
 - **Performance optimizations** that aren't self-evident
 
-Inline comments should be casual and conversational (following [Section 6.4](#64-comment-style-requirements) style requirements).
+Inline comments should be casual and conversational (following [Comment Style Requirements](#comment-style-requirements) style requirements).
 
-#### 6.6.2 Commit Messages
+#### Commit Messages
 
 Use commit messages for:
 
 - **What changed** in this specific commit
 - **Why the change was necessary** (business justification)
 - **Impact scope** (what systems/features are affected)
-- **Bug fix history** (what was broken, what the fix was, and why), which per [What Comments MUST NOT Explain](#653-what-comments-must-not-explain) belongs EXCLUSIVELY in commit messages and issue trackers
+- **Bug fix history** (what was broken, what the fix was, and why), which per [What Comments MUST NOT Explain](#what-comments-must-not-explain) belongs EXCLUSIVELY in commit messages and issue trackers
 
 Follow formal commit message standards defined in [`git-protocol.md`](git-protocol.md).
 
-#### 6.6.3 Formal Documentation
+#### Formal Documentation
 
 Use formal documentation (README, API docs, architecture docs) for:
 
@@ -454,28 +454,28 @@ Use formal documentation (README, API docs, architecture docs) for:
 
 Formal documentation MUST maintain professional tone and structured format, suitable for external audiences or formal review.
 
-### 6.7 Comment Minimalism Requirements
+### Comment Minimalism Requirements
 
-Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, [Section 6.4](#64-comment-style-requirements) governs its style.
+Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, [Comment Style Requirements](#comment-style-requirements) governs its style.
 
-#### 6.7.1 Default Absence Principle
+#### Default Absence Principle
 
 Comments MUST be absent by default. The baseline rule is simple: do not write comments unless asked.
 
 Implementations MUST NOT add comments unless one of the following is true:
 
 1. **The user explicitly requests commentary**: this is the primary and expected path for any comment.
-2. **The narrow autonomous exception** in [Section 6.7.1.1](#6711-autonomous-comment-exception) applies.
+2. **The narrow autonomous exception** in [Autonomous Comment Exception](#autonomous-comment-exception) applies.
 
 When the user has not explicitly asked for comments, implementations MUST assume no comments are wanted and produce clean, self-explanatory code instead.
 
-#### 6.7.1.1 Autonomous Comment Exception
+#### Autonomous Comment Exception
 
 A comment MAY be added without an explicit user request ONLY when ALL of the following are true:
 
 - The code genuinely cannot express its intent on its own
 - The attempts below to make the code self-explanatory have been exhausted
-- The comment explains non-obvious WHY, not WHAT (per [Section 6.4](#64-comment-style-requirements))
+- The comment explains non-obvious WHY, not WHAT (per [Comment Style Requirements](#comment-style-requirements))
 - Removing the comment would leave a future reader genuinely confused
 
 Before writing an autonomous comment, implementations MUST first attempt to make the code self-explanatory through:
@@ -487,7 +487,7 @@ Before writing an autonomous comment, implementations MUST first attempt to make
 
 If intent remains non-obvious ONLY after these attempts AND the comment explains WHY (not WHAT), the comment is permitted. Otherwise, no comment is written.
 
-#### 6.7.2 Redundant Comment Prohibition
+#### Redundant Comment Prohibition
 
 Implementations MUST NOT write comments that restate what the code already expresses. Redundant comments are noise that adds maintenance burden without insight.
 
@@ -509,7 +509,7 @@ def validate_email(address):
 
 If a comment can be deleted and the code remains equally clear, the comment MUST be deleted.
 
-#### 6.7.3 Prohibited Comment Patterns
+#### Prohibited Comment Patterns
 
 Implementations MUST NOT use filler markers or formulaic comment conventions. These add no information and read as padding.
 
@@ -517,7 +517,7 @@ Implementations MUST NOT use filler markers or formulaic comment conventions. Th
 
 - Imperative preambles: `Note:`, `Important:`, `Consider:`, `NB:`, `FYI:`, `Remember:`, `Warning:`
 - Signature restatement: `This function...`, `This method...`, `Here we...`, `Below we...`, `Now we...`
-- Section banners (governed canonically by [Section Commentary Prohibition](#676-section-commentary-prohibition) below)
+- Section banners (governed canonically by [Section Commentary Prohibition](#section-commentary-prohibition) below)
 - Placeholder TODOs lacking owner, context, or tracking reference: `# TODO: improve this`, `# FIXME later`, `# refactor at some point`
 
 A bare `TODO` or `FIXME` is acceptable ONLY when it includes a concrete description AND a tracking reference (issue number, ticket, or design doc).
@@ -532,7 +532,7 @@ data = load()
 data = load()
 ```
 
-#### 6.7.4 Comment Density as a Complexity Signal
+#### Comment Density as a Complexity Signal
 
 If a function, block, or module requires many comments to be understood, the code is too complex. Implementations MUST treat dense comments as a signal to refactor, not as a reason to annotate.
 
@@ -544,7 +544,7 @@ Required response to dense comments:
 
 Comments MUST NOT compensate for poor naming, deep nesting, or tangled control flow. If a comment exists to explain HOW the code works, the code MUST be rewritten until the comment becomes unnecessary.
 
-#### 6.7.5 Over-Documentation Prohibition
+#### Over-Documentation Prohibition
 
 Implementations MUST NOT add docstrings or comments to trivial constructs:
 
@@ -555,7 +555,7 @@ Implementations MUST NOT add docstrings or comments to trivial constructs:
 
 Trivial constructs that speak for themselves require zero commentary.
 
-#### 6.7.6 Section Commentary Prohibition
+#### Section Commentary Prohibition
 
 Implementations MUST NOT decorate code with ornamental section headers, file-level manifestos, or closing summaries.
 
@@ -577,9 +577,9 @@ Standard language conventions for module organization (package declarations, imp
 
 ---
 
-## 7. Type Safety Requirements
+## Type Safety Requirements
 
-### 7.1 Strict Typing Requirement
+### Strict Typing Requirement
 
 Implementations MUST use the strictest type-checking mode available in the project's language and tooling.
 
@@ -590,7 +590,7 @@ This includes:
 - Annotating function signatures with explicit types
 - Avoiding type-escape mechanisms (e.g., `any`, `Object`, `void*`, dynamic casts)
 
-### 7.2 Type-Escape Exceptions
+### Type-Escape Exceptions
 
 Type-escape mechanisms MAY be used ONLY when:
 
@@ -598,7 +598,7 @@ Type-escape mechanisms MAY be used ONLY when:
 - The type system cannot express the required constraint
 - The limitation is documented in a code comment explaining why
 
-### 7.3 Type Annotation Boundaries
+### Type Annotation Boundaries
 
 Implementations SHOULD allow type inference for local variables where type is obvious.
 
@@ -611,9 +611,9 @@ Implementations MUST NOT rely on type inference for:
 
 ---
 
-## 8. Code Quality Tool Requirements
+## Code Quality Tool Requirements
 
-### 8.1 Linting and Static Analysis
+### Linting and Static Analysis
 
 **UNLESS ABSOLUTELY NECESSARY, DO NOT DISABLE LINT CHECKERS.**
 
@@ -624,7 +624,7 @@ When disabling is unavoidable, implementations MUST:
 2. Document the specific reason why the rule cannot be satisfied
 3. Reference any related issue or technical constraint
 
-### 8.2 Prohibited Suppressions
+### Prohibited Suppressions
 
 Implementations MUST NOT suppress:
 
@@ -633,7 +633,7 @@ Implementations MUST NOT suppress:
 - Unused variable warnings (remove the variable instead)
 - Any warning that can be resolved by fixing the code
 
-### 8.3 Community Standards and Configuration
+### Community Standards and Configuration
 
 Implementations MUST use widely accepted community coding standards, linters, and formatters for the target language and framework.
 
@@ -644,9 +644,9 @@ Implementations MUST use widely accepted community coding standards, linters, an
 - Implementations SHOULD prefer stable, well‑maintained tools with broad adoption.
 
 
-## 9. Security Requirements
+## Security Requirements
 
-### 9.1 Input Validation
+### Input Validation
 
 Implementations MUST validate all external input before processing:
 
@@ -661,7 +661,7 @@ Validation MUST include:
 - Format validation (pattern matching for structured strings)
 - Whitelist validation for enumerated values
 
-### 9.2 Output Sanitization
+### Output Sanitization
 
 Implementations MUST sanitize output when:
 
@@ -674,7 +674,7 @@ Implementations MUST use parameterized queries or prepared statements for databa
 
 Implementations MUST NOT construct queries or commands via string concatenation with user input.
 
-### 9.3 Secrets Management
+### Secrets Management
 
 Implementations MUST NOT:
 
@@ -689,7 +689,7 @@ Secrets MUST be loaded from:
 - Dedicated secrets management systems
 - Encrypted configuration (with proper key management)
 
-### 9.4 Extended Security Considerations
+### Extended Security Considerations
 
 For security-sensitive applications, implementations MUST address the following according to project security requirements:
 
@@ -704,9 +704,9 @@ Each consideration MUST be either implemented or explicitly documented as not ap
 
 ---
 
-## 10. Performance Requirements
+## Performance Requirements
 
-### 10.1 Algorithmic Complexity Awareness
+### Algorithmic Complexity Awareness
 
 Implementations MUST consider algorithmic complexity for operations on collections.
 
@@ -718,7 +718,7 @@ When implementing algorithms:
 
 Implementations MUST NOT use inefficient algorithms when efficient alternatives are readily available.
 
-### 10.2 Async and Concurrent Patterns
+### Async and Concurrent Patterns
 
 Implementations MUST use asynchronous patterns for:
 
@@ -734,7 +734,7 @@ When parallelizing work, implementations MUST:
 - Handle partial failures gracefully
 - Provide cancellation mechanisms for long-running operations
 
-### 10.3 Resource Cleanup
+### Resource Cleanup
 
 Implementations MUST ensure cleanup of:
 
@@ -750,9 +750,9 @@ Resources MUST be released on both success and failure paths.
 
 ---
 
-## 11. Solution Selection Requirements
+## Solution Selection Requirements
 
-### 11.1 Correctness Priority
+### Correctness Priority
 
 Implementations MUST prioritize correctness over simplicity.
 
@@ -762,7 +762,7 @@ When evaluating solutions:
 2. When a solution is both correct AND simple, this is optimal
 3. Simple solutions that sacrifice correctness are not acceptable
 
-### 11.2 Simple Solution Documentation
+### Simple Solution Documentation
 
 When a simple solution is chosen over a more comprehensive one for pragmatic reasons (time constraints, scope limitations), implementations MUST:
 
@@ -774,7 +774,7 @@ This documentation ensures technical debt is visible and actionable.
 
 ---
 
-## 12. Conformance
+## Conformance
 
 ALL strong requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
