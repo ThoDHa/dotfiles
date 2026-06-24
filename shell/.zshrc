@@ -84,6 +84,10 @@ source $ZSH/oh-my-zsh.sh
 # You may need to manually set your language environment
 # export LANG=en_US.UTF-8
 
+# System clock is UTC; set local timezone so tools (Claude Code, opencode)
+# display times in local time instead of UTC.
+export TZ="America/New_York"
+
 # Preferred editor for local and remote sessions
 # if [[ -n $SSH_CONNECTION ]]; then
 #   export EDITOR='vim'
