@@ -202,6 +202,8 @@ Within a task file, references to its own sections, to another task file, or to 
 
 A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
 
+Every child task file, and every subtask within a Task Breakdown, MUST be identified by a proper Task ID following the `PREFIX-NNN` pattern ([Task ID Format](#task-id-format)) AND a descriptive name. Its filename MUST follow the [File Naming Convention](#file-naming-convention). Implementations MUST NOT label child tasks or subtasks with placeholder single-letter or sequential markers (for example, `A`, `B`, `C`, or `Task 1`, `Task 2`); each identifier MUST describe the work it represents.
+
 ### Task File Template
 
 ```markdown
@@ -549,6 +551,8 @@ This section summarizes all work performed, whether by agents/allies or by the m
 
 Task IDs MUST follow the pattern: `PREFIX-NNN`
 
+Implementations MUST NOT substitute placeholder labels (single letters such as `A`, `B`, `C`, or bare sequential markers such as `Task 1`, `Task 2`) for a Task ID. Every task and subtask, including those spawned at closure ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) and child task files ([Child Task Files](#child-task-files)), MUST receive a real `PREFIX-NNN` ID and a descriptive name.
+
 ### Standard Prefixes
 
 | Prefix | Meaning |
@@ -752,7 +756,7 @@ Before a task may be marked Completed, implementations MUST capture every piece 
 
 For each such item, implementations MUST:
 
-1. Create a new task file in Triage state ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)), named per [File Naming Convention](#file-naming-convention).
+1. Create a new task file in Triage state ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)), assigned a proper Task ID (`PREFIX-NNN`, see [Task ID Format](#task-id-format)) and a descriptive name, with its filename per [File Naming Convention](#file-naming-convention). Placeholder single-letter or sequential labels (for example, `A`, `B`, `C`) MUST NOT be used.
 2. Register it in the master index dashboard ([Index Maintenance](#index-maintenance)).
 3. Link it from the closing task's Final Summary "Remaining Work" entry.
 
