@@ -173,8 +173,6 @@ The master index MUST be located at `.opencode/tasks.md`.
 *Last updated: YYYY-MM-DD HH:MM - Auto-updated when task status changes*
 ```
 
-**Coordination task files** ([Section 9](#9-coordination-task-files)) appear in these same tables, distinguished by a `[COORD]` prefix on the task name. Their "What Was Done" snapshot summarizes child-task rollup (for example, `4/7 child tasks complete, 2 questions queued`).
-
 ### 4.3 Index Maintenance
 
 The master index (`tasks.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
@@ -865,7 +863,6 @@ Task IDs MUST follow the pattern: `PREFIX-NNN`
 | `INFRA` | Infrastructure |
 | `TASK` | Generic tasks |
 | `EXPLORE` | Exploration/discovery |
-| `COORD` | Coordination task file orchestrating multiple task files ([Section 9](#9-coordination-task-files)) |
 
 Custom prefixes MAY be used when they improve clarity.
 
@@ -1140,7 +1137,7 @@ User requests MUST be explicit and specific. Ambiguous instructions must NOT tri
 
 ### 8.6 Deferred Work Capture at Closure
 
-This requirement applies to EVERY task closure, in both standard and coordination task files, in Manager Mode (Solo) and Manager Mode (Delegating).
+This requirement applies to EVERY task closure, in Manager Mode (Solo) and Manager Mode (Delegating), and to parent (epic) task files as well as ordinary ones.
 
 Before a task may be marked Completed, implementations MUST capture every piece of work that was identified during the task but intentionally left undone. Such work includes:
 
@@ -1161,122 +1158,38 @@ When a task is closed as Cancelled rather than Completed, deferred or out-of-sco
 
 ---
 
-## 9. Coordination Task Files
+## 9. Parallel Task Files and Question Tracking
 
-### 9.1 Definition and Purpose
+This section covers the two concerns specific to running work across multiple task files at once under Manager Mode (Delegating - parallel): organizing the work across files, and tracking the questions and blockers raised while parallel work is in flight. There is no separate "coordination" task file species. Everything else (creation, the Triage → Ready planning phase, real-time updates, deferred-work capture, content preservation, the dashboard, and completion) behaves exactly as for any standard task file.
 
-A **coordination task file** is a specialized task file whose unit of work is *other task files*. Where a standard task file documents and executes a single coherent task (with subtasks in its Task Breakdown), a coordination task file orchestrates a set of related, independently-tracked task files toward a shared objective (an epic, a multi-part feature, a migration, a release).
+### 9.1 Parent (Epic) Task Files
 
-| Aspect | Standard Task File | Coordination Task File |
-|--------|--------------------|------------------------|
-| Unit of work | One task | A set of task files |
-| Execution | Work performed within the file | No implementation performed within the file; work happens in child task files |
-| Role | Worker or Manager (Solo) | Manager (Delegating, parallel) only |
-| Lifespan | One task's lifecycle | Spans the lifecycle of all coordinated tasks |
-| Primary output | Completed task and logs | Dispatch decisions, integration, follow-ups, resolved questions |
+When a single objective (an epic, a multi-part feature, a migration, a release) decomposes into two or more independently-tracked task files, a standard task file MAY act as the **parent**. The parent is an ordinary task file used to organize children, not a distinct type.
 
-A coordination task file MUST NOT contain implementation work. Its responsibilities are dispatching work to child tasks, monitoring their progress, integrating their results, creating follow-up tasks, and handling questions ([Section 9.8](#98-question-handling-protocol)).
+The parent task file:
 
-### 9.2 Operating Mode
+- Tracks its child task files in its Task Breakdown ([Section 5.2](#52-task-file-template)), one entry per child, linked by relative path. The Task Breakdown already records status, dependencies, and assignee; add a dispatch-wave note where parallel ordering matters.
+- Performs no implementation itself. It dispatches work to the child task files under the Manager Mode rules in [`delegation.md`](delegation.md) (parallel safety, ally preference, reporting, failure takeover).
+- Records dispatch and integration decisions in its Work Log, with child agent reports captured verbatim per [Section 8.2](#82-verbatim-recording-requirement).
+- MUST NOT be marked Completed while any child task remains open (neither Completed nor Cancelled), its Question Queue is non-empty, or integration across children is unverified. If it is blocked solely on user input while children remain, it moves to Blocked ([Section 7](#7-task-lifecycle-states)) with the blocking questions referenced.
 
-A coordination task file MUST operate in **Manager Mode (Delegating - parallel)** as defined in [`delegation.md`](delegation.md).
+Child task files are ordinary task files. They appear in the dashboard under their own lifecycle lanes, and the parent appears like any other task file, with no special prefix.
 
-The coordinator MUST:
+### 9.2 Question Tracking
 
-- Dispatch parallel agents/allies to child tasks, subject to the safety requirements in [`delegation.md` Section 5](delegation.md#5-safety-requirements) (file-conflict prevention, dependency sequencing, boundary isolation, pre-dispatch verification).
-- Prefer allies over agents per [`delegation.md` Section 4.4](delegation.md#44-ally-preference-requirement).
-- Restrict its own direct action to the exceptions in [`delegation.md` Section 4.2](delegation.md#42-direct-execution-exceptions) (quick tasks under 30 seconds, planning, coordination, synthesis, user communication) and failure takeover per [`delegation.md` Section 7.2](delegation.md#72-failure-takeover).
+This subsection provides the persistent bookkeeping that any Manager-Mode (Delegating) task file MAY use for questions and blockers. The classification and escalation **policy** is canonical in [`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline) (Question Batching Discipline) and is not restated here. This is only the file-based artifact that records it.
 
-If the user declares no parallel resources are available, the effort MUST be run as standard Manager Mode (Solo) task files instead. A coordination task file is not appropriate without parallel delegation.
+A question is recorded in one of two places:
 
-### 9.3 Creation Triggers
+- A **Basic** question (answered autonomously per the policy) is recorded in the **Question Log** with its source, the answer, and the rationale that justified answering without interrupting the user.
+- A **Significant** question (deferred per the policy) is recorded in the **Question Queue** with its source, current state, the task IDs it blocks (or "none yet"), and the user resolution once answered.
 
-In addition to the standard triggers in [Section 2.1](#21-creation-triggers), a coordination task file MUST be created when ALL of the following hold:
-
-- The user has activated Manager Mode (Delegating - parallel), AND
-- The effort decomposes into two or more independent child task files, AND
-- Those task files benefit from orchestration (shared objective, ordering dependencies, or a shared integration point).
-
-A coordination task file MUST NOT be created for a single task. Use a standard task file with a Task Breakdown section instead.
-
-### 9.4 Naming and Identification
-
-| Component | Requirement |
-|-----------|-------------|
-| File name | `YYYYMMDD-HHMM-coord-<description>.md` |
-| Coordination ID prefix | `COORD` (e.g., `COORD-001`) |
-| Child task files | Retain their own names and IDs (see File Naming Convention and Task ID Format); referenced by relative link from the coordination file |
-
-A coordination ID MUST NOT be reused as a child task ID. Child tasks keep their domain prefixes (AUTH, API, and similar).
-
-### 9.5 Required Sections
-
-A coordination task file MUST contain:
-
-1. Objective (the shared goal across all coordinated tasks)
-2. Success Criteria (program-level, measured by child task completion plus integration)
-3. Child Task Registry ([Section 9.6](#96-child-task-registry))
-4. Coordination Strategy and Decision Log
-5. Coordination Loop and Execution Waves ([Section 9.7](#97-coordination-loop-and-execution-waves))
-6. Question Queue and Question Log ([Section 9.8](#98-question-handling-protocol))
-7. Follow-up Tracking ([Section 9.9](#99-follow-up-task-creation))
-8. Work Log (coordinator dispatch and integration entries)
-9. Execution Log
-
-Sections shared with the standard template (Objective, Success Criteria, Decision Log, Work Log, Execution Log) follow the same rules as the standard Task File Structure ([Section 5](#5-task-file-structure)).
-
-### 9.6 Child Task Registry
-
-The coordination file MUST maintain a registry of every coordinated task file. The registry is the authoritative map of the program and MUST be updated whenever a child task is added, changes state, or completes.
-
-| Field | Description |
-|-------|-------------|
-| Task | Linked name of the child task file |
-| ID | Child task ID (e.g., AUTH-001) |
-| Status | Child lifecycle state (see Task Lifecycle States) |
-| Depends On | Child task IDs that must complete first, or "None" |
-| Wave | Dispatch wave or batch number |
-| Assigned | Ally/agent currently executing, or "Unassigned" |
-| Notes | Integration points, blockers, follow-up origin |
-
-### 9.7 Coordination Loop and Execution Waves
-
-The coordinator MUST run a repeating loop:
-
-1. **Plan wave:** Select the set of child tasks whose dependencies are satisfied and whose territories do not conflict (per [`delegation.md` Section 5](delegation.md#5-safety-requirements)).
-2. **Dispatch:** Launch parallel agents/allies for the selected tasks. Record dispatch in the Work Log.
-3. **Monitor:** Track progress. Receive reports verbatim into child task files ([Section 8.2](#82-verbatim-recording-requirement)) and summarize into the coordinator Work Log.
-4. **Integrate:** Reconcile completed child results, resolve cross-task conflicts, and update the registry.
-5. **Decide:** Determine the next wave, create follow-ups ([Section 9.9](#99-follow-up-task-creation)), and handle accumulated questions ([Section 9.8](#98-question-handling-protocol)).
-
-The loop continues until no unblocked child tasks or follow-ups remain.
-
-### 9.8 Question Handling Protocol
-
-Classification and escalation of questions raised by child agents and by the coordinator's own decisions follow the **Question Batching Discipline** in [`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline), which governs all Manager Mode (Delegating) work. This section does not restate those rules. It instantiates them with the persistent bookkeeping a coordination file provides: a Question Log, a Question Queue, and the explicit states below.
-
-#### 9.8.1 Classification
-
-Each question begins in state **Open** ([Section 9.8.3](#983-question-states)). Classify it as Basic or Significant per [`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline). In the coordination file:
-
-- A **Basic** question is recorded in the Question Log ([Section 9.8.4](#984-question-log-and-queue-format)) with its answer, marked **Self-Answered**, and work proceeds.
-- A **Significant** question enters the Question Queue ([Section 9.8.4](#984-question-log-and-queue-format)) in state **Queued** ([Section 9.8.3](#983-question-states)), and all unblocked work continues.
-
-#### 9.8.2 Escalation
-
-Escalate queued questions per the triggers and batching rules in [`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline) (hard block, checkpoint, high rework risk, status request; whole-batch interruption; independent-questions-only sequencing). Map each escalation to a queue-state transition:
-
-- A **hard block** moves the question to **Blocking**, then immediately to **Asked** (it is asked at once).
-- A **checkpoint**, **high-rework-risk**, or **status-request** escalation moves all then-pending queued questions to **Asked**, presented in one batch.
-
-A question moves from **Asked** to **Resolved** when the user answers.
-
-#### 9.8.3 Question States
+#### 9.2.1 Question States
 
 | State | Meaning |
 |-------|---------|
 | **Open** | Just raised, not yet classified |
-| **Self-Answered** | Basic question resolved by the coordinator and logged |
+| **Self-Answered** | Basic question resolved by the manager and logged |
 | **Queued** | Significant question deferred, work continues around it |
 | **Blocking** | Queued question now gates all remaining work |
 | **Asked** | Presented to the user, awaiting answer |
@@ -1285,118 +1198,21 @@ A question moves from **Asked** to **Resolved** when the user answers.
 
 Permitted transitions: `Open → Self-Answered`; `Open → Queued → Blocking → Asked → Resolved`; `Queued → Asked → Resolved` (checkpoint, high rework risk, or status request); any Queued/Blocking/Asked state `→ Cancelled` with a recorded reason.
 
-#### 9.8.4 Question Log and Queue Format
+#### 9.2.2 Question Log and Queue Format
 
-Self-answered (Basic) questions are recorded in the **Question Log** with the source, the coordinator's answer, and the rationale that justified answering autonomously.
+The Question Queue MUST be kept current in real time per [Section 8.1](#81-real-time-updates). Every queued question MUST end as either Resolved by the user or explicitly Cancelled with a recorded reason, never silently dropped. A question MAY be Cancelled when it becomes irrelevant (for example, when the task it blocked is itself Cancelled).
 
-Deferred (Significant) questions are recorded in the **Question Queue** with the source, current state, the task IDs the question blocks (or "none yet"), and the user resolution once Resolved.
-
-The Question Queue MUST be kept current in real time per [Section 8.1](#81-real-time-updates). Every queued question MUST end as either Resolved by the user or explicitly Cancelled with a recorded reason, never silently dropped. A question MAY be Cancelled when it becomes irrelevant (for example, when the child task it blocked is itself Cancelled).
-
-### 9.9 Follow-up Task Creation
-
-Work that surfaces while a child task is in progress and falls within that task's scope MUST be handled within the child task itself. The coordinator MUST NOT spin up a new task file for every surfaced item.
-
-A new follow-up task file is created only when work is deferred or ruled out of the originating task's scope. This is the coordination-mode instance of the general Deferred Work Capture rule ([Section 8.6](#86-deferred-work-capture-at-closure)), applied as the child task closes: any deferred, follow-up, or "nice-to-have" work the child ruled out of scope MUST become its own task file before that child task is marked Completed. When this occurs, the coordinator MUST:
-
-1. Create a follow-up task file in Triage state ([Section 7.2](#72-triage-to-ready-planning-phase)), named per [Section 3.4](#34-file-naming-convention).
-2. Register it in the Child Task Registry ([Section 9.6](#96-child-task-registry)) with its origin recorded in Notes.
-3. Link it from the originating child task and from the coordination file.
-4. Update the master index dashboard ([Section 4.3](#43-index-maintenance)).
-
-Exception: work the coordination effort genuinely requires to meet its objective (for example, a newly discovered blocking dependency) MAY be created as a child task as soon as it is identified, rather than waiting for closure, because the coordinator must track and sequence it. This exception does not extend to nice-to-have or deferrable work, which waits for closure.
-
-Follow-up tasks participate in the coordination loop like any other child task. The coordination file itself MUST NOT be marked Completed ([Section 9.11](#911-lifecycle-and-completion)) while deferred or out-of-scope work remains uncaptured.
-
-### 9.10 Dashboard Integration
-
-A coordination task file MUST appear in the master index (`tasks.md`) and MUST be visually distinguished from standard task files by prefixing its dashboard entry with `[COORD]`. Its dashboard row MUST summarize child rollup (for example, "4/7 child tasks complete, 2 questions queued").
-
-Child task files continue to appear in the dashboard individually under their own lifecycle lanes. The coordination file's "What Was Done" snapshot MUST reference the current wave and the queue depth.
-
-### 9.11 Lifecycle and Completion
-
-A coordination task file MAY be marked Completed ONLY when ALL of the following hold:
-
-- Every child task and follow-up task is Completed or Cancelled.
-- The Question Queue is empty (all Significant questions Resolved or Cancelled).
-- Program-level Success Criteria are met and integration is verified.
-
-If child tasks remain but the coordinator is blocked solely on user input, the coordination file MUST be moved to Blocked (see Task Lifecycle States) with the blocking questions referenced, not Completed.
-
-### 9.12 Coordination Task File Template
-
-```markdown
-# Coordination: [Descriptive Name]
-
-*Created: YYYY-MM-DD HH:MM*
-**Type:** Coordination
-**ID:** COORD-NNN
-**Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
-**Mode:** Manager Mode (Delegating - parallel)
-
-## 1. Objective
-
-[The shared goal across all coordinated tasks and why it matters]
-
-## 2. Success Criteria
-
-- [ ] Program-level criterion 1
-- [ ] Program-level criterion 2
-- [ ] All child tasks Completed or Cancelled; integration verified
-
-## 3. Child Task Registry
-
-| Task | ID | Status | Depends On | Wave | Assigned | Notes |
-|------|----|--------|------------|------|----------|-------|
-| [Task A](./YYYYMMDD-HHMM-task-a.md) | API-001 | In Progress | None | 1 | Nezha | Shared schema owner |
-| [Task B](./YYYYMMDD-HHMM-task-b.md) | API-002 | Ready | API-001 | 2 | Unassigned | Consumes Task A output |
-
-## 4. Coordination Strategy and Decision Log
-
-**Strategy:** [How waves are sequenced, how territories are isolated]
-
-### Decision: [Short title]
-
-*Timestamp: YYYY-MM-DD HH:MM*
-
-**Context / Alternatives / Final Decision / Rationale:** [Per the Decision Log format in the standard task file template (Section 5.2)]
-
-## 5. Coordination Loop / Execution Waves
-
-### Wave 1
-
-- Dispatched: [task IDs] to [allies/agents]
-- Status: [in progress / complete]
-- Integration result: [summary]
-
-## 6. Question Log (Self-Answered, Basic)
-
+```
+Question Log (Basic, self-answered):
 - [Timestamp] Q (source: API-001 agent): [question]
-  - Class: Basic
-  - Answer: [coordinator answer]
+  - Answer: [manager answer]
   - Rationale: [why answering autonomously was justified]
 
-## 7. Question Queue (Significant)
-
+Question Queue (Significant):
 - [Timestamp] Q (source: API-002 agent): [question]
   - State: Queued | Blocking | Asked | Resolved | Cancelled
   - Blocks: [task IDs, or "none yet"]
   - Resolution: [user answer once Resolved]
-
-## 8. Follow-up Tracking
-
-| Follow-up | ID | Origin | Status | Link |
-|-----------|----|--------|--------|------|
-| [Name] | TASK-010 | Surfaced by API-001 | Triage | [link] |
-
-## 9. Work Log
-
-[Coordinator dispatch and integration entries per the Work Log section; agent reports recorded verbatim per Section 8.2]
-
-## 10. Execution Log
-
-[Timeline, work summary, failed approaches, final summary per the Execution Log of the standard task file template]
 ```
 
 ---
@@ -1411,9 +1227,9 @@ Violations of MUST requirements constitute conformance failures.
 - Marking a task Completed before the Simplify and Review Loop has converged, or without documenting each loop iteration in the Work Log (the TDD Workflow section of the standard task file template, [Section 5.2](#52-task-file-template)), is a conformance failure.
 - Failure to immediately and thoroughly update associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
 - Deleting or overwriting previously written task file content ([Section 8.5](#85-content-preservation)) is a critical conformance failure with zero tolerance for exceptions.
-- Performing implementation work directly within a coordination task file, rather than dispatching it to child tasks ([Section 9.1](#91-definition-and-purpose), [Section 9.2](#92-operating-mode)), is a conformance failure.
-- Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline)), or silently dropping a queued question ([Section 9.8.4](#984-question-log-and-queue-format)), is a conformance failure.
-- Marking a coordination task file Completed while child tasks remain or the Question Queue is non-empty ([Section 9.11](#911-lifecycle-and-completion)) is a conformance failure.
+- Performing implementation work directly within a parent (epic) task file, rather than dispatching it to its child task files ([Section 9.1](#91-parent-epic-task-files)), is a conformance failure.
+- Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline)), or silently dropping a queued question ([Section 9.2.2](#922-question-log-and-queue-format)), is a conformance failure.
+- Marking a parent (epic) task file Completed while any child task remains open or its Question Queue is non-empty ([Section 9.1](#91-parent-epic-task-files)) is a conformance failure.
 - Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Section 8.6](#86-deferred-work-capture-at-closure)) is a conformance failure.
 
 ---
