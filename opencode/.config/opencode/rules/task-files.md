@@ -26,11 +26,11 @@ Task files serve multiple purposes:
 
 ### Tone and Voice Policy
 
-- All sections MUST use professional, formal tone with no character voice, per [core.md Formal Output Standards](core.md#formal-output-standards).
+- All sections MUST use professional, formal tone with no character voice, per [`core.md` Formal Output Standards](core.md#formal-output-standards).
 - Exceptions (both in the Work Log template, [Task File Template](#task-file-template)):
   - The Agent Report entry: record verbatim, regardless of tone.
   - The Manager entry: MAY use informal conversational tone appropriate to ongoing work updates while remaining factual and objective.
-- Execution Log, Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown MUST remain formal.
+- Every other section of the task file MUST remain formal.
 
 ---
 
@@ -198,6 +198,10 @@ Each task file MUST contain these sections, as they appear within the standard t
 
 Within a task file, references to its own sections, to another task file, or to these specifications MUST cite the target by its heading title as a markdown link (for example, `[Completion Protocol](#completion-protocol)`), never by a section number. Work Log entries follow this rule as well: when an entry points to a section, decision, or another task, it links to that heading by title.
 
+### Child Task Files
+
+A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
+
 ### Task File Template
 
 ```markdown
@@ -208,15 +212,15 @@ Within a task file, references to its own sections, to another task file, or to 
 
 ## Table of Contents
 
-1. [Objective](#objective)
-2. [Success Criteria](#success-criteria)
-3. [Technical Approach](#technical-approach)
-4. [Risk Assessment](#risk-assessment)
-5. [Testing Strategy](#testing-strategy)
-6. [TDD Workflow](#tdd-workflow)
-7. [Task Breakdown](#task-breakdown)
-8. [Work Log](#work-log)
-9. [Execution Log](#execution-log)
+- [Objective](#objective)
+- [Success Criteria](#success-criteria)
+- [Technical Approach](#technical-approach)
+- [Risk Assessment](#risk-assessment)
+- [Testing Strategy](#testing-strategy)
+- [TDD Workflow](#tdd-workflow)
+- [Task Breakdown](#task-breakdown)
+- [Work Log](#work-log)
+- [Execution Log](#execution-log)
 
 ---
 
@@ -537,10 +541,6 @@ This section summarizes all work performed, whether by agents/allies or by the m
 **Remaining Work:** [If any]
 ```
 
-### Child Task Files
-
-A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
-
 ---
 
 ## Task ID Format
@@ -764,7 +764,7 @@ When a task is closed as Cancelled rather than Completed, deferred or out-of-sco
 
 ## Question Tracking
 
-This section provides the persistent bookkeeping that any Manager-Mode (Delegating) task file MAY use for questions and blockers. The classification and escalation **policy** is canonical in [`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline) (Question Batching Discipline) and is not restated here. This is only the file-based artifact that records it.
+This section provides the persistent bookkeeping that any Manager-Mode (Delegating) task file MAY use for questions and blockers. The classification and escalation **policy** is canonical in [`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline) and is not restated here. This is only the file-based artifact that records it.
 
 A question is recorded in one of two places:
 

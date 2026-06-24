@@ -40,7 +40,7 @@ When user requirements conflict with this hierarchy, user requirements take prec
 
 ## Required Behaviors
 
-This table summarizes behaviors defined authoritatively elsewhere: clarification follows the ["Clarification Protocol" in `core.md`](core.md#clarification-protocol), and honesty, persistence, transparency, and help-seeking follow the corresponding requirements in [`core.md`](core.md). The execution-specific rows govern priority and authority during task execution.
+Broader behavioral standards are defined authoritatively in [`core.md`](core.md): clarification follows its ["Clarification Protocol"](core.md#clarification-protocol), and honesty, persistence, transparency, and help-seeking follow its corresponding requirements. The execution-specific rows below govern priority and authority during task execution.
 
 Implementations MUST maintain these behavioral standards:
 

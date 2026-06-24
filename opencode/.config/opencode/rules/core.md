@@ -188,6 +188,8 @@ When connecting clauses or providing clarification, implementations MUST use:
 
 This requirement applies to all conversational output. Formal documentation (commit messages, technical specs) follows their own formatting standards.
 
+Documentation-specific punctuation rules (the colon-as-enthusiasm-break and en-dash numeric-range rules) live in [`documentation-standards.md`](documentation-standards.md#punctuation-requirements).
+
 ---
 
 ## Advisory Deliberation Protocol
@@ -275,8 +277,6 @@ Implementations MUST comply with user override requests immediately.
 
 ## Conformance
 
-### Conformance and Violations
-
 ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
 Critical conformance rules:
@@ -284,7 +284,7 @@ Critical conformance rules:
 - Communication and response standards (including [Communication Structure and Verbosity Requirements](#communication-structure-and-verbosity-requirements) and [Punctuation and Formatting Requirements](#punctuation-and-formatting-requirements)) are mandatory.
 - All related specifications listed in [Related Specifications](#related-specifications) must be followed.
 
-The following table consolidates prohibited behaviors whose normative requirements are defined in Sections [2](#failure-response-requirements) through [5](#output-format-requirements). Any behavior listed below is forbidden and is a conformance failure if committed:
+The following table consolidates prohibited behaviors whose normative requirements are defined in the sections from [Failure Response Requirements](#failure-response-requirements) through [Output Format Requirements](#output-format-requirements). Any behavior listed below is forbidden and is a conformance failure if committed:
 
 | Behavior | Rationale |
 |----------|-----------|

@@ -20,7 +20,7 @@ This specification defines requirements for documentation, README files, and pro
 
 ## Prohibited Writing Patterns
 
-**Scope of Sections [2](#prohibited-writing-patterns) and [3](#punctuation-requirements):** These rules govern prose. They do NOT apply to table cells, fenced code examples, or `term: definition` reference lists (including the illustrative tables, code fences, and reference lists within this document itself). Those structures are exempt, since they exist to demonstrate patterns or define terms concisely rather than to read as continuous prose.
+**Scope of [Prohibited Writing Patterns](#prohibited-writing-patterns) and [Punctuation Requirements](#punctuation-requirements):** These rules govern prose. They do NOT apply to table cells, fenced code examples, or `term: definition` reference lists (including the illustrative tables, code fences, and reference lists within this document itself). Those structures are exempt, since they exist to demonstrate patterns or define terms concisely rather than to read as continuous prose.
 
 ### Vague Bullet Lists
 
@@ -100,7 +100,7 @@ An en-dash (`–`) is permitted ONLY tight-bound between the endpoints of a nume
 
 ### Completeness
 
-Documentation MUST explain concepts fully with detailed descriptions, and MUST NOT name a concept without explaining it. This prohibition is consistent with [Prohibited Writing Patterns](#prohibited-writing-patterns) (Prohibited Writing Patterns).
+Documentation MUST explain concepts fully with detailed descriptions, and MUST NOT name a concept without explaining it. This prohibition is consistent with [Prohibited Writing Patterns](#prohibited-writing-patterns).
 
 ### Specificity
 
@@ -116,7 +116,7 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements) (casual dash and colon separators).
+Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements) (the colon-as-enthusiasm-break and en-dash misuse prohibitions).
 
 ---
 
