@@ -1,5 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "defaultMode": "auto"
+  },
   "outputStyle": "Concise",
   "language": "english",
   "spinnerTipsEnabled": false,
@@ -13,11 +17,9 @@
     ]
   },
   "effortLevel": "high",
+  "tui": "default",
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "theme": "dark",
-  "showTurnDuration": false,
-  "includeCoAuthoredBy": false,
-  "permissions": {
-    "defaultMode": "auto"
-  }
+  "showTurnDuration": false
 }
