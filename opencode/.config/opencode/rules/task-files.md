@@ -1025,14 +1025,15 @@ All significant decisions MUST include:
 When a task completes, implementations MUST:
 
 1. Confirm the Simplify and Review Loop has converged (see the TDD Workflow section of the standard task file template, [Section 5.2](#52-task-file-template)) before declaring completion
-2. Update task status to "Completed"
-3. Check all acceptance criteria boxes
-4. Add final progress log entry with summary
-5. Complete the Final Summary section
-6. Update master index with completion date
-7. Move task from In Progress table to Completed table in dashboard
-8. Populate "Completed" and "Duration" columns in dashboard
-9. Update dashboard "Last updated" timestamp
+2. Capture all deferred work as new task files per [Section 8.6](#86-deferred-work-capture-at-closure) before declaring completion
+3. Update task status to "Completed"
+4. Check all acceptance criteria boxes
+5. Add final progress log entry with summary
+6. Complete the Final Summary section
+7. Update master index with completion date
+8. Move task from In Progress table to Completed table in dashboard
+9. Populate "Completed" and "Duration" columns in dashboard
+10. Update dashboard "Last updated" timestamp
 
 ### 8.5 Content Preservation
 
@@ -1136,6 +1137,27 @@ The ONLY permissible content deletion is when a user explicitly commands it:
 - "Clear this section"
 
 User requests MUST be explicit and specific. Ambiguous instructions must NOT trigger content deletion.
+
+### 8.6 Deferred Work Capture at Closure
+
+This requirement applies to EVERY task closure, in both standard and coordination task files, in Manager Mode (Solo) and Manager Mode (Delegating).
+
+Before a task may be marked Completed, implementations MUST capture every piece of work that was identified during the task but intentionally left undone. Such work includes:
+
+- Deferred improvements (work consciously postponed)
+- Follow-up items and "nice-to-have" enhancements
+- Anything discovered during the task but ruled out of scope
+- Simpler-solution tradeoffs recorded per [`coding-standards.md` Section 11.2](coding-standards.md#112-simple-solution-documentation)
+
+For each such item, implementations MUST:
+
+1. Create a new task file in Triage state ([Section 7.2](#72-triage-to-ready-planning-phase)), named per [Section 3.4](#34-file-naming-convention).
+2. Register it in the master index dashboard ([Section 4.3](#43-index-maintenance)).
+3. Link it from the closing task's Final Summary "Remaining Work" entry.
+
+Deferred or out-of-scope work MUST NOT survive a closure recorded only as prose, a TODO, or a Work Log note: any such work that outlives the task becomes its own task file. A task MUST NOT be marked Completed while identified deferred or out-of-scope work remains uncaptured as task files.
+
+When a task is closed as Cancelled rather than Completed, deferred or out-of-scope work that is still desired MUST likewise be captured as new task files; work that is no longer wanted requires no capture.
 
 ---
 
@@ -1273,14 +1295,18 @@ The Question Queue MUST be kept current in real time per [Section 8.1](#81-real-
 
 ### 9.9 Follow-up Task Creation
 
-When a child task surfaces new work (discovered scope, deferred improvement, or a newly required task), the coordinator MUST:
+Work that surfaces while a child task is in progress and falls within that task's scope MUST be handled within the child task itself. The coordinator MUST NOT spin up a new task file for every surfaced item.
+
+A new follow-up task file is created only when work is deferred or ruled out of the originating task's scope. This is the coordination-mode instance of the general Deferred Work Capture rule ([Section 8.6](#86-deferred-work-capture-at-closure)), applied as the child task closes: any deferred, follow-up, or "nice-to-have" work the child ruled out of scope MUST become its own task file before that child task is marked Completed. When this occurs, the coordinator MUST:
 
 1. Create a follow-up task file in Triage state ([Section 7.2](#72-triage-to-ready-planning-phase)), named per [Section 3.4](#34-file-naming-convention).
 2. Register it in the Child Task Registry ([Section 9.6](#96-child-task-registry)) with its origin recorded in Notes.
 3. Link it from the originating child task and from the coordination file.
 4. Update the master index dashboard ([Section 4.3](#43-index-maintenance)).
 
-Follow-up tasks participate in the coordination loop like any other child task.
+Exception: work the coordination effort genuinely requires to meet its objective (for example, a newly discovered blocking dependency) MAY be created as a child task as soon as it is identified, rather than waiting for closure, because the coordinator must track and sequence it. This exception does not extend to nice-to-have or deferrable work, which waits for closure.
+
+Follow-up tasks participate in the coordination loop like any other child task. The coordination file itself MUST NOT be marked Completed ([Section 9.11](#911-lifecycle-and-completion)) while deferred or out-of-scope work remains uncaptured.
 
 ### 9.10 Dashboard Integration
 
@@ -1388,6 +1414,7 @@ Violations of MUST requirements constitute conformance failures.
 - Performing implementation work directly within a coordination task file, rather than dispatching it to child tasks ([Section 9.1](#91-definition-and-purpose), [Section 9.2](#92-operating-mode)), is a conformance failure.
 - Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline)), or silently dropping a queued question ([Section 9.8.4](#984-question-log-and-queue-format)), is a conformance failure.
 - Marking a coordination task file Completed while child tasks remain or the Question Queue is non-empty ([Section 9.11](#911-lifecycle-and-completion)) is a conformance failure.
+- Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Section 8.6](#86-deferred-work-capture-at-closure)) is a conformance failure.
 
 ---
 
