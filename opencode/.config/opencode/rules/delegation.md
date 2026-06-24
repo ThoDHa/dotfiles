@@ -271,7 +271,7 @@ Implementations MUST provide reporting at the cadence specified in this table.
 
 ### 6.4 Question Batching Discipline
 
-In Manager Mode (Delegating), questions arise from child agents and from the manager's own decisions while parallel work is in flight. The manager MUST handle these questions so as to interrupt the user no more than necessary. This discipline applies to all delegating work, whether or not a coordination task file (see the [Coordination Task Files section of `task-files.md`](task-files.md#9-coordination-task-files)) exists.
+In Manager Mode (Delegating), questions arise from child agents and from the manager's own decisions while parallel work is in flight. The manager MUST handle these questions so as to interrupt the user no more than necessary. This discipline applies to all delegating work, whether or not it is recorded in a task file (when it is, see [Question Tracking in `task-files.md`](task-files.md#92-question-tracking) for the file-based bookkeeping).
 
 **Classification.** The manager MUST classify each question by impact:
 
@@ -291,7 +291,7 @@ The manager MUST NOT fabricate an answer to a Significant question to avoid inte
 
 **Independent questions only.** Batching questions into one ask is permitted ONLY when those questions are mutually independent. When one question's framing depends on another's answer, the manager MUST sequence them (ask the first, re-derive the second from the answer) rather than merging dependent questions into a single malformed batch. The manager MAY batch all currently-independent questions and defer the dependent remainder to the next escalation.
 
-A coordination task file instantiates this discipline with persistent bookkeeping (a Question Log and Question Queue with explicit states); see the [Question Handling Protocol in the Coordination Task Files section of `task-files.md`](task-files.md#98-question-handling-protocol). Delegating work without a coordination file follows the same principle without the file-based bookkeeping.
+A Manager-Mode task file instantiates this discipline with persistent bookkeeping (a Question Log and Question Queue with explicit states); see [Question Tracking in `task-files.md`](task-files.md#92-question-tracking). Delegating work not recorded in a task file follows the same principle without the file-based bookkeeping.
 
 ---
 
