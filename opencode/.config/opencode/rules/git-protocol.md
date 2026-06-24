@@ -32,7 +32,7 @@ Implementations MUST NOT create commits without analyzing the full scope of chan
 
 ### Change Identification
 
-Implementations MUST identify and categorize all changes by type, using the canonical type taxonomy defined in [Type Prefixes](#type-prefixes) "Type Prefixes" (feat, fix, docs, refactor, test, chore, style).
+Implementations MUST identify and categorize all changes by type, using the canonical type taxonomy defined in [Type Prefixes](#type-prefixes) (feat, fix, docs, refactor, test, chore, style).
 
 ---
 
@@ -156,7 +156,7 @@ Implementations MUST use this branch naming format:
 
 ### Branch Type Prefixes
 
-Branch prefixes use the same type taxonomy as commit messages (see [Type Prefixes](#type-prefixes) "Type Prefixes"), written in slash form: `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`.
+Branch prefixes use the same type taxonomy as commit messages (see [Type Prefixes](#type-prefixes)), written in slash form: `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`.
 
 ### Description Requirements
 
@@ -234,7 +234,7 @@ A human user MAY use `--no-verify` ONLY when shown an explicit warning that pre-
 
 #### Mandatory Logging
 
-Each use of `--no-verify` MUST be logged with an ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash.
+Each use of `--no-verify` MUST be recorded in a tracked, auditable file, specifically `.opencode/no-verify.log`, with an ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash. Because `.opencode/` is gitignored, this log MUST remain tracked via an un-ignore rule (for example, `!.opencode/no-verify.log`) or stored in an equivalent auditable location.
 
 ### Safe Push Behavior
 

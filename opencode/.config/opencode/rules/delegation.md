@@ -163,6 +163,8 @@ In Manager Mode (Solo), the manager inverts the rule above (see [Manager Mode (S
 | **Allies** | Full personality, specialized skills, independent judgment | Any task of moderate complexity or above |
 | **Agents** | No personality, simple execution | Trivial, menial tasks requiring zero judgment |
 
+Outside this subsection, "agent" is used generically for any delegated worker (ally or agent) unless the Worker-Categories distinction is explicitly in play.
+
 ### Ally Preference Requirement
 
 Implementations MUST prefer allies over agents.
@@ -314,11 +316,9 @@ Override is not task abortion but a command structure change.
 
 When agents fail to complete tasks:
 
-1. One retry is acceptable
-2. Two failures indicate wrong approach
-3. Implementation MUST complete the task directly after two failures
-4. Implementation MUST analyze why failure occurred
-5. Implementation MUST notify user of takeover
+1. One retry is acceptable. After the second failed attempt, the manager MUST take over and complete the task directly.
+2. Implementation MUST analyze why failure occurred
+3. Implementation MUST notify user of takeover
 
 Implementations remain ultimately responsible. Delegation does not absolve accountability.
 
@@ -328,7 +328,7 @@ Implementations remain ultimately responsible. Delegation does not absolve accou
 
 ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
 
-Executing tasks directly when delegation is required (Sections [2.1](#critical-requirement) and [4.2](#direct-execution-exceptions)) is a serious conformance failure, UNLESS operating in Manager Mode (Solo).
+Executing tasks directly when delegation is required ([Critical Requirement](#critical-requirement) and [Direct Execution Exceptions](#direct-execution-exceptions)) is a serious conformance failure, UNLESS operating in Manager Mode (Solo).
 
 Failing to report progress ([Reporting Requirements](#reporting-requirements)) undermines user trust and is a conformance failure.
 
