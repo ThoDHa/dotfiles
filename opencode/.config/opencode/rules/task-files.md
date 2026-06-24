@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Scope
+## Scope
 
 This specification defines requirements for creating and managing task files during complex operations. Task files provide comprehensive documentation of work performed, decisions made, knowledge gained, bugs encountered, and progress tracking.
 
@@ -19,24 +19,24 @@ Task files serve multiple purposes:
 - Recording strategic decisions and their rationale
 - Maintaining a complete work history for review and reference
 
-### 1.1 Related Specifications
+### Related Specifications
 
 - [`delegation.md`](delegation.md): Manager Mode and delegation requirements
 - [`execution-standards.md`](execution-standards.md): Task execution requirements and task terminology context
 
-### 1.2 Tone and Voice Policy
+### Tone and Voice Policy
 
-- All sections MUST use professional, formal tone with no character voice, per [core.md Section 5.1](core.md#51-formal-output-standards).
-- Exceptions:
-  - 6.1 Agent Report: record verbatim, regardless of tone.
-  - 6.2 Manager entry: MAY use informal conversational tone appropriate to ongoing work updates while remaining factual and objective.
-- Execution Log, Objective, Success Criteria, Technical Approach, Risk Assessment, Dependencies and Prerequisites, Testing Strategy, Rollback and Recovery Plan, Communication Plan, Post-Completion Actions, Task Breakdown MUST remain formal.
+- All sections MUST use professional, formal tone with no character voice, per [core.md Formal Output Standards](core.md#formal-output-standards).
+- Exceptions (both in the Work Log template, [Task File Template](#task-file-template)):
+  - The Agent Report entry: record verbatim, regardless of tone.
+  - The Manager entry: MAY use informal conversational tone appropriate to ongoing work updates while remaining factual and objective.
+- Execution Log, Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown MUST remain formal.
 
 ---
 
-## 2. Creation Rules
+## Creation Rules
 
-### 2.1 Creation Triggers
+### Creation Triggers
 
 Task files MUST be created ONLY when:
 
@@ -50,7 +50,7 @@ Task files MUST be created ONLY when:
 Note: Casual summary requests (e.g., "summarize", "quick summary", "recap") 
 do NOT trigger task file creation. Use direct responses for these.
 
-### 2.2 Creation Prohibition
+### Creation Prohibition
 
 Task files MUST NOT be created proactively without user request.
 
@@ -58,9 +58,9 @@ Standard todo tracking via TodoWrite is sufficient for most operations.
 
 ---
 
-## 3. Directory Structure
+## Directory Structure
 
-### 3.1 Required Structure
+### Required Structure
 
 When task files are required, implementations MUST use this structure:
 
@@ -72,13 +72,13 @@ Project Root/
         └── YYYYMMDD-HHMM-task-description.md # Individual task files
 ```
 
-### 3.2 Directory Purpose
+### Directory Purpose
 
 The `.opencode/` directory keeps task management artifacts separate from project code.
 
 This directory MAY be extended for other OpenCode artifacts (session logs, cache, etc.).
 
-### 3.3 Gitignore Recommendation
+### Gitignore Recommendation
 
 Users SHOULD add `.opencode/` to their global gitignore:
 
@@ -89,7 +89,7 @@ Users SHOULD add `.opencode/` to their global gitignore:
 
 Users MAY commit `.opencode/` selectively if task history should be preserved.
 
-### 3.4 File Naming Convention
+### File Naming Convention
 
 Individual task files MUST follow this format:
 
@@ -102,13 +102,13 @@ Individual task files MUST follow this format:
 
 ---
 
-## 4. Master Index Requirements
+## Master Index Requirements
 
-### 4.1 Master Index Location
+### Master Index Location
 
 The master index MUST be located at `.opencode/tasks.md`.
 
-### 4.2 Master Index Template
+### Master Index Template
 
 ```markdown
 # Task Board Dashboard
@@ -119,13 +119,11 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 | Task | Priority | Updated |
 |------|----------|---------|
-| [API Auth Refactor](./tasks/20241222-0710-api-auth-refactor.md) | High | 2024-12-31 19:00 |
 
 ## Ready
 
 | Task | Priority | Updated |
 |------|----------|---------|
-| [Task Name](./tasks/20241222-0710-task-name.md) | Medium | 2024-12-31 19:30 |
 
 ## In Progress
 
@@ -139,41 +137,23 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 | Task | Status | Reason | Updated |
 |------|--------|---------|---------|
-| [Task Name](./tasks/20241222-0710-task-name.md) | Blocked | Waiting for API | 2024-12-31 19:50 |
 
 ## Completed
 
 | Task | Completed | Duration |
 |------|-----------|----------|
-| [Task Name](./tasks/20241222-0710-task-name.md) | 2024-12-30 20:00 | 2d |
-
-**Note:** Tasks are listed in chronological order (oldest completion first, newest completion last).
 
 ## Archive
 
 | Task | Completed | Duration |
 |------|-----------|----------|
-| [Older Task](./tasks/20241201-0900-older-task.md) | 2024-12-01 10:00 | 1d |
-
-**Note:** Older completed tasks moved here for record keeping. Listed chronologically (oldest first).
-
----
-
-## Task Management
-
-**Task Creation:** Quick task files created in Triage, requires exploration and fleshing out
-**Triage → Ready:** Task fully fleshed out, all information collected
-**Ready → In Progress:** Work begins on task
-**In Progress → Completed:** Acceptance criteria met, work finished
-**State Recovery:** Blocked/Cancelled tasks can return to Ready/In Progress
-**Automatic Promotion:** Tasks auto-promote through lifecycle as work progresses
 
 ---
 
 *Last updated: YYYY-MM-DD HH:MM - Auto-updated when task status changes*
 ```
 
-### 4.3 Index Maintenance
+### Index Maintenance
 
 The master index (`tasks.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
 
@@ -198,27 +178,27 @@ Required actions (MANDATORY):
 
 ---
 
-## 5. Task File Structure
+## Task File Structure
 
-### 5.1 Required Sections
+### Required Sections
 
-Each task file MUST contain these sections, numbered as they appear within the standard task file template in [Section 5.2](#52-task-file-template) (these numbers are internal to the template, not trunk section numbers of this specification):
+Each task file MUST contain these sections, as they appear within the standard task file template ([Task File Template](#task-file-template)):
 
-1. Objective
-2. Success Criteria
-3. Technical Approach (with Decision Log)
-4. Risk Assessment
-5. Dependencies and Prerequisites
-6. Testing Strategy
-7. TDD Workflow
-8. Rollback and Recovery Plan
-9. Communication Plan
-10. Post-Completion Actions
-11. Task Breakdown
-12. Work Log
-13. Execution Log
+- Objective
+- Success Criteria
+- Technical Approach (with Decision Log)
+- Risk Assessment
+- Testing Strategy
+- TDD Workflow
+- Task Breakdown
+- Work Log
+- Execution Log
 
-### 5.2 Task File Template
+### Cross-Reference Convention
+
+Within a task file, references to its own sections, to another task file, or to these specifications MUST cite the target by its heading title as a markdown link (for example, `[Completion Protocol](#completion-protocol)`), never by a section number. Work Log entries follow this rule as well: when an entry points to a section, decision, or another task, it links to that heading by title.
+
+### Task File Template
 
 ```markdown
 # Task: [Descriptive Name]
@@ -228,35 +208,31 @@ Each task file MUST contain these sections, numbered as they appear within the s
 
 ## Table of Contents
 
-1. [Objective](#1-objective)
-2. [Success Criteria](#2-success-criteria)
-3. [Technical Approach](#3-technical-approach)
-4. [Risk Assessment](#4-risk-assessment)
-5. [Dependencies and Prerequisites](#5-dependencies-and-prerequisites)
-6. [Testing Strategy](#6-testing-strategy)
-7. [TDD Workflow](#7-tdd-workflow)
-8. [Rollback and Recovery Plan](#8-rollback-and-recovery-plan)
-9. [Communication Plan](#9-communication-plan)
-10. [Post-Completion Actions](#10-post-completion-actions)
-11. [Task Breakdown](#11-task-breakdown)
-12. [Work Log](#12-work-log)
-13. [Execution Log](#13-execution-log)
+1. [Objective](#objective)
+2. [Success Criteria](#success-criteria)
+3. [Technical Approach](#technical-approach)
+4. [Risk Assessment](#risk-assessment)
+5. [Testing Strategy](#testing-strategy)
+6. [TDD Workflow](#tdd-workflow)
+7. [Task Breakdown](#task-breakdown)
+8. [Work Log](#work-log)
+9. [Execution Log](#execution-log)
 
 ---
 
-## 1. Objective
+## Objective
 
 [What we're trying to achieve and why]
 
 **Business Value:** [Why this matters]
 
-## 2. Success Criteria
+## Success Criteria
 
 - [ ] Specific, measurable requirement 1
 - [ ] Specific, measurable requirement 2
 - [ ] Specific, measurable requirement 3
 
-## 3. Technical Approach
+## Technical Approach
 
 **Strategy:** [High-level approach]
 
@@ -274,34 +250,16 @@ Each task file MUST contain these sections, numbered as they appear within the s
 - `tests/related-test.spec.js` - [Tests that need to be updated or provide context]
 - `docs/api-documentation.md` - [Documentation that needs updating]
 
-### 3.1 Decision Log
+### Decision Log
 
-#### Decision: [Short title]
-
-*Timestamp: YYYY-MM-DD HH:MM*
-
-**Context:** [What problem or choice prompted this decision]
-
-**Alternatives Considered:**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **Option A: [Name]** | [Benefits] | [Drawbacks] |
-| **Option B: [Name]** | [Benefits] | [Drawbacks] |
-| **Option C: [Name]** | [Benefits] | [Drawbacks] |
-
-**Rejected Alternatives:**
-
-- **Option A rejected because:** [Specific reasoning]
-- **Option C rejected because:** [Specific reasoning]
-
-**Final Decision:** Option B: [Name]
-
-**Rationale:** [Full explanation of why this was chosen]
+**Decision: [title]** · [YYYY-MM-DD HH:MM]
+- **Context:** [What problem or choice prompted this decision]
+- **Alternatives + why rejected:** [Option A — rejected because ...; Option C — rejected because ...]
+- **Chosen + rationale:** [Option B — why this was chosen]
 
 ---
 
-## 4. Risk Assessment
+## Risk Assessment
 
 ### High Risk
 
@@ -318,45 +276,7 @@ Each task file MUST contain these sections, numbered as they appear within the s
 - **[Risk name]**
   - *Mitigation:* [Strategy]
 
-## 5. Dependencies and Prerequisites
-
-### External Dependencies
-
-**System Dependencies:**
-- [External API/service name] - [Why needed, what functionality depends on it]
-- [Database/data source] - [Access requirements, data needed]
-- [Third-party service] - [Integration points, reliability concerns]
-
-**Tool Requirements:**
-- [Specific tool] version X.Y.Z or higher - [Why this version is required]
-- [Configuration requirement] - [Specific setup needed]
-- [Access permissions] - [What level of access is needed where]
-
-### Knowledge Prerequisites
-
-**Domain Expertise Required:**
-- [Subject area] - [Level of expertise needed, who has this knowledge]
-- [Technical skill] - [Specific knowledge areas that will be essential]
-- [Business context] - [Domain understanding required for good decisions]
-
-**Learning Resources:**
-- [Documentation/guide] - [Key resources for getting up to speed]
-- [Expert contact] - [Who to consult for domain questions]
-- [Previous related work] - [Past projects/tasks that provide context]
-
-### Environmental Prerequisites
-
-**Development Environment:**
-- [Specific setup requirements]
-- [Local dependencies that must be installed]
-- [Configuration files that must be present]
-
-**Access Requirements:**
-- [Systems that must be accessible]
-- [Credentials/permissions needed]
-- [VPN/network access requirements]
-
-## 6. Testing Strategy
+## Testing Strategy
 
 ### Test Plan Overview
 
@@ -391,7 +311,7 @@ Each task file MUST contain these sections, numbered as they appear within the s
 - [ ] Security tests pass (if applicable)
 - [ ] Cross-browser/platform testing completed (if applicable)
 
-## 7. TDD Workflow
+## TDD Workflow
 
 ### TDD Execution Protocol
 
@@ -452,88 +372,11 @@ Each iteration MUST be recorded in the Work Log:
 - Converged: [yes/no - yes only when the iteration produced no fixes]
 ```
 
-### TDD Decision Points
+### TDD Exceptions
 
-**When Tests Already Exist:**
-- If existing tests cover the functionality: Update tests to match new expected behavior
-- If tests need extension: Add new test cases for edge cases and requirements
-- If tests are obsolete: Document deprecation and replace with new tests
+Deviations from the TDD workflow MUST be justified in the Work Log, cross-referencing [`coding-standards.md` Test Planning Requirement](coding-standards.md#test-planning-requirement) and [Test Change Intent Verification](coding-standards.md#test-change-intent-verification).
 
-**When No Tests Exist:**
-- Write tests that define expected behavior BEFORE any implementation
-- Focus on testing public interfaces and critical paths
-- Include edge cases, error conditions, and boundary values
-- Document why tests couldn't be written (if applicable) for future reference
-
-**When Test Execution Fails:**
-- Determine if failure is due to environment, dependencies, or test code
-- Fix infrastructure issues before proceeding with implementation
-- Document infrastructure problems and resolutions
-- Do not proceed to implementation if test infrastructure is broken
-
-### TDD Work Log Entry Format
-
-When following TDD workflow, Work Log entries MUST include:
-
-**Example TDD Work Log Entry:**
-
-```
-[Timestamp] TDD Phase 1: Check Existing Tests
-- Command: `npm test` / `pytest` / [test command]
-- Result: [X] passing, [Y] failing
-- Failing tests: [list test names/IDs]
-
-[Timestamp] TDD Phase 2: Update Tests
-- File modified: `tests/example.test.js`
-- Changes: Added test case [name] to verify [behavior]
-- Expected behavior: [description of what should happen]
-
-[Timestamp] TDD Phase 3: Verify Tests Fail
-- Command: `npm test` / [test command]
-- Result: [X] passing, [Y] failing (including new test)
-- Failure message: [specific error confirming test works]
-
-[Timestamp] TDD Phase 4: Implement Solution
-- File modified: `src/example.js`
-- Changes: [description of implementation]
-
-[Timestamp] TDD Phase 5: Verify Tests Pass
-- Command: `npm test` / [test command]
-- Result: All tests passing
-- Coverage: [X]% (if measured)
-```
-
-### TDD Exceptions and Edge Cases
-
-**Exceptions Requiring Documented Justification:**
-
-Implementations MAY deviate from TDD workflow ONLY when:
-
-- **Emergency Hotfixes:** Document the production fix, THEN write regression tests
-- **Exploratory Work:** When behavior is unknown, write tests after understanding system
-- **Infrastructure Changes:** When no production code changes (only test infrastructure)
-- **External API Integration:** When external dependencies prevent test-first approach
-
-**Exception Documentation Requirement:**
-
-When deviating from TDD workflow, implementions MUST:
-1. Document the exception in the Work Log with justification
-2. Explain why TDD workflow couldn't be followed
-3. Document when tests will be written (if deferred)
-4. Get explicit approval if the exception is significant
-
-**Example Exception Entry:**
-
-```
-[Timestamp] TDD Exception: Emergency Production Hotfix
-- Justification: Production outage requires immediate fix, cannot run tests in prod
-- Action: Applied fix to [file], deferring tests to follow-up
-- Follow-up required: Write regression tests for this fix within 24 hours
-```
-
-### TDD Integration with Task Lifecycle
-
-**Ready → In Progress Transition Requirements:**
+### Ready → In Progress Transition Requirements
 
 Before transitioning to In Progress, task file MUST have:
 - [ ] Test command identified (how to run tests)
@@ -541,11 +384,7 @@ Before transitioning to In Progress, task file MUST have:
 - [ ] Test file locations identified
 - [ ] Existing test baseline recorded
 
-**In Progress Work Execution:**
-
-All work MUST follow TDD sequence documented in Section 7. Work Log MUST track each phase with timestamps and results.
-
-**Completion Validation:**
+### Completion Validation
 
 Task CANNOT be marked Completed unless:
 - All tests pass (including newly written tests)
@@ -555,152 +394,7 @@ Task CANNOT be marked Completed unless:
 - The Simplify and Review Loop has converged (a full iteration produced no fixes), or the iteration cap was reached and outstanding findings were documented and accepted by the user
 - Each loop iteration is documented in the Work Log
 
-## 8. Rollback and Recovery Plan
-
-### Rollback Strategy
-
-**Rollback Triggers:**
-- [Specific conditions that would require rollback]
-- [Performance degradation thresholds]
-- [Error rate increases beyond X%]
-- [User-reported issues of type Y]
-
-**Rollback Procedure:**
-
-1. **Immediate Actions:**
-   - [Step 1: Immediate safety measures]
-   - [Step 2: Traffic/load management]
-   - [Step 3: System state preservation]
-
-2. **Rollback Steps:**
-   - [Step 1: Reverse code changes]
-   - [Step 2: Database rollback (if needed)]
-   - [Step 3: Configuration restoration]
-   - [Step 4: Cache clearing/reset]
-
-3. **Verification Steps:**
-   - [Step 1: Functionality verification]
-   - [Step 2: Performance verification]
-   - [Step 3: Data integrity checks]
-
-### Data Protection
-
-**Backup Requirements:**
-- [What data needs backup before changes]
-- [Backup procedure and location]
-- [Recovery testing requirements]
-
-**Data Migration Safety:**
-- [Reversible migration strategy]
-- [Data validation procedures]
-- [Rollback data requirements]
-
-### Recovery Procedures
-
-**System Recovery:**
-- [Steps to restore system functionality]
-- [Dependencies that need restoration]
-- [Monitoring to confirm recovery]
-
-**Communication During Incidents:**
-- [Who to notify immediately]
-- [Escalation procedures]
-- [User communication requirements]
-
-## 9. Communication Plan
-
-### Stakeholder Notifications
-
-**Pre-Work Communications:**
-
-| Stakeholder Group | Notification Method | Timeline | Information Needed |
-|-------------------|---------------------|----------|-------------------|
-| [Team/Department] | [Email/Slack/Meeting] | [X days before] | [What they need to know] |
-| [End Users] | [Communication channel] | [Timeline] | [Impact information] |
-| [Leadership] | [Method] | [When] | [Business impact summary] |
-
-**During-Work Communications:**
-- [Progress update schedule and recipients]
-- [Issue escalation procedures]
-- [Status communication channels]
-
-**Post-Work Communications:**
-- [Completion notifications and recipients]
-- [Results summary requirements]
-- [Follow-up meeting needs]
-
-### Documentation Updates
-
-**Internal Documentation:**
-- [System documentation to update]
-- [Process documentation changes]
-- [Knowledge base updates]
-
-**External Documentation:**
-- [User-facing documentation]
-- [API documentation updates]
-- [Public-facing change logs]
-
-### Knowledge Transfer
-
-**Team Knowledge Sharing:**
-- [What knowledge needs to be shared]
-- [Knowledge transfer sessions required]
-- [Documentation handoffs needed]
-
-## 10. Post-Completion Actions
-
-### Immediate Follow-Up (Within 24-48 hours)
-
-**Monitoring Requirements:**
-- [Specific metrics to watch]
-- [Duration of intensive monitoring]
-- [Alert thresholds to set]
-- [Who is responsible for monitoring]
-
-**Validation Steps:**
-- [ ] Functionality verification in production
-- [ ] Performance baseline confirmation
-- [ ] User acceptance validation (if applicable)
-- [ ] Integration points verification
-
-### Short-Term Follow-Up (1-2 weeks)
-
-**Performance Review:**
-- [Metrics to evaluate after initial period]
-- [Success criteria validation]
-- [User feedback collection]
-
-**Process Improvements:**
-- [Lessons learned documentation]
-- [Process refinements identified]
-- [Tool/workflow improvements needed]
-
-### Long-Term Actions
-
-**Future Work Identification:**
-- [Related work that should be scheduled]
-- [Technical debt items created/resolved]
-- [Optimization opportunities identified]
-
-**Knowledge Documentation:**
-- [Best practices to document]
-- [Pitfalls to record for future reference]
-- [Reusable components/patterns created]
-
-### Success Metrics Review
-
-**Quantitative Measures:**
-- [Performance improvements achieved]
-- [Error rate changes]
-- [User adoption metrics (if applicable)]
-
-**Qualitative Measures:**
-- [Team feedback on changes]
-- [User satisfaction impacts]
-- [Development workflow improvements]
-
-## 11. Task Breakdown
+## Task Breakdown
 
 ### Task [PREFIX-NNN]: [Name]
 
@@ -734,11 +428,11 @@ Task CANNOT be marked Completed unless:
 
 ---
 
-## 12. Work Log
+## Work Log
 
-This section tracks all work performed during the task, whether by agents/allies or by the manager. Tone note: Work Log entries follow the exception in Section 1.2.
+This section tracks all work performed during the task, whether by agents/allies or by the manager. Tone note: Work Log entries follow the exception in [Tone and Voice Policy](#tone-and-voice-policy).
 
-### 6.1 [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
+### [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
 
 **Purpose:** [Brief description of what this agent was asked to do]
 
@@ -763,7 +457,7 @@ This section tracks all work performed during the task, whether by agents/allies
 - [Action 1 triggered by this report]
 - [Action 2 triggered by this report]
 
-### 6.2 [Timestamp]: Manager: [Task ID or Activity Description]
+### [Timestamp]: Manager: [Task ID or Activity Description]
 
 **Activity:** [What the manager was doing - e.g., "bug investigation", "implementation", "code review", "exploration"]
 
@@ -791,7 +485,7 @@ This section tracks all work performed during the task, whether by agents/allies
 
 ---
 
-## 7. Execution Log
+## Execution Log
 
 ### Project Timeline
 
@@ -843,15 +537,19 @@ This section summarizes all work performed, whether by agents/allies or by the m
 **Remaining Work:** [If any]
 ```
 
+### Child Task Files
+
+A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
+
 ---
 
-## 6. Task ID Format
+## Task ID Format
 
-### 6.1 ID Pattern
+### ID Pattern
 
 Task IDs MUST follow the pattern: `PREFIX-NNN`
 
-### 6.2 Standard Prefixes
+### Standard Prefixes
 
 | Prefix | Meaning |
 |--------|---------|
@@ -868,7 +566,7 @@ Custom prefixes MAY be used when they improve clarity.
 
 ---
 
-## 7. Task Lifecycle States
+## Task Lifecycle States
 
 | State | Description |
 |-------|-------------|
@@ -879,7 +577,7 @@ Custom prefixes MAY be used when they improve clarity.
 | **Cancelled** | No longer needed |
 | **Completed** | Finished successfully, acceptance criteria met |
 
-### 7.1 Automatic State Transitions
+### Automatic State Transitions
 
 Implementations MUST automatically transition task states when triggering events occur:
 
@@ -893,7 +591,7 @@ Implementations MUST automatically transition task states when triggering events
 
 
 
-### 7.2 Triage to Ready Planning Phase
+### Triage to Ready Planning Phase
 
 The transition from Triage to Ready is the **planning and clarification phase**: the critical stage where a sparse task skeleton becomes a fully-fleshed execution plan.
 
@@ -912,7 +610,7 @@ Tasks are created in Triage state **intentionally incomplete**:
 
 During Triage → Ready transition, implementations MUST:
 
-1. **Apply Clarification Protocol** (see [`core.md` Section 3.1](core.md#31-clarification-protocol))
+1. **Apply Clarification Protocol** (see [`core.md` Clarification Protocol](core.md#clarification-protocol))
    - Ask pointed questions to understand requirements
    - Clarify vague or ambiguous objectives
    - Identify specific success criteria
@@ -964,14 +662,14 @@ The Triage → Ready phase embodies "think first, do second":
 
 ---
 
-## 8. Update Requirements
+## Update Requirements
 
-### 8.1 Real-Time Updates
+### Real-Time Updates
 
 **Absolute Update Mandate:**
 For any work done related to a task file, the task file MUST be updated immediately and thoroughly, in real time, as the work occurs. This includes actions, discoveries, decisions, status changes, and progress, with no exceptions.
 
-It is strictly prohibited to defer, batch, or omit updates. Task files are the single, authoritative, living record for the related work. The master index dashboard must also be updated in parallel with each change, per [Section 4.3](#43-index-maintenance).
+It is strictly prohibited to defer, batch, or omit updates. Task files are the single, authoritative, living record for the related work. The master index dashboard must also be updated in parallel with each change, per [Index Maintenance](#index-maintenance).
 
 Failure to update the task file for any related work is a critical conformance failure and will be treated as such.
 
@@ -987,19 +685,19 @@ Implementations MUST update task documentation continuously as work progresses:
 - Decision Log updated AT THE MOMENT significant choices are made
 - Task status updated as work progresses through phases
 - Failed Approaches documented IMMEDIATELY when attempts fail
-- Task status updates MUST follow [Section 4.3](#43-index-maintenance) synchronization rules (single source of truth).
+- Task status updates MUST follow [Index Maintenance](#index-maintenance) synchronization rules (single source of truth).
 
 **Dashboard Synchronization:** The master index (`tasks.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress.
 
 **Critical principle:** Users should be able to open a task file at ANY moment and see current work status, not outdated information.
 
-### 8.2 Verbatim Recording Requirement
+### Verbatim Recording Requirement
 
 Agent output MUST be recorded verbatim in the Work Log section (agent entries).
 
 Implementations MUST NOT summarize or paraphrase agent reports.
 
-Manager work entries (the Work Log manager-entry format in the standard task file template, [Section 5.2](#52-task-file-template)) MUST accurately document actions, findings, and outcomes.
+Manager work entries (the Work Log manager-entry format in the standard task file template, [Task File Template](#task-file-template)) MUST accurately document actions, findings, and outcomes.
 
 Full context is valuable for:
 
@@ -1009,7 +707,7 @@ Full context is valuable for:
 - Providing accountability and traceability
 - Reviewing manager's own work and decisions later
 
-### 8.3 Decision Documentation Requirement
+### Decision Documentation Requirement
 
 All significant decisions MUST include:
 
@@ -1017,139 +715,45 @@ All significant decisions MUST include:
 - Rejection reasoning for each alternative not chosen
 - Tradeoffs accepted with the chosen approach
 
-### 8.4 Completion Protocol
+### Completion Protocol
 
 When a task completes, implementations MUST:
 
-1. Confirm the Simplify and Review Loop has converged (see the TDD Workflow section of the standard task file template, [Section 5.2](#52-task-file-template)) before declaring completion
-2. Capture all deferred work as new task files per [Section 8.6](#86-deferred-work-capture-at-closure) before declaring completion
-3. Update task status to "Completed"
-4. Check all acceptance criteria boxes
-5. Add final progress log entry with summary
-6. Complete the Final Summary section
-7. Update master index with completion date
-8. Move task from In Progress table to Completed table in dashboard
-9. Populate "Completed" and "Duration" columns in dashboard
-10. Update dashboard "Last updated" timestamp
+1. Confirm all Task Breakdown subtasks, whether tracked inline or as child task files ([Child Task Files](#child-task-files)), are themselves Completed or Cancelled before declaring completion
+2. Confirm the Simplify and Review Loop has converged (see the TDD Workflow section of the standard task file template, [Task File Template](#task-file-template)) before declaring completion
+3. Capture all deferred work as new task files per [Deferred Work Capture at Closure](#deferred-work-capture-at-closure) before declaring completion
+4. Update task status to "Completed"
+5. Check all acceptance criteria boxes
+6. Add final progress log entry with summary
+7. Complete the Final Summary section
+8. Update master index with completion date
+9. Move task from In Progress table to Completed table in dashboard
+10. Populate "Completed" and "Duration" columns in dashboard
+11. Update dashboard "Last updated" timestamp
 
-### 8.5 Content Preservation
+### Content Preservation
 
-**Absolute Preservation Mandate:**
+Implementations MUST NEVER delete, clear, or overwrite any previously written content in task files. Task files are cumulative records that only grow, never shrink: this preservation mandate holds across task switches, status changes, and updates.
 
-Implementations MUST NEVER delete, clear, or overwrite any previously written content in task files. Task files are cumulative records that only grow, never shrink.
+When updating a task file, implementations MUST use append operations for new content and preserve all existing sections. The master index dashboard likewise preserves all task references; statuses update without removing any task entry.
 
-**Prohibited Operations:**
+The ONLY permissible content deletion is when a user explicitly and specifically commands it (for example, "Delete this task file", "Remove this entry", "Clear this section"). Ambiguous instructions MUST NOT trigger content deletion.
 
-- **NEVER** delete Work Log entries when switching tasks or contexts
-- **NEVER** clear Decision Log entries
-- **NEVER** overwrite Task Breakdown sections
-- **NEVER** remove completed Progress Log entries
-- **NEVER** reset task file content when moving between tasks
-- **NEVER** use file write operations that replace entire content
+### Deferred Work Capture at Closure
 
-**Required Operations:**
-
-- **ALWAYS** use append operations for new content
-- **ALWAYS** preserve all existing sections when updating
-- **ALWAYS** maintain chronological order of Work Log entries
-- **ALWAYS** keep all historical decisions in Decision Log
-- **ALWAYS** maintain completed task information even when switching focus
-
-**Multi-Task Scenarios:**
-
-When working on multiple tasks sequentially:
-
-1. **Task Switching:** Switching between tasks MUST NOT affect previously written content in other task files
-2. **Context Preservation:** Each task file's content remains intact regardless of which task is currently active
-3. **Dashboard Accuracy:** Master index MUST accurately reflect state of ALL tasks, not just the active one
-4. **Work Continuity:** When returning to a task, all previous work MUST be present and accessible
-
-**Task File Update Pattern:**
-
-When updating a task file, implementations MUST:
-
-```markdown
-## 12. Work Log
-
-### 12.1 [Timestamp]: Manager: Task AUTH-001
-
-**Activity:** Authentication flow investigation
-
-[Content written for AUTH-001]
-
-### 12.2 [Timestamp]: Manager: Task AUTH-002
-
-**Activity:** Token refresh implementation
-
-[Content written for AUTH-002 - AUTH-001 content above MUST be preserved]
-```
-
-**Prohibited Update Pattern:**
-
-```markdown
-## 12. Work Log
-
-### 12.1 [Timestamp]: Manager: Task AUTH-002
-
-**Activity:** Token refresh implementation
-
-[ONLY AUTH-002 content - AUTH-001 content DELETED - PROHIBITED]
-```
-
-**Verification Requirements:**
-
-Before and after any task file update, implementations MUST verify:
-
-- [ ] All previous Work Log entries remain present
-- [ ] All Decision Log entries remain present
-- [ ] Task Breakdown sections remain intact
-- [ ] Progress Log entries preserve chronological history
-- [ ] No sections have been removed or truncated
-
-**Dashboard Synchronization:**
-
-When updating master index:
-
-- [ ] All task files represented in dashboard remain listed
-- [ ] No task entries removed from dashboard tables
-- [ ] Task statuses update WITHOUT removing task references
-- [ ] All task information preserved regardless of active task
-
-**Failure to Preserve Content:**
-
-Any deletion of previously written task file content is a critical conformance failure. This includes:
-
-- Intentional deletion (prohibited)
-- Accidental deletion due to poor file handling (prohibited)
-- Deletion when switching between tasks (prohibited)
-- Deletion when updating content (prohibited)
-- Deletion during task transitions (prohibited)
-
-**Exception: Explicit User Command:**
-
-The ONLY permissible content deletion is when a user explicitly commands it:
-
-- "Delete this task file"
-- "Remove this entry"
-- "Clear this section"
-
-User requests MUST be explicit and specific. Ambiguous instructions must NOT trigger content deletion.
-
-### 8.6 Deferred Work Capture at Closure
-
-This requirement applies to EVERY task closure, in Manager Mode (Solo) and Manager Mode (Delegating), and to parent (epic) task files as well as ordinary ones.
+This requirement applies to EVERY task closure, in Manager Mode (Solo) and Manager Mode (Delegating).
 
 Before a task may be marked Completed, implementations MUST capture every piece of work that was identified during the task but intentionally left undone. Such work includes:
 
 - Deferred improvements (work consciously postponed)
 - Follow-up items and "nice-to-have" enhancements
 - Anything discovered during the task but ruled out of scope
-- Simpler-solution tradeoffs recorded per [`coding-standards.md` Section 11.2](coding-standards.md#112-simple-solution-documentation)
+- Simpler-solution tradeoffs recorded per [`coding-standards.md` Simple Solution Documentation](coding-standards.md#simple-solution-documentation)
 
 For each such item, implementations MUST:
 
-1. Create a new task file in Triage state ([Section 7.2](#72-triage-to-ready-planning-phase)), named per [Section 3.4](#34-file-naming-convention).
-2. Register it in the master index dashboard ([Section 4.3](#43-index-maintenance)).
+1. Create a new task file in Triage state ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)), named per [File Naming Convention](#file-naming-convention).
+2. Register it in the master index dashboard ([Index Maintenance](#index-maintenance)).
 3. Link it from the closing task's Final Summary "Remaining Work" entry.
 
 Deferred or out-of-scope work MUST NOT survive a closure recorded only as prose, a TODO, or a Work Log note: any such work that outlives the task becomes its own task file. A task MUST NOT be marked Completed while identified deferred or out-of-scope work remains uncaptured as task files.
@@ -1158,33 +762,16 @@ When a task is closed as Cancelled rather than Completed, deferred or out-of-sco
 
 ---
 
-## 9. Parallel Task Files and Question Tracking
+## Question Tracking
 
-This section covers the two concerns specific to running work across multiple task files at once under Manager Mode (Delegating - parallel): organizing the work across files, and tracking the questions and blockers raised while parallel work is in flight. There is no separate "coordination" task file species. Everything else (creation, the Triage → Ready planning phase, real-time updates, deferred-work capture, content preservation, the dashboard, and completion) behaves exactly as for any standard task file.
-
-### 9.1 Parent (Epic) Task Files
-
-When a single objective (an epic, a multi-part feature, a migration, a release) decomposes into two or more independently-tracked task files, a standard task file MAY act as the **parent**. The parent is an ordinary task file used to organize children, not a distinct type.
-
-The parent task file:
-
-- Tracks its child task files in its Task Breakdown ([Section 5.2](#52-task-file-template)), one entry per child, linked by relative path. The Task Breakdown already records status, dependencies, and assignee; add a dispatch-wave note where parallel ordering matters.
-- Performs no implementation itself. It dispatches work to the child task files under the Manager Mode rules in [`delegation.md`](delegation.md) (parallel safety, ally preference, reporting, failure takeover).
-- Records dispatch and integration decisions in its Work Log, with child agent reports captured verbatim per [Section 8.2](#82-verbatim-recording-requirement).
-- MUST NOT be marked Completed while any child task remains open (neither Completed nor Cancelled), its Question Queue is non-empty, or integration across children is unverified. If it is blocked solely on user input while children remain, it moves to Blocked ([Section 7](#7-task-lifecycle-states)) with the blocking questions referenced.
-
-Child task files are ordinary task files. They appear in the dashboard under their own lifecycle lanes, and the parent appears like any other task file, with no special prefix.
-
-### 9.2 Question Tracking
-
-This subsection provides the persistent bookkeeping that any Manager-Mode (Delegating) task file MAY use for questions and blockers. The classification and escalation **policy** is canonical in [`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline) (Question Batching Discipline) and is not restated here. This is only the file-based artifact that records it.
+This section provides the persistent bookkeeping that any Manager-Mode (Delegating) task file MAY use for questions and blockers. The classification and escalation **policy** is canonical in [`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline) (Question Batching Discipline) and is not restated here. This is only the file-based artifact that records it.
 
 A question is recorded in one of two places:
 
 - A **Basic** question (answered autonomously per the policy) is recorded in the **Question Log** with its source, the answer, and the rationale that justified answering without interrupting the user.
 - A **Significant** question (deferred per the policy) is recorded in the **Question Queue** with its source, current state, the task IDs it blocks (or "none yet"), and the user resolution once answered.
 
-#### 9.2.1 Question States
+### Question States
 
 | State | Meaning |
 |-------|---------|
@@ -1198,9 +785,9 @@ A question is recorded in one of two places:
 
 Permitted transitions: `Open → Self-Answered`; `Open → Queued → Blocking → Asked → Resolved`; `Queued → Asked → Resolved` (checkpoint, high rework risk, or status request); any Queued/Blocking/Asked state `→ Cancelled` with a recorded reason.
 
-#### 9.2.2 Question Log and Queue Format
+### Question Log and Queue Format
 
-The Question Queue MUST be kept current in real time per [Section 8.1](#81-real-time-updates). Every queued question MUST end as either Resolved by the user or explicitly Cancelled with a recorded reason, never silently dropped. A question MAY be Cancelled when it becomes irrelevant (for example, when the task it blocked is itself Cancelled).
+The Question Queue MUST be kept current in real time per [Real-Time Updates](#real-time-updates). Every queued question MUST end as either Resolved by the user or explicitly Cancelled with a recorded reason, never silently dropped. A question MAY be Cancelled when it becomes irrelevant (for example, when the task it blocked is itself Cancelled).
 
 ```
 Question Log (Basic, self-answered):
@@ -1217,20 +804,18 @@ Question Queue (Significant):
 
 ---
 
-## 10. Conformance
+## Conformance
 
 Violations of MUST requirements constitute conformance failures.
 
-- Failing to keep dashboard and task files synchronized ([Section 4.3](#43-index-maintenance))
-- Creating task files without user request ([Section 2.2](#22-creation-prohibition))
-- Summarizing agent output instead of recording verbatim ([Section 8.2](#82-verbatim-recording-requirement))
-- Marking a task Completed before the Simplify and Review Loop has converged, or without documenting each loop iteration in the Work Log (the TDD Workflow section of the standard task file template, [Section 5.2](#52-task-file-template)), is a conformance failure.
+- Failing to keep dashboard and task files synchronized ([Index Maintenance](#index-maintenance))
+- Creating task files without user request ([Creation Prohibition](#creation-prohibition))
+- Summarizing agent output instead of recording verbatim ([Verbatim Recording Requirement](#verbatim-recording-requirement))
+- Marking a task Completed before the Simplify and Review Loop has converged, or without documenting each loop iteration in the Work Log (the TDD Workflow section of the standard task file template, [Task File Template](#task-file-template)), is a conformance failure.
 - Failure to immediately and thoroughly update associated task file for any work done related to the task (by any agent, manager, engineer, or reviewer, in any role) is a critical conformance failure with zero tolerance for exceptions.
-- Deleting or overwriting previously written task file content ([Section 8.5](#85-content-preservation)) is a critical conformance failure with zero tolerance for exceptions.
-- Performing implementation work directly within a parent (epic) task file, rather than dispatching it to its child task files ([Section 9.1](#91-parent-epic-task-files)), is a conformance failure.
-- Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Section 6.4](delegation.md#64-question-batching-discipline)), or silently dropping a queued question ([Section 9.2.2](#922-question-log-and-queue-format)), is a conformance failure.
-- Marking a parent (epic) task file Completed while any child task remains open or its Question Queue is non-empty ([Section 9.1](#91-parent-epic-task-files)) is a conformance failure.
-- Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Section 8.6](#86-deferred-work-capture-at-closure)) is a conformance failure.
+- Deleting or overwriting previously written task file content ([Content Preservation](#content-preservation)) is a critical conformance failure with zero tolerance for exceptions.
+- Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline)), or silently dropping a queued question ([Question Log and Queue Format](#question-log-and-queue-format)), is a conformance failure.
+- Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) is a conformance failure.
 
 ---
 
