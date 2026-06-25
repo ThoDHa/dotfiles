@@ -204,6 +204,22 @@ A Task Breakdown subtask MAY be tracked inline within this task file, or as a *c
 
 Every child task file, and every subtask within a Task Breakdown, MUST be identified by a proper Task ID following the `PREFIX-NNN` pattern ([Task ID Format](#task-id-format)) AND a descriptive name. Its filename MUST follow the [File Naming Convention](#file-naming-convention). Implementations MUST NOT label child tasks or subtasks with placeholder single-letter or sequential markers (for example, `A`, `B`, `C`, or `Task 1`, `Task 2`); each identifier MUST describe the work it represents.
 
+Because a child task file is an ordinary task file, it MUST be registered in the master index dashboard ([Index Maintenance](#index-maintenance)) and MUST move between the dashboard tables as its own state changes, exactly as a standalone task does. Implementations MUST NOT track a child task file solely within its parent's Task Breakdown while leaving the dashboard unaware of it. Specifically:
+
+- When the child task file is created, it MUST be added to the appropriate dashboard table (Triage, Ready, or In Progress) per [Index Maintenance](#index-maintenance).
+- As work on the child progresses, its state transitions MUST be reflected on the dashboard in real time, following [Automatic State Transitions](#automatic-state-transitions) and the [Real-Time Updates](#real-time-updates) mandate. The child moves Triage → Ready → In Progress → Completed (or Blocked/Cancelled) on the board independently of its parent's row.
+- A child task file MUST reach Completed or Cancelled on the dashboard before the parent task may close, consistent with the [Completion Protocol](#completion-protocol) requirement that all Task Breakdown subtasks be Completed or Cancelled.
+
+### Coordination Tasks and Work Documentation Ownership
+
+When a task is broken into child task files, the parent and child task files play distinct documentation roles. Implementations MUST observe this division.
+
+**The child task file owns the work record.** A child task file is worked exactly as if it were a single standalone task. All documentation of the work performed on the child lives in the child task file itself: its Work Log, its Decision Log (within Technical Approach), its Execution Log, and its Progress Log entries, all sections of the standard task file template ([Task File Template](#task-file-template)). The actions, findings, decisions, failed approaches, and per-iteration Simplify and Review Loop records for the child's work MUST be written into the child task file, not the parent. The same [Real-Time Updates](#real-time-updates) mandate applies to the child while it is being worked.
+
+**The parent task file is a coordination task.** A parent that exists to break work across child task files is an orchestration record, not a second copy of the children's work. Its role is to coordinate the children being worked together: sequencing them by dependency, dispatching and tracking them, and handling conflicts between them (shared-file contention, shared state, integration order, and reconciliation, including any [Worktree Isolation](delegation.md#worktree-isolation) used to keep conflicting children parallel). The parent's Work Log records this coordination activity, not the granular per-child work. Implementations MUST NOT duplicate a child's detailed work log into the parent, and MUST NOT record a child's work only in the parent while leaving the child task file empty.
+
+The parent reflects each child's status through its Task Breakdown entry and the dashboard ([Index Maintenance](#index-maintenance)); the substance of how each child was accomplished is read from the child task file.
+
 ### Task File Template
 
 ```markdown
