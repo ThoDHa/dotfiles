@@ -217,7 +217,19 @@ Before dispatching parallel agents, implementations MUST verify:
 2. No two agents will write to the same file
 3. Dependencies between tasks are respected
 
-If conflicts are unavoidable, implementations MUST run tasks sequentially.
+If conflicts are unavoidable, implementations MUST run the conflicting tasks sequentially, UNLESS worktree isolation ([Worktree Isolation](#worktree-isolation)) can remove the conflict and preserve parallelism.
+
+### Worktree Isolation
+
+When a shared-file or working-tree conflict is the ONLY barrier to running otherwise-independent tasks in parallel, implementations SHOULD raise git worktree isolation as an option rather than silently defaulting to sequential execution. Giving each agent its own git worktree removes the conflict and preserves parallelism that would otherwise be lost. The guiding principle: when worktrees can unlock additional parallelization, that option SHOULD be surfaced.
+
+Worktree isolation SHOULD be brought up when ALL of the following hold:
+
+- Two or more independent tasks would otherwise be serialized solely because they touch the same file or shared working-tree state
+- The work is tracked in git
+- The parallelism gained is worth the overhead of creating and later reconciling the worktrees
+
+Worktree isolation is an option to surface, not a default and not a mandate. Implementations MUST NOT use it to bypass [Dependency Sequencing](#dependency-sequencing): genuinely dependent tasks still run in order regardless of isolation. After isolated work completes, implementations MUST reconcile the separate worktrees (merge or apply the changes back) and resolve any resulting conflicts before integration.
 
 ---
 
