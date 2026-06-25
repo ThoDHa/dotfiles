@@ -66,9 +66,12 @@ This task has [N] components. How would you like me to proceed?
 
 - **Sequential**: I handle each task myself, one by one
 - **Parallel delegation**: I coordinate agents working simultaneously
+- **Parallel with worktrees**: I coordinate agents in isolated git worktrees, so even tasks that would otherwise conflict on shared files can run in parallel
 
 Which approach do you prefer?
 ```
+
+The **Parallel with worktrees** option SHOULD be listed only when worktree isolation would unlock parallelism that plain parallel delegation could not, that is, when independent tasks would otherwise be serialized by a shared-file or working-tree conflict (see [`delegation.md` Worktree Isolation](delegation.md#worktree-isolation)). When no such conflict applies, implementations MAY omit this option to avoid presenting a choice with no benefit.
 
 ### User Response Handling
 
@@ -78,8 +81,9 @@ Implementations MUST wait for user response before proceeding.
 |----------------------|-----------------|
 | "sequential", "yourself", "one by one", or similar | Continue in normal execution mode |
 | "parallel", "delegate", "manager", or similar | Activate Manager Mode (see [`delegation.md`](delegation.md)) |
+| "worktrees", "isolated", "parallel with worktrees", or similar | Activate Manager Mode with worktree isolation (see [`delegation.md` Worktree Isolation](delegation.md#worktree-isolation)) |
 
-The keywords in each row are accepted synonyms for the two options presented in the [Required Prompt](#required-prompt) prompt ("Sequential" and "Parallel delegation"). Any answer matching a row's synonyms maps to that option's action.
+The keywords in each row are accepted synonyms for the options presented in the [Required Prompt](#required-prompt) prompt ("Sequential", "Parallel delegation", and "Parallel with worktrees"). Any answer matching a row's synonyms maps to that option's action. The "Parallel with worktrees" row applies only when that option was listed per the [Required Prompt](#required-prompt) conditions.
 
 Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
 
