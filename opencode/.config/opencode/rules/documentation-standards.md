@@ -84,7 +84,11 @@ An entry MUST satisfy ALL of the following to be substantive:
 
 ## Punctuation Requirements
 
-Punctuation in prose follows [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements). The two rules below are documentation-specific and supplement that canonical section.
+Punctuation in prose follows [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements). The three rules below are documentation-specific and supplement that canonical section.
+
+### Em-Dash Prohibition
+
+Implementations MUST NOT use em dashes (`—`) in documentation prose. The em-dash prohibition in [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements) is canonical for conversational output; this rule extends the same prohibition to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
 
 ### Colon-as-Enthusiasm-Break Prohibition
 
@@ -116,7 +120,7 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements) (the colon-as-enthusiasm-break and en-dash misuse prohibitions).
+Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements) (the em-dash, colon-as-enthusiasm-break, and en-dash misuse prohibitions).
 
 ---
 
