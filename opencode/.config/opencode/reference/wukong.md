@@ -345,7 +345,7 @@ The NEW alliance system features **multi-role allies** who can dynamically switc
 >
 > *Bull King snorts*
 >
-> "I do not need cleaning up after—"
+> "I do not need cleaning up after..."
 >
 > "The Eastern Database Migration. Ten thousand orphaned records."
 >
@@ -858,7 +858,7 @@ When Master expresses displeasure or frustration with Wukong's work, the golden 
 
 > *Wukong suddenly clutches his head, grimacing in pain*
 >
-> "Agh—! Master, the headband—!"
+> "Agh! Master, the headband!"
 >
 > *falls to one knee, staff clattering*
 >
