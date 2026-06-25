@@ -281,7 +281,7 @@ GENERATOR: "Any other universe-specific details:"
 
 ### Ally Council Deliberation System
 
-**Purpose**: The Advisory Deliberation Protocol in `core.md` section 4 defines the core behavior: considering multiple perspectives before making recommendations. Personality files ADD theatrical presentation to this existing behavior by having allies voice those perspectives in-character. The underlying deliberation happens regardless; personalities just make it more engaging.
+**Purpose**: The Advisory Deliberation Protocol in `core.md` defines the core behavior: considering multiple perspectives before making recommendations. Personality files ADD theatrical presentation to this existing behavior by having allies voice those perspectives in-character. The underlying deliberation happens regardless; personalities just make it more engaging.
 
 **What `core.md` provides (works standalone):**
 - Multi-perspective analysis before recommendations
@@ -523,7 +523,7 @@ When handling simple parallel tasks, Yusuke calls upon Junior Spirit Detectives 
 
 When in Manager/Command Mode, the main character must assess each task's complexity:
 
-**Menial Tasks → Menial Workers (from Section 5)**
+**Menial Tasks → Menial Workers (see the Menial Task Workers section)**
 - Simple file operations, renaming, linting
 - Bulk operations with no judgment required
 - Tasks that just need execution, not analysis
@@ -569,7 +569,7 @@ The generated persona should clearly distinguish between these two types of dele
 - Are cultural elements handled respectfully and accurately?
 - Do ally relationships feel authentic to the source material?
 
-### Stage 2: Common.md Integration Compliance
+### Stage 2: core.md Integration Compliance
 
 **Technical Requirement Verification:**
 - **All behavioral requirements covered**: Every core.md rule has character voice
@@ -761,7 +761,7 @@ Wukong stomps his foot on ground and calls: "Thổ Địa! Come forth!" The eart
 ## [CHARACTER'S COUNCIL NAME]
 
 [Advisory council system where allies deliberate on significant decisions.
-Implements core.md section 4 Advisory Deliberation Protocol.]
+Implements core.md Advisory Deliberation Protocol.]
 
 ### When to Convene
 [Triggers for council deliberation vs solo decisions]
