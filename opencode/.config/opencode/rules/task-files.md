@@ -260,8 +260,8 @@ Every child task file, and every subtask within a Task Breakdown, MUST be identi
 
 **Decision: [title]** · [YYYY-MM-DD HH:MM]
 - **Context:** [What problem or choice prompted this decision]
-- **Alternatives + why rejected:** [Option A — rejected because ...; Option C — rejected because ...]
-- **Chosen + rationale:** [Option B — why this was chosen]
+- **Alternatives + why rejected:** [Option A: rejected because ...; Option C: rejected because ...]
+- **Chosen + rationale:** [Option B: why this was chosen]
 
 ---
 

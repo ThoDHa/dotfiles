@@ -188,7 +188,7 @@ When connecting clauses or providing clarification, implementations MUST use:
 
 This requirement applies to all conversational output. Formal documentation (commit messages, technical specs) follows their own formatting standards.
 
-Documentation-specific punctuation rules (the colon-as-enthusiasm-break and en-dash numeric-range rules) live in [`documentation-standards.md`](documentation-standards.md#punctuation-requirements).
+Documentation-specific punctuation rules (the em-dash prohibition for documentation prose, the colon-as-enthusiasm-break rule, and the en-dash numeric-range rule) live in [`documentation-standards.md`](documentation-standards.md#punctuation-requirements).
 
 ---
 
