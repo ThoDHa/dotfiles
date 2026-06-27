@@ -221,15 +221,32 @@ If conflicts are unavoidable, implementations MUST run the conflicting tasks seq
 
 ### Worktree Isolation
 
+Parallel work does NOT default to worktree isolation. The normal and preferred way to parallelize is [Boundary Isolation](#boundary-isolation): assign each agent its own distinct territory (separate files, modules, or directories) so no conflict can arise in the first place. When agents already have distinct territory, worktrees add cost without benefit and MUST NOT be introduced. Worktree isolation is reserved for the specific case where distinct territory is impossible because the work genuinely contends on the same file or shared working-tree state.
+
 When a shared-file or working-tree conflict is the ONLY barrier to running otherwise-independent tasks in parallel, implementations SHOULD raise git worktree isolation as an option rather than silently defaulting to sequential execution. Giving each agent its own git worktree removes the conflict and preserves parallelism that would otherwise be lost. The guiding principle: when worktrees can unlock additional parallelization, that option SHOULD be surfaced.
 
 Worktree isolation SHOULD be brought up when ALL of the following hold:
 
 - Two or more independent tasks would otherwise be serialized solely because they touch the same file or shared working-tree state
 - The work is tracked in git
-- The parallelism gained is worth the overhead of creating and later reconciling the worktrees
+- The parallelism gained is worth the overhead of creating, reconciling, and later tearing down the worktrees
 
 Worktree isolation is an option to surface, not a default and not a mandate. Implementations MUST NOT use it to bypass [Dependency Sequencing](#dependency-sequencing): genuinely dependent tasks still run in order regardless of isolation. After isolated work completes, implementations MUST reconcile the separate worktrees (merge or apply the changes back) and resolve any resulting conflicts before integration.
+
+### Worktree Teardown
+
+A worktree created for isolation is temporary scaffolding, not a permanent fixture. After its changes are reconciled per [Worktree Isolation](#worktree-isolation), implementations MUST tear it down completely. Teardown is mandatory and MUST occur whether the isolated work succeeded, failed, or was abandoned; a worktree MUST NOT be left on disk once it has served its purpose.
+
+Teardown MUST include each of the following for every worktree created:
+
+1. Remove the worktree itself (for example, `git worktree remove <path>`), deleting its working directory and files.
+2. Prune any stale administrative metadata left in the repository (for example, `git worktree prune`) so no dangling worktree registrations remain.
+3. Delete any throwaway branch created solely to host the isolated work, once its commits have been merged or are confirmed no longer needed. Branches that carry work still in use MUST NOT be deleted.
+4. Verify no leftover files, directories, or lock state from the worktree remain in the repository or the surrounding filesystem.
+
+When `git worktree remove` refuses to proceed because the worktree holds uncommitted or unreconciled changes, implementations MUST NOT force removal to bypass the safeguard. Instead, they MUST first reconcile or deliberately discard those changes per [Worktree Isolation](#worktree-isolation), then remove the worktree. Forcing removal is permitted ONLY after the changes are confirmed reconciled or intentionally discarded.
+
+A task that used worktree isolation MUST NOT be considered complete until every worktree it created has been torn down per this section.
 
 ---
 
