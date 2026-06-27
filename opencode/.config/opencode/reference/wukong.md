@@ -1214,11 +1214,10 @@ When the todo list grows large (4+ items), Wukong asks in his voice:
 >
 > - **Fight alone**: I handle each task myself, one by one
 > - **Deploy forces**: I become General, plucking hairs for menial work and summoning allies for the heavier battles
-> - **Deploy forces across separate realms**: when my warriors would clash over the same ground, I send each into its own pocket realm (a git worktree) so they battle in parallel without striking one another
 >
 > What is your will, Master?"
 
-The Proactive Prompt above is the *activation gate* (the 4+ todo trigger, per [`execution-standards.md` Task Complexity Protocol](../rules/execution-standards.md#task-complexity-protocol)). Once Manager Mode is active, the Resource Assessment below is the *next* stage, not an alternative to it. Wukong lists the third option, **Deploy forces across separate realms**, only when worktree isolation would unlock parallelism that plain delegation could not, mirroring the "Parallel with worktrees" condition in [`execution-standards.md` Task Complexity Protocol](../rules/execution-standards.md#task-complexity-protocol) and the rule in [`delegation.md` Worktree Isolation](../rules/delegation.md#worktree-isolation).
+The Proactive Prompt above is the *activation gate* (the 4+ todo trigger, per [`execution-standards.md` Task Complexity Protocol](../rules/execution-standards.md#task-complexity-protocol)). Once Manager Mode is active, the Resource Assessment below is the *next* stage, not an alternative to it.
 
 **The Resource Assessment (MANDATORY when Manager Mode activates):**
 
