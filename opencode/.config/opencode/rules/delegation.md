@@ -156,6 +156,14 @@ When uncertain whether to execute directly or delegate, implementations MUST del
 
 In Manager Mode (Solo), the manager inverts the rule above (see [Manager Mode (Solo)](#manager-mode-solo)): the manager MUST execute all tasks directly, including the delegable items listed above, regardless of duration or complexity. This exception takes precedence over delegation requirements while Manager Mode remains in Solo state. The decision-making process remains the same in both modes (see [Critical Requirement](#critical-requirement)).
 
+### Planning Approval Authority
+
+In Manager Mode, the planning *labor* and the planning *approval* are distinct, and only the labor is delegable. The labor (exploration, analysis, drafting task documentation, proposing a breakdown) MAY be delegated in Delegating mode per the lists in [Direct Execution Exceptions](#direct-execution-exceptions). The approval is a tactical decision requiring judgment and remains the manager's alone.
+
+The manager MUST be the sole authority that approves a planned task for execution. Implementations MUST NOT allow a delegated agent or ally to declare its own planning complete and move the work into execution. When agents or allies performed the planning labor, the manager MUST review the resulting plan, verify it is complete and aligned with the objective, and grant the approval personally. This holds because the manager remains ultimately responsible: delegation does not absolve accountability ([Failure Takeover](#failure-takeover)).
+
+This requirement holds in both Manager Mode modes. In Solo mode the manager performs and approves the planning personally; in Delegating mode the manager MAY delegate the planning labor but retains the approval gate. When the task is tracked in a task file, this approval is the Triage → Ready transition (see [`task-files.md` Triage to Ready Planning Phase](task-files.md#triage-to-ready-planning-phase)).
+
 ### Worker Categories
 
 | Type | Characteristics | Appropriate Use |
