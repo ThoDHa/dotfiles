@@ -66,28 +66,32 @@ When task files are required, implementations MUST use this structure:
 
 ```
 Project Root/
-└── .opencode/
-    ├── tasks.md                              # Jira-style dashboard (stowed from ~/.config/opencode/tasks.md)
-    └── tasks/
-        └── YYYYMMDD-HHMM-task-description.md # Individual task files
+└── .tasks/
+    ├── dashboard.md                              # Jira-style dashboard board
+    ├── current/
+    │   └── YYYYMMDD-HHMM-task-description.md      # Active and recently completed task files
+    └── archive/
+        └── YYYYMMDD-HHMM-task-description.md      # Archived task files
 ```
+
+Individual task files live in `.tasks/current/` while active or recently completed. When a task is moved to the dashboard's Archive table, its file MUST be moved from `.tasks/current/` into `.tasks/archive/` to keep the current set uncluttered. Only `dashboard.md` sits at the top of `.tasks/`; every individual task file lives in one of the two subfolders.
 
 ### Directory Purpose
 
-The `.opencode/` directory keeps task management artifacts separate from project code.
+The `.tasks/` directory keeps task management artifacts separate from project code. It holds the dashboard board at its top, the `current/` subfolder for active task files, and the `archive/` subfolder for retired tasks.
 
-This directory MAY be extended for other OpenCode artifacts (session logs, cache, etc.).
+This directory is task-specific. Other OpenCode artifacts (for example the `.opencode/no-verify.log` audit trail defined in [`git-protocol.md`](git-protocol.md)) live under their own namespaces and are not affected by this structure.
 
 ### Gitignore Recommendation
 
-Users SHOULD add `.opencode/` to their global gitignore:
+Users SHOULD add `.tasks/` to their global gitignore:
 
 ```bash
 # ~/.config/git/ignore or project .gitignore
-.opencode/
+.tasks/
 ```
 
-Users MAY commit `.opencode/` selectively if task history should be preserved.
+Users MAY commit `.tasks/` selectively if task history should be preserved.
 
 ### File Naming Convention
 
@@ -106,7 +110,7 @@ Individual task files MUST follow this format:
 
 ### Master Index Location
 
-The master index MUST be located at `.opencode/tasks.md`.
+The master index MUST be located at `.tasks/dashboard.md`.
 
 ### Master Index Template
 
@@ -129,7 +133,7 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 | Task | Progress | What Was Done | Updated | Priority |
 |------|----------|---------------|---------|----------|
-| [Task Name](./tasks/20241222-0710-task-name.md) | 45% | Token refresh wired up; session store integration pending | 2024-12-31 19:45 | High |
+| [Task Name](./current/20241222-0710-task-name.md) | 45% | Token refresh wired up; session store integration pending | 2024-12-31 19:45 | High |
 
 **Note:** "What Was Done" is a concise snapshot of the current state, overwritten on each update. It MUST NOT be a running list of every change.
 
@@ -155,7 +159,7 @@ The master index MUST be located at `.opencode/tasks.md`.
 
 ### Index Maintenance
 
-The master index (`tasks.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
+The master index (`dashboard.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
 
 Required actions (MANDATORY):
 
@@ -707,7 +711,7 @@ Implementations MUST update task documentation continuously as work progresses:
 - Failed Approaches documented IMMEDIATELY when attempts fail
 - Task status updates MUST follow [Index Maintenance](#index-maintenance) synchronization rules (single source of truth).
 
-**Dashboard Synchronization:** The master index (`tasks.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress.
+**Dashboard Synchronization:** The master index (`dashboard.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress.
 
 **Critical principle:** Users should be able to open a task file at ANY moment and see current work status, not outdated information.
 
