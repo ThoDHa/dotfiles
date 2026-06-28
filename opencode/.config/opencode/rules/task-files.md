@@ -161,6 +161,10 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 In every lane, the `Task` cell MUST be a markdown link whose text is the task's descriptive name (headline / AP-style title case, see [File Naming Convention](#file-naming-convention)) and whose target is the task file: `./current/<file>.md` while active or recently completed, `./archive/<file>.md` once archived.
 
+In the Completed and Archive tables, the `Duration` cell MUST be a time value, and nothing but that time: for example `3h 20m`, `2d 4h`, `45m`. The single exception is the literal `N/A`, used only when no working time can be derived from the task's logs. The cell MUST NOT hold a date, a description, any other placeholder (for example `-`, `TBD`), or any other non-time value.
+
+`Duration` is the **active working time** spent on the task, not the wall-clock span from start to finish. It is the time actually spent working, accumulated across the task's working periods as recorded in the Work Log and Progress Log. This includes the planning work performed during the Triage → Ready phase (clarification, exploration, populating the task file), not only the In Progress phase. Time during which the task made no progress MUST be excluded: any period the task sat Blocked, and any idle wait (for example waiting on tokens, on a review, or on an external dependency), does not count toward the duration. When the logs contain no derivable working time, the cell is `N/A`.
+
 ### Index Maintenance
 
 The master index (`dashboard.md`) and individual task files MUST remain synchronized at all times. Update both in a single atomic operation whenever task documentation changes.
