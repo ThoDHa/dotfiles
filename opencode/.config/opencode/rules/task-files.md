@@ -206,7 +206,7 @@ Within a task file, references to its own sections, to another task file, or to 
 
 A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
 
-Every child task file, and every subtask within a Task Breakdown, MUST be identified by a proper Task ID following the `PREFIX-NNN` pattern ([Task ID Format](#task-id-format)) AND a descriptive name. Its filename MUST follow the [File Naming Convention](#file-naming-convention). Implementations MUST NOT label child tasks or subtasks with placeholder single-letter or sequential markers (for example, `A`, `B`, `C`, or `Task 1`, `Task 2`); each identifier MUST describe the work it represents.
+Every child task file, and every subtask within a Task Breakdown, MUST be identified by a proper hierarchical Task ID derived from its parent (`PREFIX-N-N`, see [Task ID Format](#task-id-format)) AND a descriptive name. Its filename MUST follow the [File Naming Convention](#file-naming-convention). Implementations MUST NOT label child tasks or subtasks with placeholder single-letter or sequential markers (for example, `A`, `B`, `C`, or `Task 1`, `Task 2`), nor with a dot-and-letter suffix such as `PREFIX-N.A`; each identifier MUST be numeric and describe the work it represents.
 
 Because a child task file is an ordinary task file, it MUST be registered in the master index dashboard ([Index Maintenance](#index-maintenance)) and MUST move between the dashboard tables as its own state changes, exactly as a standalone task does. Implementations MUST NOT track a child task file solely within its parent's Task Breakdown while leaving the dashboard unaware of it. Specifically:
 
@@ -422,7 +422,7 @@ Task CANNOT be marked Completed unless:
 
 ## Task Breakdown
 
-### Task [PREFIX-NNN]: [Name]
+### Task [PREFIX-N-N]: [Name]
 
 **Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
 **Priority:** High | Medium | Low
@@ -569,9 +569,18 @@ This section summarizes all work performed, whether by agents/allies or by the m
 
 ### ID Pattern
 
-Task IDs MUST follow the pattern: `PREFIX-NNN`
+Top-level task IDs MUST follow the pattern: `PREFIX-N`, where `N` is a sequential number with no zero-padding (for example, `AUTH-1`, `API-14`).
 
-Implementations MUST NOT substitute placeholder labels (single letters such as `A`, `B`, `C`, or bare sequential markers such as `Task 1`, `Task 2`) for a Task ID. Every task and subtask, including those spawned at closure ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) and child task files ([Child Task Files](#child-task-files)), MUST receive a real `PREFIX-NNN` ID and a descriptive name.
+Subtask and child task IDs MUST be derived hierarchically from their parent by appending a dash and a sequential number: `PREFIX-N-N`. Nesting MAY continue to any depth by appending further `-N` segments (`PREFIX-N-N-N`). Numbering restarts at `1` within each parent.
+
+| Level | ID | Name |
+|-------|-----|------|
+| Parent | `AUTH-1` | User authentication |
+| Subtask | `AUTH-1-1` | Token refresh |
+| Subtask | `AUTH-1-2` | Session store |
+| Sub-subtask | `AUTH-1-2-1` | Redis adapter |
+
+Implementations MUST NOT substitute placeholder labels (single letters such as `A`, `B`, `C`, or bare sequential markers such as `Task 1`, `Task 2`) for a Task ID, and MUST NOT use a dot-and-letter suffix such as `AUTH-1.A` or `AUTH-1.B` for subtasks. Every task and subtask, including those spawned at closure ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) and child task files ([Child Task Files](#child-task-files)), MUST receive a real numeric Task ID and a descriptive name: `PREFIX-N` at the top level, `PREFIX-N-N` for subtasks and children.
 
 ### Standard Prefixes
 
@@ -777,7 +786,7 @@ Before a task may be marked Completed, implementations MUST capture every piece 
 
 For each such item, implementations MUST:
 
-1. Create a new task file in Triage state ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)), assigned a proper Task ID (`PREFIX-NNN`, see [Task ID Format](#task-id-format)) and a descriptive name, with its filename per [File Naming Convention](#file-naming-convention). Placeholder single-letter or sequential labels (for example, `A`, `B`, `C`) MUST NOT be used.
+1. Create a new task file in Triage state ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)), assigned a proper Task ID (`PREFIX-N`, see [Task ID Format](#task-id-format)) and a descriptive name, with its filename per [File Naming Convention](#file-naming-convention). Placeholder single-letter or sequential labels (for example, `A`, `B`, `C`) MUST NOT be used.
 2. Register it in the master index dashboard ([Index Maintenance](#index-maintenance)).
 3. Link it from the closing task's Final Summary "Remaining Work" entry.
 
