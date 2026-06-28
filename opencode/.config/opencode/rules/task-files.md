@@ -210,6 +210,14 @@ Each task file MUST contain these sections, as they appear within the standard t
 
 Within a task file, references to its own sections, to another task file, or to these specifications MUST cite the target by its heading title as a markdown link (for example, `[Completion Protocol](#completion-protocol)`), never by a section number. Work Log entries follow this rule as well: when an entry points to a section, decision, or another task, it links to that heading by title.
 
+A reference from one task to *another task* MUST exist only when a real structural relationship justifies it. The legitimate cases are exhaustive:
+
+- A declared dependency, recorded in the depending task's **Dependencies** field ([Task File Template](#task-file-template)).
+- A parent ↔ child task-file link ([Child Task Files](#child-task-files)).
+- A deferred-work link from a closing task's Final Summary to the follow-up task it spawned ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)).
+
+Implementations MUST NOT reference another task outside these cases. Do not mention or link a sibling task for context, completeness, or "see also" flavor; do not restate another task's content; do not cross-link tasks that merely touch the same area without a genuine dependency. When in doubt, omit the reference. This restriction governs references *between tasks*; references to a task file's own sections and to these specifications are unaffected.
+
 ### Child Task Files
 
 A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
