@@ -211,7 +211,7 @@ Every child task file, and every subtask within a Task Breakdown, MUST be identi
 Because a child task file is an ordinary task file, it MUST be registered in the master index dashboard ([Index Maintenance](#index-maintenance)) and MUST move between the dashboard tables as its own state changes, exactly as a standalone task does. Implementations MUST NOT track a child task file solely within its parent's Task Breakdown while leaving the dashboard unaware of it. Specifically:
 
 - When the child task file is created, it MUST be added to the appropriate dashboard table (Triage, Ready, or In Progress) per [Index Maintenance](#index-maintenance).
-- As work on the child progresses, its state transitions MUST be reflected on the dashboard in real time, following [Automatic State Transitions](#automatic-state-transitions) and the [Real-Time Updates](#real-time-updates) mandate. The child moves Triage → Ready → In Progress → Completed (or Blocked/Cancelled) on the board independently of its parent's row.
+- As work on the child progresses, its state transitions MUST be reflected on the dashboard in real time, following [Automatic State Transitions](#automatic-state-transitions) and the [Real-Time Updates](#real-time-updates) mandate. The child moves Triage → Ready → In Progress → Completed (or Blocked/Cancelled) on the board independently of its parent's row. The parent entering In Progress does NOT cascade to its children: each child remains in Ready until execution of that child actually begins. At the moment the parent coordination task starts working a Ready child (directly or by dispatching it to an agent/ally), the manager MUST transition that child Ready → In Progress, independently of the parent's own row.
 - A child task file MUST reach Completed or Cancelled on the dashboard before the parent task may close, consistent with the [Completion Protocol](#completion-protocol) requirement that all Task Breakdown subtasks be Completed or Cancelled.
 
 ### Coordination Tasks and Work Documentation Ownership
@@ -608,6 +608,7 @@ Implementations MUST automatically transition task states when triggering events
 | Trigger Event | Required State Change | Dashboard Action |
 |---------------|----------------------|------------------|
 | Work begins on a Ready task | Ready → In Progress | Move from Ready table to In Progress table |
+| A coordination (parent) task begins execution of a Ready child task (whether the manager works it directly or dispatches it to an agent/ally) | child: Ready → In Progress | Move the child row from Ready table to In Progress table |
 | Task becomes blocked | In Progress → Blocked | Move to Blocked/Cancelled table with reason |
 | Blocked task can proceed | Blocked → Ready or In Progress | Move back to appropriate table |
 | All acceptance criteria met AND Simplify and Review Loop converged | In Progress → Completed | Move to Completed table with completion timestamp |
