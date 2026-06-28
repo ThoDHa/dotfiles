@@ -104,6 +104,8 @@ Individual task files MUST follow this format:
 | Description | Kebab-case, 3-5 words maximum |
 | Example | `20241222-0710-api-auth-refactor.md` |
 
+The kebab-case rule above governs the **filename** only. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title, the dashboard link text, and any reference to the task in prose) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles (a, an, the), coordinating conjunctions (and, but, or, nor, for, so, yet), and prepositions of three letters or fewer when they fall mid-title. Example: filename `20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`.
+
 ---
 
 ## Master Index Requirements
@@ -131,16 +133,16 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 ## In Progress
 
-| Task | Progress | What Was Done | Updated | Priority |
-|------|----------|---------------|---------|----------|
-| [Task Name](./current/20241222-0710-task-name.md) | 45% | Token refresh wired up; session store integration pending | 2024-12-31 19:45 | High |
+| Task | Progress | Updated | Priority |
+|------|----------|---------|----------|
+| [Task Name](./current/20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
 
-**Note:** "What Was Done" is a concise snapshot of the current state, overwritten on each update. It MUST NOT be a running list of every change.
+**Note:** Details of what was done and what remains live in the task file itself, not on the board.
 
 ## Blocked/Cancelled
 
-| Task | Status | Reason | Updated |
-|------|--------|---------|---------|
+| Task | Status | Updated |
+|------|--------|---------|
 
 ## Completed
 
@@ -156,6 +158,8 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 *Last updated: YYYY-MM-DD HH:MM - Auto-updated when task status changes*
 ```
+
+In every lane, the `Task` cell MUST be a markdown link whose text is the task's descriptive name (headline / AP-style title case, see [File Naming Convention](#file-naming-convention)) and whose target is the task file: `./current/<file>.md` while active or recently completed, `./archive/<file>.md` once archived.
 
 ### Index Maintenance
 
@@ -174,10 +178,10 @@ Required actions (MANDATORY):
 | New task file created | Add entry to appropriate dashboard table (Triage/Ready/In Progress) |
 | Task status changes | Move task between dashboard tables + update task file status |
 | Task file modified | Update "Updated" column in dashboard to current timestamp |
-| Work progresses | Update progress percentage and overwrite the "What Was Done" snapshot in dashboard (if In Progress) |
+| Work progresses | Update progress percentage in dashboard (if In Progress) |
 | Task moves between states | Move row to new table + update all relevant columns |
 | Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
-| Task blocked/cancelled | Move to Blocked/Cancelled table + add "Reason" column |
+| Task blocked/cancelled | Move to Blocked/Cancelled table + record the reason prominently in the task file (not the dashboard) |
 | ANY task file write | Update dashboard "Last updated" timestamp |
 
 ---
@@ -231,6 +235,7 @@ The parent reflects each child's status through its Task Breakdown entry and the
 
 *Created: YYYY-MM-DD HH:MM*
 **Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
+**Status Reason:** [Required when Blocked or Cancelled: one line stating plainly why. Omit otherwise.]
 
 ## Table of Contents
 
@@ -618,10 +623,10 @@ Implementations MUST automatically transition task states when triggering events
 |---------------|----------------------|------------------|
 | Work begins on a Ready task | Ready → In Progress | Move from Ready table to In Progress table |
 | A coordination (parent) task begins execution of a Ready child task (whether the manager works it directly or dispatches it to an agent/ally) | child: Ready → In Progress | Move the child row from Ready table to In Progress table |
-| Task becomes blocked | In Progress → Blocked | Move to Blocked/Cancelled table with reason |
+| Task becomes blocked | In Progress → Blocked | Move to Blocked/Cancelled table; record reason in task file |
 | Blocked task can proceed | Blocked → Ready or In Progress | Move back to appropriate table |
 | All acceptance criteria met AND Simplify and Review Loop converged | In Progress → Completed | Move to Completed table with completion timestamp |
-| Task no longer needed | Any state → Cancelled | Move to Blocked/Cancelled table with reason |
+| Task no longer needed | Any state → Cancelled | Move to Blocked/Cancelled table; record reason in task file |
 
 
 
