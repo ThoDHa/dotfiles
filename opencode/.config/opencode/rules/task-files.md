@@ -248,6 +248,7 @@ The parent reflects each child's status through its Task Breakdown entry and the
 *Created: YYYY-MM-DD HH:MM*
 **Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
 **Status Reason:** [Required when Blocked or Cancelled: one line stating plainly why. Omit otherwise.]
+**Checkpoint Gating:** autonomous | sign-off [Required for checkpoint-sliced tasks, see [Checkpoint Gating](#checkpoint-gating); omit for single-slice tasks. Default: autonomous.]
 
 ## Table of Contents
 
@@ -688,6 +689,11 @@ During Triage → Ready transition, implementations MUST:
    - Document dependencies on external systems
    - Plan mitigation strategies
 
+5. **Decide Checkpoint Slicing** (see [Checkpoint Slicing (MVP Waystations)](#checkpoint-slicing-mvp-waystations))
+   - Determine whether the task warrants checkpoint slicing (large enough, and the seam has a definable contract)
+   - If it does, structure the Task Breakdown into a contract-first step, mock-bounded slices, and a dependent integration checkpoint
+   - Raise the gating mode with the user and record it in the Checkpoint Gating field (default: autonomous)
+
 #### Ready State Criteria
 
 A task moves from Triage to Ready ONLY when:
@@ -699,6 +705,7 @@ A task moves from Triage to Ready ONLY when:
 - Risks are identified and mitigation planned
 - Success criteria are clear and measurable
 - Task breakdown is complete with acceptance criteria
+- If the task is checkpoint-sliced, the slice structure and gating mode are defined ([Checkpoint Slicing (MVP Waystations)](#checkpoint-slicing-mvp-waystations))
 
 #### Philosophy: Plan Before Execute
 
@@ -710,6 +717,64 @@ The Triage → Ready phase embodies "think first, do second":
 - **In Progress:** Execute the plan
 
 **A task MUST NOT move to In Progress without first being properly planned in the Triage → Ready phase.**
+
+---
+
+## Checkpoint Slicing (MVP Waystations)
+
+### Purpose
+
+Large tasks SHOULD be decomposed so that work reaches verifiable, working states at intermediate points, not only at final completion. A **checkpoint** is such an intermediate state: a slice of the overall task that, once done, is independently built, tested, reviewed, and demonstrable. Checkpoints let drift, regressions, and integration errors surface early, at a slice boundary, instead of at the end of a long task.
+
+A checkpoint is not a new tracking construct. Each checkpoint is realized as a **child task file** ([Child Task Files](#child-task-files)) under a coordinating parent ([Coordination Tasks and Work Documentation Ownership](#coordination-tasks-and-work-documentation-ownership)). All existing child-task machinery applies unchanged: a hierarchical Task ID, an independent dashboard lifecycle, its own TDD Workflow, and its own Simplify and Review Loop driven to convergence.
+
+### When to Use Checkpoint Slicing
+
+Checkpoint slicing is conditional, not universal. Implementations SHOULD apply it when BOTH conditions hold:
+
+- The task is large enough that a single build-then-verify pass would leave substantial work unverified for a long stretch (as a guide, a task that decomposes into two or more independently meaningful slices).
+- The seams between slices have a **definable contract**: an interface, schema, or API the slices can agree on in advance.
+
+Implementations MUST NOT apply checkpoint slicing when:
+
+- The task is small enough that one slice is the whole job. A single-slice task needs no mocks and no integration checkpoint.
+- The contract between slices is genuinely unknown. Mocking against a guessed contract only defers the mismatch to integration day, defeating the purpose. In this case implementations SHOULD first build a thin **walking skeleton** (one minimal end-to-end slice through all layers using real components) to establish the contract, then fan out into fuller slices.
+
+### Slicing Doctrine
+
+When checkpoint slicing applies, the parent's Task Breakdown MUST be structured as follows:
+
+1. **Contract first.** Before any slice that depends on a seam, define that seam as a shared artifact (interface, type, schema, or API contract) that both the mock and the real implementation MUST honor. The contract MAY be its own checkpoint child task or a prerequisite subtask, but it MUST exist before dependent slices begin.
+
+2. **Mock-bounded slices.** Each slice mocks the cross-slice dependencies it does not own, coding those mocks against the shared contract. Each slice MUST reach a genuinely working, tested state on its own: it is a complete child task with its own tests and its own converged Simplify and Review Loop. Slices with distinct territory (no shared files) MAY run in parallel per [`delegation.md` Boundary Isolation](delegation.md#boundary-isolation).
+
+3. **Integration checkpoint.** A final child task MUST replace the mocks with the real wiring and test the seams end-to-end. This integration task MUST declare `Dependencies` on the slices it connects, so it runs only after those slices are Completed.
+
+Example decomposition for a feature spanning a web UI and a database:
+
+| Checkpoint | Task ID | Slice | Verified state |
+|------------|---------|-------|----------------|
+| Contract | `WEB-1-1` | Define the data-access interface both sides honor | Interface compiles and is agreed |
+| Web slice | `WEB-1-2` | Build the pages against a mocked data layer | Pages work and are tested against the mock |
+| Data slice | `WEB-1-3` | Build the real data layer against the same interface | Data layer works and is tested in isolation |
+| Integration | `WEB-1-4` | Wire pages to the real data layer, remove the mock | End-to-end flow works and is tested |
+
+`WEB-1-2` and `WEB-1-3` share no files and MAY run in parallel; `WEB-1-4` declares `Dependencies` on both and runs after them.
+
+### Checkpoint Gating
+
+Each checkpoint-sliced task MUST record a **gating mode** governing what happens when a checkpoint (a slice child task) reaches Completed:
+
+- **autonomous** (default): the manager self-verifies the checkpoint (its tests pass and its Simplify and Review Loop has converged), records a milestone entry in the parent's Execution Log timeline, and proceeds to the next checkpoint without interrupting the user. The manager escalates only on failure or on a Significant question, per [`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline).
+- **sign-off**: reaching a checkpoint is a hard stop. The manager presents an overview of the slice plus its test and review results, then waits for user confirmation before starting the next checkpoint.
+
+The gating mode is chosen during the Triage → Ready planning phase and recorded in the **Checkpoint Gating** field of the task file header ([Task File Template](#task-file-template)). The manager MUST raise the gating choice with the user at the start of planning. When the user expresses no preference, the mode defaults to **autonomous**.
+
+Gating never suppresses failure reporting. Under either mode, a checkpoint whose tests fail or whose loop cannot converge MUST halt progression and be handled per [Completion Validation](#completion-validation) and the escalation rules.
+
+### Milestone Recording
+
+Under both gating modes, each reached checkpoint MUST be recorded as a milestone in the parent's Execution Log timeline, capturing which slice completed, its verification result (tests and loop convergence), and, under sign-off mode, the user's confirmation. This keeps the sequence of working states auditable from the parent coordination task.
 
 ---
 
@@ -867,6 +932,8 @@ Violations of MUST requirements constitute conformance failures.
 - Deleting or overwriting previously written task file content ([Content Preservation](#content-preservation)) is a critical conformance failure with zero tolerance for exceptions.
 - Fabricating an answer to a Significant question to avoid interrupting the user ([`delegation.md` Question Batching Discipline](delegation.md#question-batching-discipline)), or silently dropping a queued question ([Question Log and Queue Format](#question-log-and-queue-format)), is a conformance failure.
 - Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) is a conformance failure.
+- Applying checkpoint slicing without a contract-first step, or without an integration checkpoint that declares `Dependencies` on the slices it connects ([Slicing Doctrine](#slicing-doctrine)), is a conformance failure.
+- Omitting the Checkpoint Gating field on a checkpoint-sliced task, or failing to raise the gating choice with the user during planning ([Checkpoint Gating](#checkpoint-gating)), is a conformance failure.
 
 ---
 
