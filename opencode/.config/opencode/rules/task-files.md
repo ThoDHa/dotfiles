@@ -161,6 +161,8 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 In every lane, the `Task` cell MUST be a markdown link whose text is the task's descriptive name (headline / AP-style title case, see [File Naming Convention](#file-naming-convention)) and whose target is the task file: `./current/<file>.md` while active or recently completed, `./archive/<file>.md` once archived.
 
+In the In Progress table, the `Progress` cell MUST be a completion percentage, and nothing but that percentage: for example `10%`, `45%`, `90%`. The cell MUST NOT hold a summary of what was done, a description of remaining work, a status phrase, or any other non-percentage value. The at-a-glance summary of the most recent change lives in the task file's [Latest Update field](#latest-update-field) instead; the fuller record of what was accomplished and what remains lives in the task file body, not on the board.
+
 In the Completed and Archive tables, the `Duration` cell MUST be a time value, and nothing but that time: for example `3h 20m`, `2d 4h`, `45m`. The single exception is the literal `N/A`, used only when no working time can be derived from the task's logs. The cell MUST NOT hold a date, a description, any other placeholder (for example `-`, `TBD`), or any other non-time value.
 
 `Duration` is the **active working time** spent on the task, not the wall-clock span from start to finish. It is the time actually spent working, accumulated across the task's working periods as recorded in the Work Log and Progress Log. This includes the planning work performed during the Triage → Ready phase (clarification, exploration, populating the task file), not only the In Progress phase. Time during which the task made no progress MUST be excluded: any period the task sat Blocked, and any idle wait (for example waiting on tokens, on a review, or on an external dependency), does not count toward the duration. When the logs contain no derivable working time, the cell is `N/A`.
@@ -187,6 +189,68 @@ Required actions (MANDATORY):
 | Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
 | Task blocked/cancelled | Move to Blocked/Cancelled table + record the reason prominently in the task file (not the dashboard) |
 | ANY task file write | Update dashboard "Last updated" timestamp |
+
+The in-place, same-operation dashboard edits mandated above assume a single writer. When two or more sessions may operate on the same `.tasks/` directory concurrently, these direct edits are unsafe and are superseded by [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety).
+
+---
+
+## Concurrency and Multi-Session Safety
+
+### Scope and Applicability
+
+The requirements in this section apply ONLY when two or more sessions (independent manager instances running in separate processes or terminals) may operate on the same `.tasks/` directory concurrently. In the default single-session case, where exactly one manager instance touches a given `.tasks/` directory at a time, the direct-edit rules of [Index Maintenance](#index-maintenance) and [Real-Time Updates](#real-time-updates) stand unmodified and this section does not apply.
+
+When concurrent sessions are possible, this section GOVERNS and supersedes any conflicting in-place-edit instruction elsewhere in this specification.
+
+### The Concurrency Hazard
+
+Sessions do not share memory. Each manager instance assumes it is the sole writer. The `dashboard.md` file is a single file that every session rewrites on every state change ([Index Maintenance](#index-maintenance)). When two sessions perform a read-modify-write on that one file, the later write silently discards the earlier session's changes, producing a lost update. Individual task files are contended only when two sessions work the same task; separate tasks live in separate files and do not collide.
+
+Two distinct hazards therefore exist:
+
+- **Shared-aggregate contention:** multiple sessions writing the single `dashboard.md`. This is the dominant hazard, because the protocol requires every session to rewrite the board constantly.
+- **Same-task contention:** two sessions claiming or editing the one task file for the same task.
+
+### Single-Writer Principle
+
+Every shared mutable file MUST have exactly one writer at any instant. Implementations MUST satisfy this not by trusting each session to voluntarily take turns, but by structuring writes so that concurrent writers cannot corrupt shared state. Two mechanisms are REQUIRED, one per hazard: a derived dashboard with serialized regeneration for shared-aggregate contention, and atomic task claiming for same-task contention.
+
+### Derived Dashboard with Serialized Mutation
+
+Under concurrency, `dashboard.md` MUST be treated as a **derived artifact**, not a hand-edited one:
+
+1. **Task files are the source of truth.** The dashboard's contents (each task's lane, priority, progress, and timestamps) MUST be fully reconstructable from the task files themselves. The rebuild reads the canonical header fields defined in the [Task File Template](#task-file-template): **Status** (lane), **Priority**, **Progress**, **Updated**, and, for finished tasks, **Completed** and **Duration**; the file's location (`current/` versus `archive/`) distinguishes the Completed lane from the Archive lane. Implementations MUST NOT hold state on the board that exists nowhere else.
+2. **No direct edits.** Sessions MUST NOT edit `dashboard.md` in place. Every change to the board is produced by regenerating it from the task files.
+3. **Serialized, lock-guarded regeneration.** Each regeneration MUST acquire an exclusive advisory lock (for example, `flock` on `.tasks/.lock`) for the duration of the read-and-write, then release it. Because regeneration is a full idempotent rebuild, concurrent sessions serialize harmlessly: each waiting session, on acquiring the lock, rebuilds a complete and current board. The `.tasks/.lock` file is a transient synchronization artifact, not a task file, and is exempt from the task-file rules of this specification.
+4. **Process-held, never agent-held.** The lock MUST be held by the regenerating process for the span of the single rebuild command (milliseconds) and released automatically when that process exits, including on abnormal exit. Implementations MUST NOT hold the lock across LLM tool calls, model turns, or any interval that spans agent reasoning. An agent-held lock cannot survive a read-think-write cycle and would deadlock every other session whenever a session is abandoned mid-task.
+
+This model removes the lost-update hazard structurally: there is no in-place mutation left to interleave, only a serialized rebuild from independently-owned sources.
+
+### Atomic Task Claiming
+
+To prevent two sessions from working the same task, a session MUST claim a task before beginning work on it, and the claim MUST be atomic:
+
+- A task file MUST carry an owner marker, the **Owner** header field ([Task File Template](#task-file-template)), identifying the session that holds it. This field is a human-readable mirror; it is not itself the atomic gate.
+- The claim gate MUST be an operation that is atomic on a local filesystem. The provided tool implements it as an exclusive-create (`O_EXCL`) of a per-task sidecar file, `.tasks/current/<taskfile>.claim`, whose contents record the owning session. The kernel guarantees exactly one creator wins the race. A session that loses observes the task as already claimed and MUST NOT proceed on it; it selects other work or defers to the owner. The winner then writes its identifier into the **Owner** field. The `.claim` sidecar is a transient synchronization artifact, not a task file, and is exempt from the task-file rules of this specification.
+- Ownership MUST be released when the session finishes with the task or is known to have exited, so that abandoned claims do not strand work permanently. Release removes the `.claim` sidecar and clears the **Owner** field. Staleness detection by timestamp MAY additionally reclaim sidecars left by sessions that exited without releasing.
+
+### External Tooling Dependency
+
+The serialized regeneration and atomic claim described above require a mutation tool provided by the environment: a small command that performs the lock-rebuild-release cycle and the atomic claim. This specification defines that tool's CONTRACT (idempotent full rebuild, a process-held short-lived lock, and an atomic claim), not its implementation. Until such a tool exists in a given environment, concurrent multi-session operation against one `.tasks/` directory is UNSAFE, and implementations MUST fall back to single-session operation (one manager per `.tasks/` directory at a time), under which this section does not apply.
+
+In this environment the tool is provided as the `tasks` command (on `PATH` at `~/.local/bin/tasks`). Its subcommands satisfy the contract:
+
+- `tasks init` scaffolds a `.tasks/` directory (`dashboard.md`, `current/`, `archive/`).
+- `tasks render` rebuilds `dashboard.md` from the task files under a `flock` on `.tasks/.lock`, released on process exit. The rebuild is a pure function of the task files, so concurrent renders serialize harmlessly and the derived `Last updated` line is the newest **Updated** timestamp among the tasks, not wall-clock time.
+- `tasks claim <taskfile>` performs the `O_EXCL` sidecar claim, writes the **Owner** field, and renders. `tasks release <taskfile>` reverses it.
+- `tasks set <taskfile> Key=Value...` updates canonical header fields (refreshing **Updated**) and renders through the serialized path.
+- `tasks new --id <ID> --name <Name>` creates a task file carrying the canonical header fields, then renders.
+
+Sessions MUST route every dashboard change through `tasks` (via `render`, or a `set`/`claim`/`release`/`new` that renders as its final step) rather than editing `dashboard.md` directly.
+
+### Relationship to Real-Time Updates
+
+Serialization does not weaken the [Real-Time Updates](#real-time-updates) mandate. Updates remain immediate: the manager writes the owning task file as work occurs, then triggers a dashboard regeneration at once. The only change is that the board is rebuilt through the serialized path rather than edited in place.
 
 ---
 
@@ -218,6 +282,18 @@ A reference from one task to *another task* MUST exist only when a real structur
 
 Implementations MUST NOT reference another task outside these cases. Do not mention or link a sibling task for context, completeness, or "see also" flavor; do not restate another task's content; do not cross-link tasks that merely touch the same area without a genuine dependency. When in doubt, omit the reference. This restriction governs references *between tasks*; references to a task file's own sections and to these specifications are unaffected.
 
+### Latest Update Field
+
+Every task file MUST carry a **Latest Update** field in its header, directly below the status block and above the Table of Contents (see [Task File Template](#task-file-template)). It holds a single entry, the one most recent notable change, NOT a running list. Its purpose is to answer "what happened last?" at a glance: the human-readable summary the dashboard board deliberately omits, since the board's `Progress` cell carries only a percentage ([Master Index Template](#master-index-template)).
+
+The field MUST contain all three of:
+
+- A timestamp (`YYYY-MM-DD HH:MM`) of the change.
+- A terse one-line summary of what changed.
+- A markdown link to the detailed record of that change, wherever its full detail lives (the relevant Work Log entry, Decision Log decision, subtask Progress Log, Failed Approach, or Execution Log milestone). The link MUST follow the [Cross-Reference Convention](#cross-reference-convention): link by heading title, never by number.
+
+The Latest Update field is a **live pointer**, refreshed in place each time a more recent notable change occurs, per the [Real-Time Updates](#real-time-updates) mandate. Refreshing it to the newer summary does NOT violate [Content Preservation](#content-preservation): the field is a mutable header pointer like **Status**, and the full cumulative history it supersedes remains preserved in the log section it links to. Only the pointer moves; no logged content is ever removed.
+
 ### Child Task Files
 
 A Task Breakdown subtask MAY be tracked inline within this task file, or as a *child task file*: a link to a separately-tracked task file. A child task file is itself an ordinary task file and MAY have its own child task files, so the structure nests to any depth.
@@ -248,7 +324,14 @@ The parent reflects each child's status through its Task Breakdown entry and the
 *Created: YYYY-MM-DD HH:MM*
 **Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
 **Status Reason:** [Required when Blocked or Cancelled: one line stating plainly why. Omit otherwise.]
+**Priority:** High | Medium | Low
+**Progress:** [Integer percent with a % sign, for example 45%. Reflected in the In Progress lane; 0% until work begins.]
+**Owner:** [Session identifier holding the atomic claim, or empty when unclaimed. Managed by the claim tool; see [Atomic Task Claiming](#atomic-task-claiming).]
 **Checkpoint Gating:** autonomous | sign-off [Required for checkpoint-sliced tasks, see [Checkpoint Gating](#checkpoint-gating); omit for single-slice tasks. Default: autonomous.]
+**Updated:** YYYY-MM-DD HH:MM [Timestamp of the last change to this file. Drives the dashboard `Updated` column and the derived `Last updated` line.]
+**Completed:** [YYYY-MM-DD HH:MM, set when Status becomes Completed; omit otherwise.]
+**Duration:** [Active working time, for example 3h 20m, or N/A. Set when Completed; omit otherwise.]
+**Latest Update:** [YYYY-MM-DD HH:MM] [One-line summary of the most recent notable change] ([detail](#anchor-of-the-detailed-record))
 
 ## Table of Contents
 
@@ -799,11 +882,12 @@ Implementations MUST update task documentation continuously as work progresses:
   - After agent reports: Record full verbatim output immediately
   - After manager activities: Document outcomes when activity concludes
 - Decision Log updated AT THE MOMENT significant choices are made
+- [Latest Update field](#latest-update-field) refreshed in place WHENEVER a more recent notable change occurs, pointing to that change's detailed record
 - Task status updated as work progresses through phases
 - Failed Approaches documented IMMEDIATELY when attempts fail
 - Task status updates MUST follow [Index Maintenance](#index-maintenance) synchronization rules (single source of truth).
 
-**Dashboard Synchronization:** The master index (`dashboard.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress.
+**Dashboard Synchronization:** The master index (`dashboard.md`) MUST be updated in parallel with task file changes. When task files are updated, the dashboard MUST reflect those changes immediately. This ensures the dashboard remains an accurate real-time view of all work in progress. When multiple sessions may share one `.tasks/` directory, this synchronization MUST be performed through the serialized, derived-dashboard path defined in [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety) rather than by editing `dashboard.md` in place.
 
 **Critical principle:** Users should be able to open a task file at ANY moment and see current work status, not outdated information.
 
@@ -934,6 +1018,8 @@ Violations of MUST requirements constitute conformance failures.
 - Closing a task while identified deferred, follow-up, "nice-to-have", or out-of-scope work remains uncaptured as new task files ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)) is a conformance failure.
 - Applying checkpoint slicing without a contract-first step, or without an integration checkpoint that declares `Dependencies` on the slices it connects ([Slicing Doctrine](#slicing-doctrine)), is a conformance failure.
 - Omitting the Checkpoint Gating field on a checkpoint-sliced task, or failing to raise the gating choice with the user during planning ([Checkpoint Gating](#checkpoint-gating)), is a conformance failure.
+- Editing `dashboard.md` in place, or holding an agent-held lock across tool calls or model turns, when multiple sessions may share the same `.tasks/` directory ([Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety)), is a conformance failure.
+- Beginning work on a task without an atomic claim when multiple sessions may share the same `.tasks/` directory ([Atomic Task Claiming](#atomic-task-claiming)), is a conformance failure.
 
 ---
 
