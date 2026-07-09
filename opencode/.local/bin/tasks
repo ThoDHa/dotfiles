@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+#
+# tasks - concurrency-safe board tool for the .tasks/ task-file protocol.
+#
+# The dashboard is a derived artifact: `render` rebuilds it from the task
+# files under a process-held flock on .tasks/.lock, so concurrent sessions
+# serialize harmlessly and never lose an update. Task ownership is claimed
+# atomically via an O_EXCL sidecar (<taskfile>.claim), never by editing a
+# text field. See ~/.config/opencode/rules/task-files.md, section
+# "Concurrency and Multi-Session Safety".
+
+set -euo pipefail
+
+readonly LOCK_NAME=".lock"
+readonly DASHBOARD_NAME="dashboard.md"
+readonly CURRENT_DIR="current"
+readonly ARCHIVE_DIR="archive"
+readonly CLAIM_SUFFIX=".claim"
+
+readonly STATUS_TRIAGE="Triage"
+readonly STATUS_READY="Ready"
+readonly STATUS_IN_PROGRESS="In Progress"
+readonly STATUS_BLOCKED="Blocked"
+readonly STATUS_CANCELLED="Cancelled"
+readonly STATUS_COMPLETED="Completed"
+
+readonly DEFAULT_PRIORITY="Medium"
+readonly DEFAULT_STATUS="$STATUS_TRIAGE"
+readonly NA="N/A"
+
+err() { printf 'tasks: %s\n' "$*" >&2; }
+die() { err "$*"; exit 1; }
+now() { date '+%Y-%m-%d %H:%M'; }
+
+# A stable per-session identifier for claims. Callers may override with
+# --owner or TASKS_SESSION; the pid fallback keeps distinct shells distinct.
+session_id() { printf '%s' "${TASKS_SESSION:-$(hostname -s 2>/dev/null || hostname)-$$}"; }
+
+usage() {
+	cat <<'EOF'
+Usage: tasks <command> [options]
+
+Commands:
+  init [--dir DIR]                     Scaffold a .tasks/ directory and empty board.
+  render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
+  new --id ID --name NAME [opts]       Create a task file with canonical header fields.
+                                       opts: --status S --priority P --dir DIR
+  set <taskfile> Key=Value...          Update header field(s), refresh Updated, render.
+  claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
+  release <taskfile>                   Release a claim and clear Owner, render.
+  help                                 Show this help.
+
+The .tasks/ directory is located from --dir, then $TASKS_DIR, then by walking
+up from the current directory, then ./.tasks as a last resort.
+EOF
+}
+
+# Resolve the .tasks directory: explicit value wins, else search upward, else default.
+resolve_tasks_dir() {
+	local explicit="${1:-}"
+	if [[ -n "$explicit" ]]; then printf '%s' "$explicit"; return; fi
+	if [[ -n "${TASKS_DIR:-}" ]]; then printf '%s' "$TASKS_DIR"; return; fi
+	local dir="$PWD"
+	while [[ "$dir" != "/" ]]; do
+		if [[ -d "$dir/.tasks" ]]; then printf '%s' "$dir/.tasks"; return; fi
+		dir="$(dirname "$dir")"
+	done
+	printf '%s' "$PWD/.tasks"
+}
+
+# Resolve a task file argument to a real path: as given, or under current/, or archive/.
+resolve_task_file() {
+	local tasks_dir="$1" arg="$2"
+	if [[ -f "$arg" ]]; then printf '%s' "$arg"; return; fi
+	if [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$CURRENT_DIR/$arg"; return; fi
+	if [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$ARCHIVE_DIR/$arg"; return; fi
+	die "task file not found: $arg"
+}
+
+# Print the header region of a task file: everything before the first "## " heading.
+header_of() { awk '/^## /{exit} {print}' "$1"; }
+
+# Extract a "**Key:** value" field from a header block supplied on stdin.
+header_field() {
+	local key="$1"
+	grep -m1 -oP "^\\*\\*${key}:\\*\\*[[:space:]]+\\K.*" || true
+}
+
+# Extract the descriptive name from the "# Task: NAME" title line.
+header_name() { grep -m1 -oP '^# Task:[[:space:]]+\K.*' || true; }
+
+# Markdown-link a task's name to its file, relative to the dashboard.
+task_link() {
+	local subdir="$1" file="$2" name="$3"
+	printf '[%s](./%s/%s)' "$name" "$subdir" "$(basename "$file")"
+}
+
+# Normalize a progress value to "<n>%"; empty becomes 0%.
+normalize_progress() {
+	local p="${1:-}"
+	p="${p%\%}"
+	p="${p//[[:space:]]/}"
+	[[ -z "$p" ]] && p=0
+	printf '%s%%' "$p"
+}
+
+slugify() {
+	printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+		| sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
+}
+
+# --- rendering -------------------------------------------------------------
+
+# Rebuild dashboard.md from all task files. Pure function of the files on disk:
+# same inputs produce byte-identical output, including the derived "Last updated"
+# line (the newest Updated timestamp, not wall-clock).
+render_unlocked() {
+	local tasks_dir="$1"
+	local dash="$tasks_dir/$DASHBOARD_NAME"
+	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
+
+	local triage=() ready=() inprogress=() blocked=() completed=() archive=()
+	local newest=""
+
+	local subdir file hdr name status priority progress updated completed_at duration link
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md; do
+			[[ -e "$file" ]] || continue
+			hdr="$(header_of "$file")"
+			name="$(printf '%s\n' "$hdr" | header_name)"
+			[[ -z "$name" ]] && name="$(basename "$file" .md)"
+			status="$(printf '%s\n' "$hdr" | header_field "Status")"
+			priority="$(printf '%s\n' "$hdr" | header_field "Priority")"
+			progress="$(printf '%s\n' "$hdr" | header_field "Progress")"
+			updated="$(printf '%s\n' "$hdr" | header_field "Updated")"
+			completed_at="$(printf '%s\n' "$hdr" | header_field "Completed")"
+			duration="$(printf '%s\n' "$hdr" | header_field "Duration")"
+			[[ -z "$priority" ]] && priority="$DEFAULT_PRIORITY"
+			[[ -z "$duration" ]] && duration="$NA"
+			link="$(task_link "$subdir" "$file" "$name")"
+
+			if [[ -n "$updated" && "$updated" > "$newest" ]]; then newest="$updated"; fi
+
+			if [[ "$subdir" == "$ARCHIVE_DIR" ]]; then
+				archive+=("| $link | ${completed_at:-$NA} | $duration |")
+				continue
+			fi
+			case "$status" in
+				"$STATUS_TRIAGE")   triage+=("| $link | $priority | $updated |") ;;
+				"$STATUS_READY")    ready+=("| $link | $priority | $updated |") ;;
+				"$STATUS_IN_PROGRESS") inprogress+=("| $link | $(normalize_progress "$progress") | $updated | $priority |") ;;
+				"$STATUS_BLOCKED"|"$STATUS_CANCELLED") blocked+=("| $link | $status | $updated |") ;;
+				"$STATUS_COMPLETED") completed+=("| $link | ${completed_at:-$updated} | $duration |") ;;
+				*) triage+=("| $link | $priority | $updated |") ;;
+			esac
+		done
+	done
+
+	{
+		printf '# Task Board Dashboard\n\n'
+		printf '*Jira-style task management board. Auto-generated by `tasks render`; do not edit by hand.*\n\n'
+		printf '## Triage\n\n| Task | Priority | Updated |\n|------|----------|---------|\n'
+		print_sorted "${triage[@]+"${triage[@]}"}"
+		printf '\n## Ready\n\n| Task | Priority | Updated |\n|------|----------|---------|\n'
+		print_sorted "${ready[@]+"${ready[@]}"}"
+		printf '\n## In Progress\n\n| Task | Progress | Updated | Priority |\n|------|----------|---------|----------|\n'
+		print_sorted "${inprogress[@]+"${inprogress[@]}"}"
+		printf '\n## Blocked/Cancelled\n\n| Task | Status | Updated |\n|------|--------|---------|\n'
+		print_sorted "${blocked[@]+"${blocked[@]}"}"
+		printf '\n## Completed\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n'
+		print_sorted "${completed[@]+"${completed[@]}"}"
+		printf '\n## Archive\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n'
+		print_sorted "${archive[@]+"${archive[@]}"}"
+		printf '\n---\n\n*Last updated: %s*\n' "${newest:-$NA}"
+	} >"$tmp"
+
+	mv -f "$tmp" "$dash"
+}
+
+# Emit table rows sorted deterministically (keeps render idempotent).
+print_sorted() {
+	(($# == 0)) && return 0
+	printf '%s\n' "$@" | LC_ALL=C sort
+}
+
+# Acquire the board lock on fd 9 for this process, then render. The lock is
+# released automatically when the process exits, so an abandoned session never
+# deadlocks the others.
+render() {
+	local tasks_dir="$1"
+	[[ -d "$tasks_dir" ]] || die "no .tasks directory at $tasks_dir (run 'tasks init')"
+	local lock="$tasks_dir/$LOCK_NAME"
+	exec 9>"$lock"
+	flock 9
+	render_unlocked "$tasks_dir"
+}
+
+# --- header mutation -------------------------------------------------------
+
+# Replace a "**Key:** value" line within the header, or insert it just before
+# the Table of Contents if absent. Only the header region is touched.
+set_header_field() {
+	local file="$1" key="$2" value="$3"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")"
+	awk -v key="$key" -v value="$value" '
+		BEGIN { inhdr = 1; done = 0 }
+		inhdr && /^## / {
+			if (!done) { print "**" key ":** " value; done = 1 }
+			inhdr = 0
+		}
+		{
+			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
+				print "**" key ":** " value; done = 1; next
+			}
+			print
+		}
+		END { if (!done) print "**" key ":** " value }
+	' "$file" >"$tmp"
+	mv -f "$tmp" "$file"
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_init() {
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "${1:-}")"
+	mkdir -p "$tasks_dir/$CURRENT_DIR" "$tasks_dir/$ARCHIVE_DIR"
+	render "$tasks_dir"
+	printf '%s\n' "$tasks_dir"
+}
+
+cmd_render() {
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "${1:-}")"
+	render "$tasks_dir"
+}
+
+cmd_new() {
+	local id="" name="" status="$DEFAULT_STATUS" priority="$DEFAULT_PRIORITY" dir=""
+	while (($#)); do
+		case "$1" in
+			--id) id="$2"; shift 2 ;;
+			--name) name="$2"; shift 2 ;;
+			--status) status="$2"; shift 2 ;;
+			--priority) priority="$2"; shift 2 ;;
+			--dir) dir="$2"; shift 2 ;;
+			*) die "new: unknown option: $1" ;;
+		esac
+	done
+	[[ -n "$id" ]] || die "new: --id is required"
+	[[ -n "$name" ]] || die "new: --name is required"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	[[ -d "$tasks_dir/$CURRENT_DIR" ]] || die "no .tasks directory at $tasks_dir (run 'tasks init')"
+
+	local ts; ts="$(now)"
+	local stamp; stamp="$(date '+%Y%m%d-%H%M')"
+	local file="$tasks_dir/$CURRENT_DIR/${stamp}-$(slugify "$name").md"
+	[[ -e "$file" ]] && die "new: task file already exists: $file"
+
+	cat >"$file" <<EOF
+# Task: $name
+
+*Created: $ts*
+**Status:** $status
+**Priority:** $priority
+**Progress:** 0%
+**Owner:**
+**Updated:** $ts
+**Latest Update:** [$ts] Task created ([detail](#execution-log))
+
+## Table of Contents
+
+- [Objective](#objective)
+- [Success Criteria](#success-criteria)
+- [Work Log](#work-log)
+- [Execution Log](#execution-log)
+
+---
+
+## Objective
+
+[$id] $name
+
+## Success Criteria
+
+- [ ] TODO
+
+## Work Log
+
+## Execution Log
+
+- $ts - Task file created
+EOF
+	render "$tasks_dir"
+	printf '%s\n' "$file"
+}
+
+cmd_set() {
+	(($# >= 1)) || die "set: usage: tasks set <taskfile> Key=Value..."
+	local args=("$@")
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "")"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	local touched_updated=0 pair key value i
+	for ((i = 1; i < ${#args[@]}; i++)); do
+		pair="${args[$i]}"
+		[[ "$pair" == *=* ]] || die "set: expected Key=Value, got: $pair"
+		key="${pair%%=*}"
+		value="${pair#*=}"
+		set_header_field "$file" "$key" "$value"
+		[[ "$key" == "Updated" ]] && touched_updated=1
+	done
+	((touched_updated == 0)) && set_header_field "$file" "Updated" "$(now)"
+	render "$tasks_dir"
+}
+
+cmd_claim() {
+	local owner="" dir="" target=""
+	while (($#)); do
+		case "$1" in
+			--owner) owner="$2"; shift 2 ;;
+			--dir) dir="$2"; shift 2 ;;
+			*) target="$1"; shift ;;
+		esac
+	done
+	[[ -n "$target" ]] || die "claim: usage: tasks claim <taskfile> [--owner ID]"
+	[[ -n "$owner" ]] || owner="$(session_id)"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
+	local claim="$file$CLAIM_SUFFIX"
+
+	# O_EXCL create: exactly one racer wins. noclobber makes '>' fail if it exists.
+	if (set -o noclobber; printf '%s\n' "$owner" >"$claim") 2>/dev/null; then
+		set_header_field "$file" "Owner" "$owner"
+		set_header_field "$file" "Updated" "$(now)"
+		render "$tasks_dir"
+		printf 'claimed %s by %s\n' "$(basename "$file")" "$owner"
+	else
+		die "already claimed by $(cat "$claim" 2>/dev/null || printf 'unknown')"
+	fi
+}
+
+cmd_release() {
+	local dir="" target=""
+	while (($#)); do
+		case "$1" in
+			--dir) dir="$2"; shift 2 ;;
+			*) target="$1"; shift ;;
+		esac
+	done
+	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile>"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
+	rm -f "$file$CLAIM_SUFFIX"
+	set_header_field "$file" "Owner" ""
+	set_header_field "$file" "Updated" "$(now)"
+	render "$tasks_dir"
+	printf 'released %s\n' "$(basename "$file")"
+}
+
+main() {
+	(($#)) || { usage; exit 2; }
+	local cmd="$1"; shift
+	case "$cmd" in
+		init) cmd_init "$@" ;;
+		render) cmd_render "$@" ;;
+		new) cmd_new "$@" ;;
+		set) cmd_set "$@" ;;
+		claim) cmd_claim "$@" ;;
+		release) cmd_release "$@" ;;
+		help | -h | --help) usage ;;
+		*) err "unknown command: $cmd"; usage; exit 2 ;;
+	esac
+}
+
+main "$@"
