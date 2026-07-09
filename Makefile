@@ -15,7 +15,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-none clean-stow test test-links test-rules
+.PHONY: personality-none clean-stow test test-links test-rules test-tasks
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -145,7 +145,7 @@ build:
 EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 
 # Test all symlinks exist and opencode loads rules
-test: test-links test-rules
+test: test-links test-rules test-tasks
 	@echo ""
 	@echo "All tests passed!"
 
@@ -175,6 +175,11 @@ test-rules:
 		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
+
+# Test the tasks board tool (render, atomic claim, lane placement)
+test-tasks:
+	@echo "Testing tasks board tool..."
+	@bash tests/tasks/test-tasks.sh
 
 # Help
 help:
@@ -209,6 +214,7 @@ help:
 	@echo "  make test        - Run all tests (symlinks + rules loading)"
 	@echo "  make test-links  - Verify all symlinks exist"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
+	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES)"
 	@echo ""
