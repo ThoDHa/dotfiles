@@ -119,11 +119,12 @@ step_stow() {
 
 step_system_packages() {
     sudo apt-get update -q
+    # util-linux provides flock, used by the tasks board tool's dashboard lock
     sudo apt-get install -y \
         git curl wget zip unzip tree stow \
         zsh tmux \
         gcc python3 python3-venv python3-dev python3-pip default-jdk \
-        ripgrep fd-find bat
+        ripgrep fd-find bat util-linux
 
     # Debian/Ubuntu ship bat as batcat
     if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
