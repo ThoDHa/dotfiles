@@ -66,6 +66,44 @@ assert_contains "In Progress row links into current/" "$ip_row" "(./current/"
 assert_contains "Triage lane lists API-2 task" "$(awk '/^## Triage/{f=1} /^## Ready/{f=0} f' <<<"$board")" "Add Rate Limiting"
 assert_contains "Ready lane lists API-3 task" "$(awk '/^## Ready/{f=1} /^## In Progress/{f=0} f' <<<"$board")" "Document Endpoints"
 
+echo "== created column =="
+assert_contains "new writes a canonical Created field" "$(cat "$f_tr")" "**Created:**"
+assert_contains "Triage header carries a Created column" "$board" "| Task | Priority | Created | Updated |"
+assert_contains "Ready header carries a Created column" "$board" "| Task | Priority | Created | Updated |"
+assert_contains "Blocked/Cancelled header carries a Created column" "$board" "| Task | Status | Created | Updated |"
+tr_created="$(grep -oP '^\*\*Created:\*\*\s+\K.*' "$f_tr")"
+assert_contains "Triage row shows the task's Created timestamp" "$(grep -F 'Add Rate Limiting' <<<"$board")" "$tr_created"
+# A task file predating the canonical field still renders its real creation date
+legacy="$TASKS_DIR/current/20240101-0900-legacy-created-line.md"
+cat >"$legacy" <<'EOF'
+# Task: Legacy Created Line
+
+*Created: 2024-01-01 09:00*
+**Status:** Triage
+**Priority:** Low
+**Updated:** 2024-01-01 09:30
+
+## Objective
+EOF
+t render >/dev/null
+assert_contains "legacy *Created:* line still yields a date" "$(grep -F 'Legacy Created Line' "$DASH")" "2024-01-01 09:00"
+# A task file with no creation timestamp at all falls back to N/A
+undated="$TASKS_DIR/current/20240101-1000-undated-task.md"
+cat >"$undated" <<'EOF'
+# Task: Undated Task
+
+**Status:** Triage
+**Priority:** Low
+**Updated:** 2024-01-01 10:00
+
+## Objective
+EOF
+t render >/dev/null
+assert_contains "missing creation timestamp renders N/A" "$(grep -F 'Undated Task' "$DASH")" "| N/A |"
+rm -f "$legacy" "$undated"
+t render >/dev/null
+board="$(cat "$DASH")"
+
 echo "== idempotent render =="
 before="$(cat "$DASH")"
 t render >/dev/null
@@ -103,6 +141,14 @@ t release "$f_tr" >/dev/null
 [[ ! -f "$f_tr.claim" ]] && ok "sidecar removed on release" || bad "sidecar removed on release"
 owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
+
+echo "== blocked lane =="
+t set "$f_tr" Status=Blocked >/dev/null
+blocked_lane="$(awk '/^## Blocked\/Cancelled/{f=1} /^## Completed/{f=0} f' <"$DASH")"
+assert_contains "blocked task appears in Blocked/Cancelled lane" "$blocked_lane" "Add Rate Limiting"
+assert_contains "blocked row carries its Created timestamp" "$blocked_lane" "$tr_created"
+assert_contains "blocked row states the status" "$blocked_lane" "| Blocked |"
+t set "$f_tr" Status=Triage >/dev/null
 
 echo "== completed and archive lanes =="
 t set "$f_rd" Status=Completed Completed="2026-07-09 18:00" Duration="2h 15m" >/dev/null
