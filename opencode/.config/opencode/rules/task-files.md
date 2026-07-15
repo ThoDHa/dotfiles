@@ -123,13 +123,13 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 ## Triage
 
-| Task | Priority | Updated |
-|------|----------|---------|
+| Task | Priority | Created | Updated |
+|------|----------|---------|---------|
 
 ## Ready
 
-| Task | Priority | Updated |
-|------|----------|---------|
+| Task | Priority | Created | Updated |
+|------|----------|---------|---------|
 
 ## In Progress
 
@@ -141,8 +141,8 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 ## Blocked/Cancelled
 
-| Task | Status | Updated |
-|------|--------|---------|
+| Task | Status | Created | Updated |
+|------|--------|---------|---------|
 
 ## Completed
 
@@ -160,6 +160,8 @@ The master index MUST be located at `.tasks/dashboard.md`.
 ```
 
 In every lane, the `Task` cell MUST be a markdown link whose text is the task's descriptive name (headline / AP-style title case, see [File Naming Convention](#file-naming-convention)) and whose target is the task file: `./current/<file>.md` while active or recently completed, `./archive/<file>.md` once archived.
+
+In the Triage, Ready, and Blocked/Cancelled tables, the `Created` and `Updated` cells MUST each hold a `YYYY-MM-DD HH:MM` timestamp and nothing else, drawn from the task file's **Created** and **Updated** header fields respectively. `Created` records when the task file was first created and MUST NOT change thereafter; `Updated` moves with every subsequent change to the file. The pair exists so a waiting task's age is visible on the board: `Created` distinguishes a task that entered Triage this morning from one that has sat unstarted for weeks, and a task blocked yesterday from one blocked for a quarter, neither of which an `Updated` timestamp alone can convey. When a task file carries no derivable creation timestamp, the `Created` cell is `N/A`.
 
 In the In Progress table, the `Progress` cell MUST be a completion percentage, and nothing but that percentage: for example `10%`, `45%`, `90%`. The cell MUST NOT hold a summary of what was done, a description of remaining work, a status phrase, or any other non-percentage value. The at-a-glance summary of the most recent change lives in the task file's [Latest Update field](#latest-update-field) instead; the fuller record of what was accomplished and what remains lives in the task file body, not on the board.
 
@@ -219,7 +221,7 @@ Every shared mutable file MUST have exactly one writer at any instant. Implement
 
 Under concurrency, `dashboard.md` MUST be treated as a **derived artifact**, not a hand-edited one:
 
-1. **Task files are the source of truth.** The dashboard's contents (each task's lane, priority, progress, and timestamps) MUST be fully reconstructable from the task files themselves. The rebuild reads the canonical header fields defined in the [Task File Template](#task-file-template): **Status** (lane), **Priority**, **Progress**, **Updated**, and, for finished tasks, **Completed** and **Duration**; the file's location (`current/` versus `archive/`) distinguishes the Completed lane from the Archive lane. Implementations MUST NOT hold state on the board that exists nowhere else.
+1. **Task files are the source of truth.** The dashboard's contents (each task's lane, priority, progress, and timestamps) MUST be fully reconstructable from the task files themselves. The rebuild reads the canonical header fields defined in the [Task File Template](#task-file-template): **Status** (lane), **Priority**, **Progress**, **Created**, **Updated**, and, for finished tasks, **Completed** and **Duration**; the file's location (`current/` versus `archive/`) distinguishes the Completed lane from the Archive lane. Implementations MUST NOT hold state on the board that exists nowhere else.
 2. **No direct edits.** Sessions MUST NOT edit `dashboard.md` in place. Every change to the board is produced by regenerating it from the task files.
 3. **Serialized, lock-guarded regeneration.** Each regeneration MUST acquire an exclusive advisory lock (for example, `flock` on `.tasks/.lock`) for the duration of the read-and-write, then release it. Because regeneration is a full idempotent rebuild, concurrent sessions serialize harmlessly: each waiting session, on acquiring the lock, rebuilds a complete and current board. The `.tasks/.lock` file is a transient synchronization artifact, not a task file, and is exempt from the task-file rules of this specification.
 4. **Process-held, never agent-held.** The lock MUST be held by the regenerating process for the span of the single rebuild command (milliseconds) and released automatically when that process exits, including on abnormal exit. Implementations MUST NOT hold the lock across LLM tool calls, model turns, or any interval that spans agent reasoning. An agent-held lock cannot survive a read-think-write cycle and would deadlock every other session whenever a session is abandoned mid-task.
@@ -321,7 +323,7 @@ The parent reflects each child's status through its Task Breakdown entry and the
 ```markdown
 # Task: [Descriptive Name]
 
-*Created: YYYY-MM-DD HH:MM*
+**Created:** YYYY-MM-DD HH:MM [Timestamp of the task file's creation. Drives the dashboard `Created` column in the Triage, Ready, and Blocked/Cancelled lanes. Set once and never changed.]
 **Status:** Triage | Ready | In Progress | Blocked | Cancelled | Completed
 **Status Reason:** [Required when Blocked or Cancelled: one line stating plainly why. Omit otherwise.]
 **Priority:** High | Medium | Low
