@@ -1,0 +1,104 @@
+tmux 3.7b: swallow duplicate device-attribute replies.
+
+Some client stacks answer DA1/DA2/XDA queries more than once (observed
+with ConPTY under Windows Terminal over SSH, which replies in addition
+to the terminal itself). tmux consumes the first reply and rejects any
+later one via the TTY_HAVEDA/TTY_HAVEDA2/TTY_HAVEXDA guards; rejected
+input falls through the key parser and is delivered to the active pane
+as literal keystrokes, e.g.:
+
+    ^[[?61;4;6;7;14;21;22;23;24;28;32;42;52c^[[>0;10;1c
+
+This patch moves each guard after the sequence has been fully parsed,
+so duplicate replies are consumed silently instead of leaking. Not yet
+fixed upstream as of master on 2026-07-17.
+
+--- a/tty-keys.c	2026-07-17 21:12:19.182607603 -0400
++++ b/tty-keys.c	2026-07-17 21:15:14.200450217 -0400
+@@ -1450,8 +1450,6 @@
+ 	char		 tmp[128], *endptr, p[32] = { 0 }, *cp, *next;
+ 
+ 	*size = 0;
+-	if (tty->flags & TTY_HAVEDA)
+-		return (-1);
+ 
+ 	/* First three bytes are always \033[?. */
+ 	if (buf[0] != '\033')
+@@ -1482,6 +1480,14 @@
+ 	tmp[i] = '\0';
+ 	*size = 4 + i;
+ 
++	/*
++	 * Some client stacks (e.g. ConPTY under Windows Terminal over SSH)
++	 * answer DA queries more than once. Swallow duplicate replies
++	 * instead of letting them fall through as key presses.
++	 */
++	if (tty->flags & TTY_HAVEDA)
++		return (0);
++
+ 	/* Convert all arguments to numbers. */
+ 	cp = tmp;
+ 	while ((next = strsep(&cp, ";")) != NULL) {
+@@ -1534,8 +1540,6 @@
+ 	char		 tmp[128], *endptr, p[32] = { 0 }, *cp, *next;
+ 
+ 	*size = 0;
+-	if (tty->flags & TTY_HAVEDA2)
+-		return (-1);
+ 
+ 	/* First three bytes are always \033[>. */
+ 	if (buf[0] != '\033')
+@@ -1566,6 +1570,14 @@
+ 	tmp[i] = '\0';
+ 	*size = 4 + i;
+ 
++	/*
++	 * Some client stacks (e.g. ConPTY under Windows Terminal over SSH)
++	 * answer DA queries more than once. Swallow duplicate replies
++	 * instead of letting them fall through as key presses.
++	 */
++	if (tty->flags & TTY_HAVEDA2)
++		return (0);
++
+ 	/* Convert all arguments to numbers. */
+ 	cp = tmp;
+ 	while ((next = strsep(&cp, ";")) != NULL) {
+@@ -1614,8 +1626,6 @@
+ 	char		 tmp[128];
+ 
+ 	*size = 0;
+-	if (tty->flags & TTY_HAVEXDA)
+-		return (-1);
+ 
+ 	/* First four bytes are always \033P>|. */
+ 	if (buf[0] != '\033')
+@@ -1646,6 +1656,14 @@
+ 	if (i == (sizeof tmp) - 1)
+ 		return (-1);
+ 	*size = 5 + i;
++
++	/*
++	 * Some client stacks (e.g. ConPTY under Windows Terminal over SSH)
++	 * answer DA queries more than once. Swallow duplicate replies
++	 * instead of letting them fall through as key presses.
++	 */
++	if (tty->flags & TTY_HAVEXDA)
++		return (0);
+ 	if (i == 0)
+ 		return (0);
+ 	tmp[i - 1] = '\0';
+@@ -1795,6 +1813,14 @@
+ 	if (i == (sizeof tmp) - 1)
+ 		return (-1);
+ 	*size = 5 + i;
++
++	/*
++	 * Some client stacks (e.g. ConPTY under Windows Terminal over SSH)
++	 * answer DA queries more than once. Swallow duplicate replies
++	 * instead of letting them fall through as key presses.
++	 */
++	if (tty->flags & TTY_HAVEXDA)
++		return (0);
+ 	if (i == 0)
+ 		return (0);
+ 	if (tmp[i - 1] == '\033')

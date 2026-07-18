@@ -101,6 +101,35 @@ _install_eza() {
     rm -rf "$tmp"
 }
 
+# Checksum of the carried tmux patches; part of the build stamp so that a
+# patch change triggers a rebuild even when the tmux version is unchanged.
+_tmux_patch_sum() {
+    cat "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch 2>/dev/null | md5sum | awk '{print $1}'
+}
+
+_install_tmux() {
+    local version="$1"
+    echo "  Building tmux $version from source..."
+    local tmp p; tmp=$(mktemp -d)
+    (
+        cd "$tmp"
+        curl -fLO "https://github.com/tmux/tmux/releases/download/${version}/tmux-${version}.tar.gz"
+        tar -xzf "tmux-${version}.tar.gz"
+        cd "tmux-${version}"
+        for p in "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch; do
+            [ -e "$p" ] || continue
+            echo "  Applying $(basename "$p")..."
+            patch -p1 < "$p"
+        done
+        ./configure
+        make -j"$(nproc)"
+        sudo make install
+    )
+    rm -rf "$tmp"
+    mkdir -p "$HOME/.local/state/dotfiles"
+    echo "$version $(_tmux_patch_sum)" > "$HOME/.local/state/dotfiles/tmux-build-stamp"
+}
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Steps
 # ──────────────────────────────────────────────────────────────────────────────
@@ -119,12 +148,15 @@ step_stow() {
 
 step_system_packages() {
     sudo apt-get update -q
-    # util-linux provides flock, used by the tasks board tool's dashboard lock
+    # util-linux provides flock, used by the tasks board tool's dashboard lock.
+    # libevent-dev/libncurses-dev/bison/pkg-config are tmux build deps: tmux is
+    # built from source in step_tmux rather than installed from apt.
     sudo apt-get install -y \
         git curl wget zip unzip tree stow \
-        zsh tmux \
-        gcc python3 python3-venv python3-dev python3-pip default-jdk \
-        ripgrep fd-find bat util-linux
+        zsh \
+        gcc make python3 python3-venv python3-dev python3-pip default-jdk \
+        ripgrep fd-find bat util-linux \
+        libevent-dev libncurses-dev bison pkg-config
 
     # Debian/Ubuntu ship bat as batcat
     if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
@@ -180,6 +212,28 @@ step_fzf() {
 }
 
 step_tmux() {
+    # Built from source for two reasons:
+    #   1. Ubuntu ships tmux 3.6, which leaks fragmented OSC color replies
+    #      into panes as literal keystrokes over slow links (SSH). Fixed
+    #      upstream in 3.7 (tmux/tmux#4749).
+    #   2. bootstrap/patches/ carries fixes not yet upstream (duplicate DA
+    #      replies from ConPTY/Windows Terminal leaking into panes), so the
+    #      source build stays even once the distro package reaches 3.7+.
+    local latest current="" stamp="" want
+    latest=$(gh_latest_tag "tmux/tmux" "3.7b")
+    command -v tmux &>/dev/null && current=$(tmux -V 2>/dev/null | awk '{print $2}')
+    want="$latest $(_tmux_patch_sum)"
+    [ -f "$HOME/.local/state/dotfiles/tmux-build-stamp" ] \
+        && stamp=$(cat "$HOME/.local/state/dotfiles/tmux-build-stamp")
+
+    if [ "$current" = "$latest" ] && [ "$stamp" = "$want" ]; then
+        echo "  tmux $current is up to date (patches applied)"
+    else
+        [ -n "$current" ] && echo "  Upgrading tmux $current → $latest..." \
+                          || echo "  Installing tmux $latest..."
+        _install_tmux "$latest"
+    fi
+
     local tpm="$HOME/.tmux/plugins/tpm"
     mkdir -p "$HOME/.tmux/plugins"
     git_clone_or_pull "TPM" "https://github.com/tmux-plugins/tpm" "$tpm"
