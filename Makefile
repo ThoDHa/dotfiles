@@ -26,7 +26,7 @@ all: help
 define stow_all
 @for pkg in $(STOW_PACKAGES); do \
     echo "  $(2)ing $$pkg..."; \
-    stow -v $(1) -t $(STOW_TARGET) $$pkg; \
+    stow -v $(1) -t $(STOW_TARGET) $$pkg || exit 1; \
 done
 endef
 
