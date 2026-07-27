@@ -106,8 +106,31 @@ source $ZSH/oh-my-zsh.sh
 alias vim='nvim'
 alias vimdiff='nvim -d'
 
-alias fd='fdfind'
-alias bat='batcat'
+# Debian ships fd/bat as fdfind/batcat; Termux and most other systems use the
+# real names. Alias only when the Debian names are what's installed.
+command -v fdfind &> /dev/null && alias fd='fdfind'
+command -v batcat &> /dev/null && alias bat='batcat'
+
+# Resolved commands for use inside fzf preview subshells, where aliases
+# don't expand.
+if command -v batcat &> /dev/null; then
+    BAT_CMD='batcat'
+else
+    BAT_CMD='bat'
+fi
+
+# Clipboard command per platform: Termux, macOS, Wayland, X11.
+if command -v termux-clipboard-set &> /dev/null; then
+    CLIP_CMD='termux-clipboard-set'
+elif command -v pbcopy &> /dev/null; then
+    CLIP_CMD='pbcopy'
+elif command -v wl-copy &> /dev/null; then
+    CLIP_CMD='wl-copy'
+elif command -v xclip &> /dev/null; then
+    CLIP_CMD='xclip -selection clipboard'
+else
+    CLIP_CMD='cat > /dev/null'
+fi
 alias oc='opencode'
 
 # Modern ls replacement with eza
@@ -129,15 +152,15 @@ export FZF_COMPLETION_OPTS='--border --info=inline'
 
 # Preview file content using bat (https://github.com/sharkdp/bat)
 export FZF_CTRL_T_OPTS="
---preview 'batcat -n --color=always {}'
+--preview '$BAT_CMD -n --color=always {}'
 --bind 'ctrl-/:change-preview-window(down|hidden|)'"
 
 # CTRL-/ to toggle small preview window to see the full command
-# CTRL-Y to copy the command into clipboard using pbcopy
+# CTRL-Y to copy the command into clipboard
 export FZF_CTRL_R_OPTS="
 --preview 'echo {}' --preview-window up:3:hidden:wrap
 --bind 'ctrl-/:toggle-preview'
---bind 'ctrl-y:execute-silent(echo -n {2..} | pbcopy)+abort'
+--bind 'ctrl-y:execute-silent(echo -n {2..} | $CLIP_CMD)+abort'
 --color header:italic
 --header 'Press CTRL-Y to copy command into clipboard'"
 
@@ -168,7 +191,7 @@ _fzf_comprun() {
         cd)           fzf --preview 'tree -C {} | head -200'   "$@" ;;
         export|unset) fzf --preview "eval 'echo \$'{}"         "Q$@" ;;
         ssh)          fzf --preview 'dig {}'                   "$@" ;;
-        *)            fzf --preview 'batcat -n --color=always {}' "$@" ;;
+        *)            fzf --preview "$BAT_CMD -n --color=always {}" "$@" ;;
     esac
 }
 
@@ -183,8 +206,13 @@ export NVM_DIR=~/.nvm
 #fix bug with ressurecting tmux without this folder
 mkdir -p ~/.tmux/resurrect
 
+# Load the first key that exists; a fresh machine (or Termux install) may
+# have none yet, and ssh-add with a missing path just prints an error.
 eval $(ssh-agent) &> /dev/null
-ssh-add ~/.ssh/id_rsa &> /dev/null
+for _key in ~/.ssh/id_rsa ~/.ssh/id_ed25519; do
+    [ -f "$_key" ] && ssh-add "$_key" &> /dev/null && break
+done
+unset _key
 
 # opencode
 export PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH
