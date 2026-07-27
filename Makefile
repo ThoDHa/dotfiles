@@ -15,7 +15,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-none clean-stow test test-links test-rules test-tasks
+.PHONY: personality-none clean-stow test test-links test-rules test-tasks test-termux
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -145,7 +145,7 @@ build:
 EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 
 # Test all symlinks exist and opencode loads rules
-test: test-links test-rules test-tasks
+test: test-links test-rules test-tasks test-termux
 	@echo ""
 	@echo "All tests passed!"
 
@@ -180,6 +180,11 @@ test-rules:
 test-tasks:
 	@echo "Testing tasks board tool..."
 	@bash tests/tasks/test-tasks.sh
+
+# Host-side checks for the Termux bootstrap (syntax, guard, no Debian-isms)
+test-termux:
+	@echo "Testing termux bootstrap script..."
+	@bash tests/termux/test-termux.sh
 
 # Help
 help:
