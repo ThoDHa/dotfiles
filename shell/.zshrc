@@ -103,6 +103,13 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
+# tmux keeps its server socket under $TMUX_TMPDIR, which defaults to /tmp.
+# Point it at the XDG state directory so the socket sits beside the resurrect
+# saves. tmux creates the tmux-$UID socket directory itself but not its parent,
+# so the parent is ensured here rather than left to fail on first launch.
+export TMUX_TMPDIR="$HOME/.local/state/tmux"
+[ -d "$TMUX_TMPDIR" ] || mkdir -p "$TMUX_TMPDIR"
+
 alias vim='nvim'
 alias vimdiff='nvim -d'
 
