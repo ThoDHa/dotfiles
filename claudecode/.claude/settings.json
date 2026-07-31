@@ -4,7 +4,7 @@
   "permissions": {
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5[1m]",
+  "model": "opus[1m]",
   "outputStyle": "Concise",
   "language": "english",
   "spinnerTipsEnabled": false,
