@@ -1,10 +1,5 @@
 # Git Protocol
 
-**Specification Document: RFC 2119 Terminology**
-
-> Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-> RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
-
 ---
 
 ## Scope
@@ -138,7 +133,7 @@ Commit messages MUST be:
 
 Commit messages MUST NOT:
 
-- Include personality voice or character
+- Include character voice
 - Contain jokes or informal language
 - Reference temporary states ("WIP", "temp fix")
 
@@ -160,25 +155,11 @@ Branch prefixes use the same type taxonomy as commit messages (see [Type Prefixe
 
 ### Description Requirements
 
-Branch descriptions MUST:
-
-- Use kebab-case (lowercase with hyphens)
-- Be 3-5 words maximum
-- Be descriptive of the change
-
-Examples:
-- `feat/user-authentication`
-- `fix/api-timeout-handling`
-- `refactor/database-connection-pool`
+Branch descriptions MUST use kebab-case (lowercase with hyphens), be 3-5 words maximum, and be descriptive of the change (e.g., `feat/user-authentication`, `fix/api-timeout-handling`).
 
 ### Issue Reference
 
-When a branch relates to a tracked issue, implementations SHOULD include the issue number:
-
-```
-fix/123-login-redirect-loop
-feat/456-export-to-csv
-```
+When a branch relates to a tracked issue, implementations SHOULD include the issue number (e.g., `fix/123-login-redirect-loop`).
 
 ---
 
@@ -222,19 +203,9 @@ Continue with force push? (y/n): _
 
 ### No-Verify Protection
 
-`--no-verify` is a dangerous operation that bypasses important quality and security checks. The following rules are mandatory and non-negotiable.
+`--no-verify` bypasses quality and security hooks and is prohibited in automated contexts: automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use it under any circumstances, and any automated attempt to bypass hooks fails the job and is treated as a security incident.
 
-#### Automated Processes Prohibition
-
-Automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use the `--no-verify` flag under any circumstances. Any automated attempt to bypass hooks must fail the job and be treated as a security incident.
-
-#### Human Interactive Usage
-
-A human user MAY use `--no-verify` ONLY when shown an explicit warning that pre-commit and commit-msg hooks will be bypassed AND the user supplies a non-empty justification, which MUST be recorded verbatim in the commit message body as a footer line: `No-Verify-Reason: <reason text>`. If the justification is blank or the user declines, the commit MUST be aborted.
-
-#### Mandatory Logging
-
-Each use of `--no-verify` MUST be recorded in a tracked, auditable file, specifically `.opencode/no-verify.log`, with an ISO 8601 timestamp, committer identity (if available), justification text, and the commit hash. Because `.opencode/` is gitignored, this log MUST remain tracked via an un-ignore rule (for example, `!.opencode/no-verify.log`) or stored in an equivalent auditable location.
+A human user MAY use `--no-verify` ONLY when shown an explicit warning that pre-commit and commit-msg hooks will be bypassed AND the user supplies a non-empty justification, recorded verbatim in the commit message body as a footer line: `No-Verify-Reason: <reason text>`. Blank justification or user decline aborts the commit. Each use MUST also append an entry (ISO 8601 timestamp, committer identity, justification text, commit hash) to the auditable `.opencode/no-verify.log`, kept tracked via an un-ignore rule or stored in an equivalent auditable location.
 
 ### Safe Push Behavior
 
@@ -246,10 +217,4 @@ When a force push is unavoidable and approved per [Force Push Protection](#force
 
 ## Conformance
 
-ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure, including the message quality requirements in [Message Quality](#message-quality) and the destructive operation safety requirements in [Destructive Operation Safety](#destructive-operation-safety).
-
-Proceeding with a force push without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and constitutes immediate conformance failure.
-
----
-
-*This specification defines version control requirements for all OpenCode implementations.*
+ALL requirements are mandatory. Force pushing without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and an immediate conformance failure.
