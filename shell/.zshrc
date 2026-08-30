@@ -222,5 +222,8 @@ done
 unset _key
 
 # opencode
+# Rules load via opencode.json instructions; block ~/.claude/CLAUDE.md and
+# skills so the same content isn't injected into context twice.
+export OPENCODE_DISABLE_CLAUDE_CODE=1
 export PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH
 export KUBECONFIG=$HOME/.kube/config
