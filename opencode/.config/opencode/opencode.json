@@ -2,7 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
     "~/.config/opencode/rules/core.md",
-    "~/.config/opencode/rules/personality.md",
     "~/.config/opencode/rules/coding-standards.md",
     "~/.config/opencode/rules/documentation-standards.md",
     "~/.config/opencode/rules/execution-standards.md",
