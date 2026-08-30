@@ -4,7 +4,7 @@
   "permissions": {
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "claude-fable-5[1m]",
   "outputStyle": "Concise",
   "language": "english",
   "spinnerTipsEnabled": false,
@@ -22,5 +22,33 @@
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
-  "showTurnDuration": false
+  "showTurnDuration": false,
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: None configured",
+      "**Repository visibility**: assume private unless the remote host and repo name indicate otherwise, or a visibility check in the transcript shows public — not queryable here (no remote configured for this repo)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: None configured",
+      "**Default / protected branches**: not queryable here (no remote configured for this repo; default branch unknown)",
+      "**CI/CD deploy targets**: None configured",
+      "**Network posture**: None configured",
+      "**Source control**: The trusted repo and its remote(s) only (no additional orgs configured) — this repo (~/dev) currently has no git remote configured and 0 tracked files",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: None configured",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: any file or store holding personal data, confidential business data, credentials, regulated data, or similarly sensitive material; preserve exact handles when known and share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment (hyphen/underscore/dot-delimited); note a sibling repo `~/dev/sudoku` contains a path named `docker-compose.prod.yml`, consistent with this heuristic but not itself adopted as an org-wide fact since sibling repos are unverified provenance",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development",
+      "**Trusted repo**: The git repository the agent started in (its working directory), ~/dev — this repo currently has no configured remote and 0 tracked files, so nothing beyond the working directory itself is established as trusted",
+      "**Org-specific CLIs**: None configured",
+      "routine under ThoDHa/ prefix: not adopted — sibling repos under the home directory (github.com/ThoDHa/*) are candidates only, not corroborated org context per the user's 'just this project' scope"
+    ]
+  }
 }
