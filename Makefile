@@ -2,12 +2,10 @@ CURRENT_DIR := $(notdir $(CURDIR))
 CONTAINER   := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES := shell tmux isort opencode claudecode
+STOW_PACKAGES := shell tmux isort opencode claudecode agents
 STOW_TARGET   := $(HOME)
 
-# OpenCode personality paths
-OPENCODE_SRC_RULES := $(CURDIR)/opencode/.config/opencode/rules
-# Target paths (after stow) — used for testing
+# Rules target path (after stow) — used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 
 # Claude Code paths
@@ -15,7 +13,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow install uninstall run build help bootstrap
-.PHONY: personality-none clean-stow test test-links test-rules test-tasks test-termux
+.PHONY: clean-stow test test-links test-rules test-tasks test-termux
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -93,19 +91,6 @@ clean-stow:
 	@rm -rf $(STOW_TARGET)/.config/opencode
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
-# ── OpenCode Personality ──────────────────────────────────────────────────────
-
-# Set active personality by name — must match a file in reference/
-personality-%:
-	@echo "Setting $* as active personality..."
-	@ln -sf ../reference/$*.md $(OPENCODE_SRC_RULES)/personality.md
-	@echo "Done! $* is now the active personality."
-
-personality-none:
-	@echo "Removing personality (using default OpenCode)..."
-	@rm -f $(OPENCODE_SRC_RULES)/personality.md
-	@echo "Done! Default OpenCode will be used (no personality)."
-
 # ── Claude Code Configuration ─────────────────────────────────────────────────
 
 # Sync Claude Code config with opencode rules
@@ -159,19 +144,20 @@ test-links:
 		test -L $(OPENCODE_RULES)/$$file || (echo "FAIL: $$file symlink missing" && exit 1); \
 		echo "    $$file OK"; \
 	done
-	@echo "  Checking personality symlink resolves to wukong.md..."
-	@readlink -f $(OPENCODE_RULES)/personality.md | grep -q "wukong.md" || \
-		(echo "FAIL: personality.md does not resolve to wukong.md" && exit 1)
-	@echo "    personality.md -> wukong.md OK"
+	@echo "  Checking skills..."
+	@test -f $(STOW_TARGET)/.agents/skills/task-files/SKILL.md || (echo "FAIL: task-files skill missing" && exit 1)
+	@test -f $(STOW_TARGET)/.agents/skills/delegation/SKILL.md || (echo "FAIL: delegation skill missing" && exit 1)
+	@test -d $(STOW_TARGET)/.claude/skills || (echo "FAIL: ~/.claude/skills link missing" && exit 1)
+	@echo "    task-files, delegation, ~/.claude/skills OK"
 	@echo "Symlink tests passed!"
 
 # Test that opencode loads all rules files correctly
 test-rules:
 	@echo "Testing opencode rules loading..."
 	@echo "  Running opencode to verify rules are loaded..."
-	@opencode run "List the rules files you have loaded. Just list filenames, one per line." 2>&1 | \
+	@opencode run "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
 		tee /tmp/opencode-rules-test.txt | \
-		grep -qiE "coding-standards|core|delegation|execution-standards|git-protocol|task-files|personality|wukong" || \
+		grep -qiE "coding-standards|core|delegation|execution-standards|git-protocol|task-files" || \
 		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
@@ -205,10 +191,6 @@ help:
 	@echo "  make stow-PKG    - Stow a single package   (e.g., make stow-shell)"
 	@echo "  make unstow-PKG  - Unstow a single package (e.g., make unstow-shell)"
 	@echo "  make restow-PKG  - Restow a single package (e.g., make restow-shell)"
-	@echo ""
-	@echo "OpenCode Personality:"
-	@echo "  make personality-THEME  - Set personality (e.g., make personality-wukong)"
-	@echo "  make personality-none   - Remove personality (use default)"
 	@echo ""
 	@echo "Claude Code Configuration:"
 	@echo "  make sync-claudecode    - Sync CLAUDE.md with opencode rules"
