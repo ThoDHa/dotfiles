@@ -12,3 +12,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Task management artifacts
+.tasks/
