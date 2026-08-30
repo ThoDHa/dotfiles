@@ -1,10 +1,5 @@
 # Execution Standards
 
-**Specification Document: RFC 2119 Terminology**
-
-> Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-> RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
-
 ---
 
 ## Scope
@@ -13,13 +8,13 @@ This specification defines requirements for task execution, priority handling, a
 
 **Task Management Context:** When users refer to "tasks," this encompasses BOTH:
 - **TodoWrite todos**: Lightweight tracking via the TodoWrite tool for standard work
-- **Task files**: Comprehensive documentation files (see [`task-files.md`](task-files.md)) for complex operations
+- **Task files**: Comprehensive documentation files (see the `task-files` skill) for complex operations
 
 ### Related Specifications
 
 - [`core.md`](core.md): Core behavioral requirements
-- [`delegation.md`](delegation.md): Manager Mode and delegation requirements
 - [`coding-standards.md`](coding-standards.md): Technical implementation requirements
+- Manager Mode and task-file protocols live in the `delegation` and `task-files` skills, loaded on demand
 
 ---
 
@@ -71,7 +66,7 @@ This task has [N] components. How would you like me to proceed?
 Which approach do you prefer?
 ```
 
-The **Parallel with worktrees** option SHOULD be listed only when worktree isolation would unlock parallelism that plain parallel delegation could not, that is, when independent tasks would otherwise be serialized by a shared-file or working-tree conflict (see [`delegation.md` Worktree Isolation](delegation.md#worktree-isolation)). When no such conflict applies, implementations MAY omit this option to avoid presenting a choice with no benefit.
+The **Parallel with worktrees** option SHOULD be listed only when worktree isolation would unlock parallelism that plain parallel delegation could not, that is, when independent tasks would otherwise be serialized by a shared-file or working-tree conflict (worktree isolation is defined in the `delegation` skill). When no such conflict applies, implementations MAY omit this option to avoid presenting a choice with no benefit.
 
 ### User Response Handling
 
@@ -80,10 +75,10 @@ Implementations MUST wait for user response before proceeding.
 | User Response Pattern | Required Action |
 |----------------------|-----------------|
 | "sequential", "yourself", "one by one", or similar | Continue in normal execution mode |
-| "parallel", "delegate", "manager", or similar | Activate Manager Mode (see [`delegation.md`](delegation.md)) |
-| "worktrees", "isolated", "parallel with worktrees", or similar | Activate Manager Mode with worktree isolation (see [`delegation.md` Worktree Isolation](delegation.md#worktree-isolation)) |
+| "parallel", "delegate", "manager", or similar | Load the `delegation` skill and activate Manager Mode |
+| "worktrees", "isolated", "parallel with worktrees", or similar | Load the `delegation` skill and activate Manager Mode with worktree isolation |
 
-The keywords in each row are accepted synonyms for the options presented in the [Required Prompt](#required-prompt) prompt ("Sequential", "Parallel delegation", and "Parallel with worktrees"). Any answer matching a row's synonyms maps to that option's action. The "Parallel with worktrees" row applies only when that option was listed per the [Required Prompt](#required-prompt) conditions.
+The keywords in each row are accepted synonyms for the options presented in the [Required Prompt](#required-prompt) prompt. The "Parallel with worktrees" row applies only when that option was listed per the [Required Prompt](#required-prompt) conditions.
 
 Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
 
@@ -112,22 +107,24 @@ For small parallelization (2-3 agents), implementations MUST proceed directly wi
 | Mode | Behavior |
 |------|----------|
 | **Standard + Parallel** | Implementation remains primary worker, spawning helpers for specific subtasks |
-| **Manager Mode** | As defined in the ["Manager Mode Definition" section of `delegation.md`](delegation.md#manager-mode-definition) |
+| **Manager Mode** | Coordinator managing agents and allies, as defined in the `delegation` skill |
 
 ---
 
 ## Parallel Safety Requirements
 
-The authoritative parallel-safety requirements (file-conflict prevention, dependency sequencing, boundary isolation, and pre-dispatch verification) are defined in the ["Safety Requirements" section of `delegation.md`](delegation.md#safety-requirements). Those requirements apply to ALL parallel operations, including standard parallel operations performed outside Manager Mode.
+These requirements apply to ALL parallel operations, including standard parallel operations performed outside Manager Mode:
+
+- **File conflict prevention**: never spawn parallel agents that modify the same file
+- **Dependency sequencing**: if Task B depends on Task A's output, run them sequentially
+- **Boundary isolation**: assign agents separate modules, directories, or concerns
+- **Shared state coordination**: sequence modifications to shared configuration or state
+- **Pre-dispatch verification**: before dispatching, verify each agent has distinct territory, no two agents write the same file, and dependencies are respected
+
+If conflicts are unavoidable, run the conflicting tasks sequentially, unless git worktree isolation removes the conflict and preserves parallelism. The full protocol, including worktree teardown, lives in the `delegation` skill.
 
 ---
 
 ## Conformance
 
-ALL requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
-
-Violations of the Task Complexity Protocol ([Task Complexity Protocol](#task-complexity-protocol)) are considered serious conformance failures as they remove user control over execution strategy.
-
----
-
-*This specification defines task execution requirements for all OpenCode implementations.*
+ALL requirements are mandatory. Violations of the [Task Complexity Protocol](#task-complexity-protocol) are serious conformance failures, as they remove user control over execution strategy.
