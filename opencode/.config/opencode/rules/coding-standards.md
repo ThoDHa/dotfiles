@@ -1,10 +1,5 @@
 # Coding Standards
 
-**Specification Document: RFC 2119 Terminology**
-
-> Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-> RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
-
 ---
 
 ## Scope
@@ -115,15 +110,7 @@ Implementations MUST NOT hardcode values that may vary between environments.
 
 ### External Call Protection
 
-Implementations MUST wrap all external calls in error-handling constructs appropriate to the language.
-
-External calls include:
-
-- Network requests (HTTP, RPC, WebSocket)
-- Database operations (queries, transactions, connections)
-- File system operations (read, write, delete)
-- Subprocess or shell execution
-- Third-party library calls that may fail
+Implementations MUST wrap all external calls (network requests, database operations, file system operations, subprocess execution, fallible third-party libraries) in error-handling constructs appropriate to the language.
 
 The error-handling mechanism MUST:
 
@@ -185,27 +172,7 @@ Implementations MUST NOT reduce existing test coverage when modifying code, exce
 
 **Test Naming Requirements:**
 
-Test names MUST describe WHAT is being tested and the EXPECTED behavior, NOT how the test was created or what bug it fixes.
-
-**Descriptive Test Names (Required):**
-- `test_user_authentication_with_valid_credentials_succeeds`
-- `test_api_returns_404_when_user_not_found`
-- `test_calculate_total_with_multiple_discounts_applies_correctly`
-- `test_password_reset_token_expires_after_24_hours`
-
-**Prohibited Test Names:**
-- `test_fixing_bug_asd_123` (use descriptive name instead)
-- `test_temp_fix` (describe the behavior being tested)
-- `test_working` (too vague: what works?)
-- `test_1`, `test_test123` (non-descriptive identifiers)
-
-**Test Name Guidelines:**
-- Use snake_case or camelCase consistent with project convention
-- Include the system/component being tested
-- Include the scenario or condition
-- Include the expected result
-- Keep names reasonably concise but descriptive
-- Focus on behavior and business logic, not implementation details
+Test names MUST describe the system under test, the scenario, and the expected behavior, in the project's naming convention (e.g., `test_api_returns_404_when_user_not_found`). Names MUST NOT reference bug IDs, temporary states, or vague identifiers (`test_working`, `test_fixing_bug_123`, `test_1`).
 
 **Test Structure Requirements:**
 
@@ -311,271 +278,24 @@ When modifying code, implementations MUST update associated documentation.
 
 Implementations MUST NOT leave documentation stale after a code change; stale documentation is worse than no documentation.
 
-### Comment Style Requirements
+### Comment Policy
 
-Code comments MUST be written in natural, conversational style.
+Comments are absent by default. Implementations MUST NOT add comments unless the user explicitly requests them, or the narrow exception below applies. Before adding any comment, implementations MUST first attempt self-explanatory code: renaming variables, functions, or types; extracting logic into named functions; simplifying expressions; introducing named constants.
 
-Comments MUST use direct, straightforward language that focuses on WHY rather than WHAT. Comments MUST sound like notes a developer would leave for their future self or teammates.
+An autonomous comment is permitted ONLY when ALL of the following hold: the code cannot express its intent on its own after the attempts above, the comment explains non-obvious WHY rather than WHAT, and removing it would leave a future reader genuinely confused. When written, comments MUST be direct and conversational, like notes a developer leaves for teammates.
 
-**Good comment characteristics:**
+Comments MUST NOT:
 
-- Direct, straightforward language
-- Focus on WHY rather than WHAT (code shows what, comments explain why)
-- Sound like a colleague explaining something briefly
-- Concise without unnecessary preamble
+- Restate what the code already expresses
+- Use filler markers (`Note:`, `Important:`, `Consider:`, `This function...`, `Here we...`)
+- Decorate code with section banners, file-level manifestos, or closing summaries
+- Contain untracked TODOs; a TODO/FIXME is acceptable only with a concrete description and a tracking reference (e.g., `TODO(#142): stream from disk once files exceed 1 GB`)
 
-**Examples:**
+Comments MUST NEVER document internal bug-fixing history: bug IDs, attribution, fix chronology, or temporal references ("previously", "before the fix"). Internal bugs belong exclusively in commit messages and issue trackers.
 
-| Comment Style | Example |
-|---------------|---------|
-| **Casual and direct** | `// Validate to prevent corrupted data downstream` |
-| **Context-focused** | `// Async call - don't block the UI` |
-| **Purpose-driven** | `// Cache results - API is slow` |
+External library workarounds are the exception: they MUST be documented in comments with full context, including library name and version, issue reference if available, expected vs actual behavior, and the conditions for removing the workaround.
 
-### Comment Purpose Guidelines
-
-Comments MUST explain code context and non-obvious decisions. Comments MUST NEVER document internal bug-fixing history.
-
-#### What Comments MUST Explain
-
-Comments MUST document:
-
-- **External library workarounds** with full context
-- **Non-obvious implementation choices** and their reasoning
-- **Complex business logic** that requires domain knowledge
-- **Performance considerations** when optimization choices aren't obvious
-
-#### External Library Workaround Documentation
-
-**CRITICAL DISTINCTION:**
-
-- **External library bugs/issues:** MUST be documented in code comments with full context
-- **Internal application bugs:** FORBIDDEN in code comments (these belong in commit messages and issue trackers only)
-
-When working around external library bugs or limitations, comments MUST include:
-
-- Library name and version affected
-- Issue reference (if available)
-- Expected behavior vs. actual behavior
-- Conditions for removing the workaround
-
-**Examples:**
-
-```javascript
-// Working around React 18.2 hydration mismatch - useLayoutEffect runs 
-// twice on initial mount. See facebook/react#24430
-// Remove when React 18.3+ is stable
-```
-
-```python
-# Workaround for requests 2.28.x SSL verification bug with custom CA
-# Expected: verify=ca_bundle should work
-# Actual: throws SSLError on valid certificates  
-# Remove when requests 2.29+ fixes issue #6078
-```
-
-#### What Comments MUST NOT Explain
-
-**Internal application bug-fixing history is FORBIDDEN in code comments.**
-
-Comments MUST NOT include:
-
-- **Historical bug references**: bug IDs, issue numbers, or ticket references
-- **Attribution**: who fixed something, when it was fixed, or why
-- **Fix chronology**: when problems occurred, how they evolved over time
-- **Deprecated behavior**: explanations of removed functionality
-- **Temporal context**: "before the fix", "after the change", "previously", etc.
-
-**Internal application bugs belong EXCLUSIVELY in commit messages and issue trackers. NEVER in code comments.**
-
-Code comments explain the current state, not the history of how we got there.
-
-**PROHIBITED comment patterns:**
-
-```javascript
-// ❌ FORBIDDEN
-// Fixed bug #1234 where users couldn't login (removed by John on 2024-01-15)
-
-// ❌ FORBIDDEN
-// This was broken until v2.1 when we fixed the timeout issue
-
-// ❌ FORBIDDEN
-// Previously returned null, now throws exception as per PR #456
-```
-
-**ACCEPTABLE comment patterns:**
-
-```javascript
-// ✅ Acceptable: explains current behavior
-// Validate session token before accessing protected resources
-// (prevents auth bypass attempts when tokens expire mid-request)
-
-// ✅ Acceptable: documents business context
-// Customer tier determines discount calculation:
-// - Premium: 15% on orders >$100, 10% otherwise
-// - Standard: 5% on orders >$50
-// - Basic: no discounts
-```
-
-### Documentation Context Distribution
-
-Different types of information belong in different places. Choose the appropriate documentation context based on scope and audience.
-
-#### Inline Comments
-
-Use inline comments for:
-
-- **Immediate code context** that affects the current function or block
-- **External library workarounds** (governed by [External Library Workaround Documentation](#external-library-workaround-documentation), which is canonical for this topic)
-- **Non-obvious algorithmic choices** within the implementation
-- **Performance optimizations** that aren't self-evident
-
-Inline comments should be casual and conversational (following [Comment Style Requirements](#comment-style-requirements) style requirements).
-
-#### Commit Messages
-
-Use commit messages for:
-
-- **What changed** in this specific commit
-- **Why the change was necessary** (business justification)
-- **Impact scope** (what systems/features are affected)
-- **Bug fix history** (what was broken, what the fix was, and why), which per [What Comments MUST NOT Explain](#what-comments-must-not-explain) belongs EXCLUSIVELY in commit messages and issue trackers
-
-Follow formal commit message standards defined in [`git-protocol.md`](git-protocol.md).
-
-#### Formal Documentation
-
-Use formal documentation (README, API docs, architecture docs) for:
-
-- **High-level design decisions** and architectural tradeoffs
-- **API specifications** and usage examples
-- **System overviews** and integration patterns
-- **Deployment and configuration** guidance
-
-Formal documentation MUST maintain professional tone and structured format, suitable for external audiences or formal review.
-
-### Comment Minimalism Requirements
-
-Comments are exceptional, not habitual. Most code communicates intent through clear naming, structure, and tests. When reading a codebase, the default experience SHOULD be code, not prose explaining the code. This section governs WHEN to comment and how dense comments may be. Where a comment survives this filter, [Comment Style Requirements](#comment-style-requirements) governs its style.
-
-#### Default Absence Principle
-
-Comments MUST be absent by default. The baseline rule is simple: do not write comments unless asked.
-
-Implementations MUST NOT add comments unless one of the following is true:
-
-1. **The user explicitly requests commentary**: this is the primary and expected path for any comment.
-2. **The narrow autonomous exception** in [Autonomous Comment Exception](#autonomous-comment-exception) applies.
-
-When the user has not explicitly asked for comments, implementations MUST assume no comments are wanted and produce clean, self-explanatory code instead.
-
-#### Autonomous Comment Exception
-
-A comment MAY be added without an explicit user request ONLY when ALL of the following are true:
-
-- The code genuinely cannot express its intent on its own
-- The attempts below to make the code self-explanatory have been exhausted
-- The comment explains non-obvious WHY, not WHAT (per [Comment Style Requirements](#comment-style-requirements))
-- Removing the comment would leave a future reader genuinely confused
-
-Before writing an autonomous comment, implementations MUST first attempt to make the code self-explanatory through:
-
-- Renaming variables, functions, or types for clarity
-- Extracting logic into named functions
-- Simplifying complex expressions
-- Introducing named constants for magic values
-
-If intent remains non-obvious ONLY after these attempts AND the comment explains WHY (not WHAT), the comment is permitted. Otherwise, no comment is written.
-
-#### Redundant Comment Prohibition
-
-Implementations MUST NOT write comments that restate what the code already expresses. Redundant comments are noise that adds maintenance burden without insight.
-
-**Prohibited redundancy:**
-
-```python
-# ❌ Prohibited: restates the code
-counter = 0  # Initialize counter to zero
-
-# ❌ Prohibited: narrates obvious control flow
-for item in items:
-    process(item)  # Process each item
-
-# ❌ Prohibited: restates the function name
-def validate_email(address):
-    # Validate the email address
-    ...
-```
-
-If a comment can be deleted and the code remains equally clear, the comment MUST be deleted.
-
-#### Prohibited Comment Patterns
-
-Implementations MUST NOT use filler markers or formulaic comment conventions. These add no information and read as padding.
-
-**Prohibited markers and patterns:**
-
-- Imperative preambles: `Note:`, `Important:`, `Consider:`, `NB:`, `FYI:`, `Remember:`, `Warning:`
-- Signature restatement: `This function...`, `This method...`, `Here we...`, `Below we...`, `Now we...`
-- Section banners (governed canonically by [Section Commentary Prohibition](#section-commentary-prohibition) below)
-- Placeholder TODOs lacking owner, context, or tracking reference: `# TODO: improve this`, `# FIXME later`, `# refactor at some point`
-
-A bare `TODO` or `FIXME` is acceptable ONLY when it includes a concrete description AND a tracking reference (issue number, ticket, or design doc).
-
-```python
-# ❌ Prohibited: empty placeholder
-# TODO: improve
-data = load()
-
-# ✅ Acceptable: concrete and tracked
-# TODO(#142): stream from disk once files exceed 1 GB
-data = load()
-```
-
-#### Comment Density as a Complexity Signal
-
-If a function, block, or module requires many comments to be understood, the code is too complex. Implementations MUST treat dense comments as a signal to refactor, not as a reason to annotate.
-
-Required response to dense comments:
-
-1. Simplify the code first (extract functions, rename, reduce branching)
-2. Move explanatory context to commit messages or formal documentation where appropriate
-3. Keep only comments that explain non-obvious WHY after simplification
-
-Comments MUST NOT compensate for poor naming, deep nesting, or tangled control flow. If a comment exists to explain HOW the code works, the code MUST be rewritten until the comment becomes unnecessary.
-
-#### Over-Documentation Prohibition
-
-Implementations MUST NOT add docstrings or comments to trivial constructs:
-
-- Getters, setters, and simple property accessors
-- One-line functions whose name fully describes their behavior
-- Obvious return statements
-- Standard language idioms familiar to the target audience
-
-Trivial constructs that speak for themselves require zero commentary.
-
-#### Section Commentary Prohibition
-
-Implementations MUST NOT decorate code with ornamental section headers, file-level manifestos, or closing summaries.
-
-**Prohibited:**
-
-```python
-# ============================================
-# IMPORTS
-# ============================================
-
-# --------------------------------------------
-# Public API
-# --------------------------------------------
-
-# End of file - everything above is tested
-```
-
-Standard language conventions for module organization (package declarations, import grouping enforced by linters) are exempt. Hand-written banner comments are not.
-
----
+Choose the right home for information: inline comments for immediate code context and library workarounds; commit messages for what changed, why, and bug-fix history; formal documentation for architecture, API specifications, and deployment guidance.
 
 ## Type Safety Requirements
 
@@ -776,10 +496,4 @@ This documentation ensures technical debt is visible and actionable.
 
 ## Conformance
 
-ALL strong requirements in this specification are mandatory. Any violation of MUST or MUST NOT constitutes an immediate conformance failure.
-
-Violations of SHOULD requirements may result in suboptimal code quality but are not conformance failures.
-
----
-
-*This specification defines technical implementation requirements for all OpenCode-produced code.*
+ALL MUST and MUST NOT requirements are mandatory; violations constitute conformance failures. SHOULD violations yield suboptimal quality but are not conformance failures.

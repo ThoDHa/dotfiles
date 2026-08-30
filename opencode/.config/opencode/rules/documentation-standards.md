@@ -1,10 +1,5 @@
 # Documentation Standards
 
-**Specification Document: RFC 2119 Terminology**
-
-> Key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
-> RECOMMENDED, MAY, and OPTIONAL follow RFC 2119 definitions.
-
 ---
 
 ## Scope
@@ -35,40 +30,11 @@ Prohibited patterns include:
 | `- <verb> <thing>` | `- Update dependencies` | Lacks context, rationale, or detail |
 | `- etc.` or `- and more` | `- etc.` | Lazy placeholder that adds nothing |
 
-### Examples of Prohibited vs Acceptable
+**Prohibited vs acceptable (a topic named is worthless; the same topic substantiated is required):**
 
-**Prohibited:**
 ```
-Features:
-- Authentication
-- Authorization  
-- Logging
-- Error handling
-```
-
-**Acceptable:**
-```
-Features:
-- JWT-based authentication with refresh token rotation
-- Role-based authorization using middleware guards
-- Structured JSON logging with correlation IDs
-- Centralized error handling with meaningful error codes
-```
-
-**Prohibited:**
-```
-Changes:
-- Fixed bug
-- Updated code
-- Improved performance
-```
-
-**Acceptable:**
-```
-Changes:
-- Fixed null reference when user profile is incomplete
-- Refactored database queries to use connection pooling
-- Reduced API latency by 40% through response caching
+- Authentication                          <- prohibited: names a topic, explains nothing
+- JWT-based authentication with refresh token rotation   <- acceptable
 ```
 
 ### Substance Requirement
@@ -88,7 +54,7 @@ Punctuation in prose follows [core.md Punctuation and Formatting Requirements](c
 
 ### Em-Dash Prohibition
 
-Implementations MUST NOT use em dashes (`—`) in documentation prose. The em-dash prohibition in [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements) is canonical for conversational output; this rule extends the same prohibition to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
+The em-dash prohibition in [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements) extends to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
 
 ### Colon-as-Enthusiasm-Break Prohibition
 
@@ -120,8 +86,4 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures. This includes the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) (vague bullet lists) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements) (the em-dash, colon-as-enthusiasm-break, and en-dash misuse prohibitions).
-
----
-
-*This specification defines documentation quality requirements for all OpenCode implementations.*
+Violations of MUST requirements constitute conformance failures, including the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements).
