@@ -43,8 +43,11 @@ dotfiles/
 ├── opencode/           # OpenCode AI config
 │   └── .config/opencode/
 │       ├── opencode.json
-│       ├── rules/      # RFC 2119 specification files
-│       └── reference/  # Personality definitions
+│       └── rules/      # RFC 2119 specification files
+├── agents/             # Shared agent skills (opencode, Claude Code, pi)
+│   └── .agents/skills/
+│       ├── delegation/SKILL.md
+│       └── task-files/SKILL.md
 ├── bootstrap/          # Setup scripts (not stowed)
 │   ├── install.sh
 │   ├── opencode-install.sh
@@ -84,18 +87,8 @@ dotfiles/
 | `tmux` | `~/.tmux.conf` | Tmux config with TPM plugins, rose-pine theme |
 | `scripts` | `~/.local/bin/` | tmux-sessionizer and tmux-windowizer |
 | `isort` | `~/.config/isort/` | Python import sorter config |
-| `opencode` | `~/.config/opencode/` | OpenCode AI rules and personality |
-
-## OpenCode Personality
-
-Switch OpenCode personality after stowing:
-
-```bash
-make stow-opencode        # Stow opencode + set Wukong as default
-make personality-wukong   # Switch to Wukong personality
-```
-
-The personality system uses symlinks — `rules/personality.md` points to the active personality in `reference/`.
+| `opencode` | `~/.config/opencode/` | OpenCode AI rules |
+| `agents` | `~/.agents/skills/` | Shared agent skills, symlinked to `~/.claude/skills` for Claude Code |
 
 ## Bootstrap
 
