@@ -1,3 +1,8 @@
+---
+name: documentation-standards
+description: Documentation standards covering prohibited vague bullet patterns, substance requirements, specific concrete language, and documentation-specific punctuation rules. Use when writing or reviewing documentation, README files, CHANGELOG entries, PR descriptions, technical specifications, code comments and docstrings, or any extended prose output.
+---
+
 # Documentation Standards
 
 ---
@@ -8,8 +13,8 @@ This specification defines requirements for documentation, README files, and pro
 
 ### Related Specifications
 
-- [`coding-standards.md`](coding-standards.md): Technical implementation requirements
-- [`core.md`](core.md): Core behavioral requirements
+- The `coding-standards` rule (always loaded): technical implementation requirements
+- The `core` rule (always loaded): core behavioral requirements
 
 ---
 
@@ -50,11 +55,11 @@ An entry MUST satisfy ALL of the following to be substantive:
 
 ## Punctuation Requirements
 
-Punctuation in prose follows [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements). The three rules below are documentation-specific and supplement that canonical section.
+Punctuation in prose follows the core rule's Punctuation and Formatting Requirements. The three rules below are documentation-specific and supplement that canonical section.
 
 ### Em-Dash Prohibition
 
-The em-dash prohibition in [core.md Punctuation and Formatting Requirements](core.md#punctuation-and-formatting-requirements) extends to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
+The em-dash prohibition in the core rule's Punctuation and Formatting Requirements extends to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
 
 ### Colon-as-Enthusiasm-Break Prohibition
 
