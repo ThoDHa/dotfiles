@@ -46,6 +46,23 @@ export NVM_DIR="$HOME/.nvm"
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
+# Ask a yes/no question. Args: <question> [default:y|n]
+# Non-interactive stdin falls back to the default so scripted runs keep working.
+prompt_yes_no() {
+    local question="$1" default="${2:-y}" hint answer
+    [ "$default" = "y" ] && hint="[Y/n]" || hint="[y/N]"
+    if [ ! -t 0 ]; then
+        echo "  $question $hint — non-interactive, using default"
+        [ "$default" = "y" ] && return 0 || return 1
+    fi
+    read -r -p "  $question $hint " answer
+    answer="${answer:-$default}"
+    case "$answer" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Clone a repo if the destination is absent, otherwise pull.
 # Extra args after <dest> are forwarded to git clone (e.g. --depth 1).
 git_clone_or_pull() {
@@ -143,7 +160,10 @@ step_stow() {
 
     echo "  Stowing dotfiles packages..."
     make -C "$DOTFILES_DIR" clean-stow
-    make -C "$DOTFILES_DIR" stow
+    local force_flags=()
+    [ "$WANT_OPENCODE" = "1" ] && force_flags+=(FORCE_OPENCODE=1)
+    [ "$WANT_CLAUDE"   = "1" ] && force_flags+=(FORCE_CLAUDECODE=1)
+    make -C "$DOTFILES_DIR" stow "${force_flags[@]}"
 }
 
 step_system_packages() {
@@ -387,7 +407,10 @@ https://download.docker.com/linux/$ID $VERSION_CODENAME stable" \
 }
 
 step_verify() {
-    local tools=(git zsh tmux nvim node fzf rg fdfind bat eza stow tree docker opencode claude)
+    local tools=(git zsh tmux nvim node fzf rg fdfind bat eza stow tree docker)
+    local optional_tools=()
+    [ "$WANT_OPENCODE" = "1" ] && optional_tools+=(opencode)
+    [ "$WANT_CLAUDE"   = "1" ] && optional_tools+=(claude)
     local missing=()
 
     echo "  Tools:"
@@ -397,6 +420,13 @@ step_verify() {
         else
             echo "    ✗ $tool — NOT FOUND"
             missing+=("$tool")
+        fi
+    done
+    for tool in "${optional_tools[@]}"; do
+        if command -v "$tool" &>/dev/null; then
+            echo "    ✓ $tool"
+        else
+            echo "    ○ $tool — not installed (optional, was not selected or install failed)"
         fi
     done
 
@@ -426,6 +456,16 @@ echo -e "${GREEN}║               Dev Environment Setup & Update               
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
+print_step "Optional tools"
+if command -v opencode &>/dev/null; then q="Update OpenCode?"; else q="Install OpenCode?"; fi
+if prompt_yes_no "$q"; then WANT_OPENCODE=1; else WANT_OPENCODE=0; fi
+if command -v claude &>/dev/null; then q="Update Claude Code?"; else q="Install Claude Code?"; fi
+if prompt_yes_no "$q"; then WANT_CLAUDE=1; else WANT_CLAUDE=0; fi
+echo ""
+echo "  OpenCode:    $([ "$WANT_OPENCODE" = "1" ] && echo yes || echo no)"
+echo "  Claude Code: $([ "$WANT_CLAUDE" = "1" ] && echo yes || echo no)"
+echo ""
+
 run_step "Stow dotfiles"          step_stow
 run_step "System packages"        step_system_packages
 run_step "NeoVim Python provider" step_nvim_python
@@ -439,9 +479,9 @@ run_step "NVM + Node.js"         step_nvm
 
 run_step "NeoVim"                 step_neovim
 run_step "eza"                    step_eza
-run_step "OpenCode"               step_opencode
-run_step "Claude Code"            step_claude
-run_step "Claude Code config"     step_claude_stow
+if [ "$WANT_OPENCODE" = "1" ]; then run_step "OpenCode"           step_opencode; else echo "  Skipping OpenCode (not selected)"; fi
+if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code"        step_claude;    else echo "  Skipping Claude Code (not selected)"; fi
+if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code config" step_claude_stow; else echo "  Skipping Claude Code config (not selected)"; fi
 run_step "Docker"                 step_docker
 run_step "Verification"           step_verify
 

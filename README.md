@@ -67,7 +67,7 @@ dotfiles/
 | `make bootstrap` | Full setup: install tools + symlink all configs |
 | `make install` | Symlink all stow packages |
 | `make uninstall` | Remove all symlinks |
-| `make stow` | Symlink stow packages |
+| `make stow` | Symlink stow packages (skips opencode/claudecode when the tool is not installed) |
 | `make unstow` | Remove stow symlinks |
 | `make restow` | Update symlinks (unstow + stow) |
 | `make dry-run` | Preview what would be stowed |
@@ -87,8 +87,9 @@ dotfiles/
 | `tmux` | `~/.tmux.conf` | Tmux config with TPM plugins, rose-pine theme |
 | `scripts` | `~/.local/bin/` | tmux-sessionizer and tmux-windowizer |
 | `isort` | `~/.config/isort/` | Python import sorter config |
-| `opencode` | `~/.config/opencode/` | OpenCode AI rules |
-| `agents` | `~/.agents/skills/` | Shared agent skills, symlinked to `~/.claude/skills` for Claude Code |
+| `opencode` | `~/.config/opencode/` | OpenCode AI rules; stowed only when `opencode` is installed |
+| `claudecode` | `~/.claude/` | Claude Code settings and skills link; stowed only when `claude` is installed |
+| `agents` | `~/.agents/skills/` | Shared agent skills (used by opencode, Claude Code, pi) |
 
 ## Bootstrap
 
@@ -102,6 +103,11 @@ The `bootstrap/install.sh` script sets up a complete development environment:
 - NeoVim configuration from [ThoDHa/nvim](https://github.com/ThoDHa/nvim)
 - NVM with Node.js LTS
 - OpenCode configuration symlinks
+
+OpenCode and Claude Code are optional: the script asks whether to install
+(or update) each one, and `make stow` only links their config packages when
+the tool is present (override with `FORCE_OPENCODE=1` / `FORCE_CLAUDECODE=1`).
+Non-interactive runs take the default answer for both prompts.
 
 The script is idempotent — safe to run multiple times.
 

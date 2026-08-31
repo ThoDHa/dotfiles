@@ -2,8 +2,19 @@ CURRENT_DIR := $(notdir $(CURDIR))
 CONTAINER   := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES := shell tmux isort opencode claudecode agents
+STOW_PACKAGES_ALL := shell tmux isort agents opencode claudecode
 STOW_TARGET   := $(HOME)
+
+# Optional tool packages are stowed only when the tool is installed.
+# FORCE_OPENCODE=1 / FORCE_CLAUDECODE=1 override detection; bootstrap uses
+# these to stow config before its tool install steps have run.
+OPENCODE_PRESENT  := $(shell command -v opencode >/dev/null 2>&1 && echo 1)
+CLAUDE_PRESENT    := $(shell command -v claude >/dev/null 2>&1 && echo 1)
+OPENCODE_STOW     := $(if $(or $(FORCE_OPENCODE),$(OPENCODE_PRESENT)),opencode)
+CLAUDECODE_STOW   := $(if $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT)),claudecode)
+STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
+SKIPPED_PACKAGES  := $(filter-out $(STOW_PACKAGES),$(STOW_PACKAGES_ALL))
+CLAUDE_SYNC       := $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT))
 
 # Rules target path (after stow) — used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
@@ -20,32 +31,53 @@ CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 all: help
 
 # ── Loop macro ────────────────────────────────────────────────────────────────
-# $(call stow_all, STOW_FLAGS, VERB) — iterate $(STOW_PACKAGES) with given flags
+# $(call stow_all, PKGS, STOW_FLAGS, VERB) — iterate PKGS with given flags
 define stow_all
-@for pkg in $(STOW_PACKAGES); do \
-    echo "  $(2)ing $$pkg..."; \
-    stow -v $(1) -t $(STOW_TARGET) $$pkg || exit 1; \
+@for pkg in $(1); do \
+    echo "  $(3)ing $$pkg..."; \
+    stow -v $(2) -t $(STOW_TARGET) $$pkg || exit 1; \
 done
 endef
 
-# Stow all packages to home directory
+# Announce packages skipped because their tool is not installed
+define announce_skips
+@for pkg in $(SKIPPED_PACKAGES); do \
+    echo "  Skipping $$pkg (tool not installed)"; \
+done
+endef
+
+# Stow all applicable packages to home directory
 stow:
 	@echo "Stowing packages to $(STOW_TARGET)..."
-	$(call stow_all,--no-folding,Stow)
+	$(call announce_skips)
+	$(call stow_all,$(STOW_PACKAGES),--no-folding,Stow)
 	@echo "Done! All packages stowed."
+ifneq ($(CLAUDE_SYNC),)
 	@$(MAKE) sync-claudecode
+else
+	@echo "Skipping Claude Code sync (claude not installed)"
+endif
 
-# Unstow all packages
+# Unstow all packages (full list, so configs of uninstalled tools are removed)
 unstow:
 	@echo "Unstowing packages from $(STOW_TARGET)..."
-	$(call stow_all,-D,Unstow)
+	$(call stow_all,$(STOW_PACKAGES_ALL),-D,Unstow)
 	@echo "Done! All packages unstowed."
 
-# Restow (unstow then stow) - useful for updating
+# Restow (unstow everything, then stow only applicable packages)
 restow:
 	@echo "Restowing packages to $(STOW_TARGET)..."
-	$(call stow_all,--no-folding -R,Restow)
+	@for pkg in $(SKIPPED_PACKAGES); do \
+        echo "  Dropping links for $$pkg (tool not installed)"; \
+    done
+	$(call stow_all,$(STOW_PACKAGES_ALL),-D,Unstow)
+	$(call announce_skips)
+	$(call stow_all,$(STOW_PACKAGES),--no-folding,Stow)
+ifneq ($(CLAUDE_SYNC),)
 	@$(MAKE) sync-claudecode
+else
+	@echo "Skipping Claude Code sync (claude not installed)"
+endif
 	@echo "Done! All packages restowed."
 
 # Stow / unstow / restow individual packages
@@ -64,6 +96,7 @@ restow-%:
 # Dry run - preview what would be stowed
 dry-run:
 	@echo "Dry run - showing what would be stowed..."
+	$(call announce_skips)
 	@for pkg in $(STOW_PACKAGES); do \
 		printf '\n=== %s ===\n' "$$pkg"; \
 		stow -n -v --no-folding -t $(STOW_TARGET) $$pkg 2>&1 || true; \
@@ -138,6 +171,7 @@ test: test-links test-rules test-tasks test-termux
 # Test that all expected symlinks exist
 test-links:
 	@echo "Testing opencode symlinks..."
+ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Checking rules directory exists..."
 	@test -d $(OPENCODE_RULES) || (echo "FAIL: $(OPENCODE_RULES) directory missing" && exit 1)
 	@echo "  Checking rules files..."
@@ -145,20 +179,28 @@ test-links:
 		test -L $(OPENCODE_RULES)/$$file || (echo "FAIL: $$file symlink missing" && exit 1); \
 		echo "    $$file OK"; \
 	done
+	@test -f $(STOW_TARGET)/.config/opencode/plugin/lru-context.ts || (echo "FAIL: lru-context plugin missing" && exit 1)
+	@echo "    lru-context plugin OK"
+else
+	@echo "  Skipping opencode checks (opencode not installed)"
+endif
 	@echo "  Checking skills..."
 	@for skill in $(EXPECTED_SKILLS); do \
 		test -f $(STOW_TARGET)/.agents/skills/$$skill/SKILL.md || (echo "FAIL: $$skill skill missing" && exit 1); \
 		echo "    $$skill OK"; \
 	done
+ifneq ($(CLAUDE_PRESENT),)
 	@test -d $(STOW_TARGET)/.claude/skills || (echo "FAIL: ~/.claude/skills link missing" && exit 1)
 	@echo "    ~/.claude/skills OK"
-	@test -f $(STOW_TARGET)/.config/opencode/plugin/lru-context.ts || (echo "FAIL: lru-context plugin missing" && exit 1)
-	@echo "    lru-context plugin OK"
+else
+	@echo "  Skipping claudecode checks (claude not installed)"
+endif
 	@echo "Symlink tests passed!"
 
 # Test that opencode loads all rules files correctly
 test-rules:
 	@echo "Testing opencode rules loading..."
+ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
 	@opencode run "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
 		tee /tmp/opencode-rules-test.txt | \
@@ -166,6 +208,9 @@ test-rules:
 		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
+else
+	@echo "  Skipping rules test (opencode not installed)"
+endif
 
 # Test the tasks board tool (render, atomic claim, lane placement)
 test-tasks:
@@ -208,7 +253,9 @@ help:
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo ""
-	@echo "Available stow packages: $(STOW_PACKAGES)"
+	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
+	@echo "opencode/claudecode are stowed only when the tool is installed"
+	@echo "(override with FORCE_OPENCODE=1 / FORCE_CLAUDECODE=1)"
 	@echo ""
 	@echo "Docker Commands:"
 	@echo "  make build       - Build the dev container"
