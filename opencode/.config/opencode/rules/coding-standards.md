@@ -10,7 +10,7 @@ This specification defines technical implementation requirements for code produc
 
 - [`core.md`](core.md): Core behavioral requirements
 - [`execution-standards.md`](execution-standards.md): Task execution requirements
-- [`git-protocol.md`](git-protocol.md): Version control requirements
+- The `git-protocol` skill (version control) is loaded on demand via the skill tool
 
 ---
 
@@ -219,7 +219,7 @@ If testing is not required for a change, implementations MUST document why testi
 
 ### Separation of Code and Test Changes
 
-This separation rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests. NEW tests written for NEW feature code are grouped WITH that code per [`git-protocol.md` Relationship Preservation](git-protocol.md#relationship-preservation), and are NOT subject to this separation requirement.
+This separation rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests. NEW tests written for NEW feature code are grouped WITH that code per the `git-protocol` skill's Relationship Preservation section, and are NOT subject to this separation requirement.
 
 For behavior-changing test updates, implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the code and test changes are inseparable and directly coupled. This rule aims to prevent behavioral changes from being hidden by simultaneous test updates and to make intent and reviewability explicit.
 

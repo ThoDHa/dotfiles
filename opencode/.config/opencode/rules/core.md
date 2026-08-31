@@ -15,8 +15,7 @@ This specification defines mandatory behavioral requirements for all OpenCode im
 
 - [`coding-standards.md`](coding-standards.md): Technical implementation requirements
 - [`execution-standards.md`](execution-standards.md): Task execution and priority requirements
-- [`git-protocol.md`](git-protocol.md): Version control requirements
-- Manager Mode and task-file protocols live in the `delegation` and `task-files` skills, loaded on demand via the skill tool
+- The `git-protocol` (version control), `documentation-standards`, `simplify-review` (completion loop), `delegation` (Manager Mode), and `task-files` (task file protocol) skills are loaded on demand via the skill tool
 
 ---
 
@@ -152,7 +151,7 @@ When connecting clauses or providing clarification, implementations MUST use col
 
 **Example:** "The bug is fixed — ready for review" becomes "The bug is fixed: ready for review".
 
-This requirement applies to all conversational output. Formal documentation follows its own standards; documentation-specific punctuation rules live in [`documentation-standards.md`](documentation-standards.md#punctuation-requirements).
+This requirement applies to all conversational output. Formal documentation follows its own standards; documentation-specific rules live in the `documentation-standards` skill, which MUST be loaded when writing documentation, README files, code comments, docstrings, or extended prose.
 
 ---
 
@@ -188,6 +187,8 @@ The following outputs MUST maintain professional tone:
 - Code comments in source files
 - Technical specifications
 - API documentation
+
+Detailed commit, branch, and push requirements live in the `git-protocol` skill; implementations MUST load it before staging, committing, branching, or pushing.
 
 ---
 

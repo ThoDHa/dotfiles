@@ -126,8 +126,9 @@ build:
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
-# Discover expected rules from the source directory automatically
+# Discover expected rules and skills from the source directories automatically
 EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
+EXPECTED_SKILLS := $(foreach d,$(wildcard agents/.agents/skills/*),$(notdir $(d)))
 
 # Test all symlinks exist and opencode loads rules
 test: test-links test-rules test-tasks test-termux
@@ -145,10 +146,14 @@ test-links:
 		echo "    $$file OK"; \
 	done
 	@echo "  Checking skills..."
-	@test -f $(STOW_TARGET)/.agents/skills/task-files/SKILL.md || (echo "FAIL: task-files skill missing" && exit 1)
-	@test -f $(STOW_TARGET)/.agents/skills/delegation/SKILL.md || (echo "FAIL: delegation skill missing" && exit 1)
+	@for skill in $(EXPECTED_SKILLS); do \
+		test -f $(STOW_TARGET)/.agents/skills/$$skill/SKILL.md || (echo "FAIL: $$skill skill missing" && exit 1); \
+		echo "    $$skill OK"; \
+	done
 	@test -d $(STOW_TARGET)/.claude/skills || (echo "FAIL: ~/.claude/skills link missing" && exit 1)
-	@echo "    task-files, delegation, ~/.claude/skills OK"
+	@echo "    ~/.claude/skills OK"
+	@test -f $(STOW_TARGET)/.config/opencode/plugin/lru-context.ts || (echo "FAIL: lru-context plugin missing" && exit 1)
+	@echo "    lru-context plugin OK"
 	@echo "Symlink tests passed!"
 
 # Test that opencode loads all rules files correctly

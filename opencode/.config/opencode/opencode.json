@@ -3,9 +3,7 @@
   "instructions": [
     "~/.config/opencode/rules/core.md",
     "~/.config/opencode/rules/coding-standards.md",
-    "~/.config/opencode/rules/documentation-standards.md",
-    "~/.config/opencode/rules/execution-standards.md",
-    "~/.config/opencode/rules/git-protocol.md"
+    "~/.config/opencode/rules/execution-standards.md"
   ],
   "plugin": ["./plugin/lru-context.ts"]
 }
