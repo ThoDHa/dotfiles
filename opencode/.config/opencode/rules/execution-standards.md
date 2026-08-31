@@ -10,11 +10,13 @@ This specification defines requirements for task execution, priority handling, a
 - **TodoWrite todos**: Lightweight tracking via the TodoWrite tool for standard work
 - **Task files**: Comprehensive documentation files (see the `task-files` skill) for complex operations
 
+**Completion Requirement:** When any task completes with modifications to files (a todo, a task-file task, or a standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete.
+
 ### Related Specifications
 
 - [`core.md`](core.md): Core behavioral requirements
 - [`coding-standards.md`](coding-standards.md): Technical implementation requirements
-- Manager Mode and task-file protocols live in the `delegation` and `task-files` skills, loaded on demand
+- The Simplify and Review Loop lives in the `simplify-review` skill; Manager Mode and task-file protocols live in the `delegation` and `task-files` skills, loaded on demand
 
 ---
 

@@ -346,19 +346,7 @@ A child task file MUST be registered in the master index dashboard and move betw
 
 ### Simplify and Review Loop
 
-After tests pass, implementations MUST iterate a simplify-then-review cycle before the task may be marked Completed. Each iteration performs both passes in order:
-
-1. **Simplify Pass (cleanup):** review the changed code for reuse, simplification, dead code, redundancy, and efficiency. Use `/simplify` where provided, otherwise equivalent manual cleanup. Apply every accepted improvement.
-2. **Review Pass (bug hunt):** review for correctness bugs, logic errors, missing error handling, edge cases, and security issues. Use `/code-review` where provided, otherwise equivalent manual review. Fix every confirmed finding.
-
-A "fix" is any change applied during the iteration, from either pass.
-
-**Loop control:**
-
-- After applying any fix, re-run the test suite to confirm no regressions
-- The loop repeats as long as an iteration produced at least one fix
-- The loop **converges** when one complete iteration produces **no fixes**
-- Cap at a reasonable iteration count (default: 5). If not converged at the cap, stop, document outstanding findings in the Work Log, and consult the user before marking Completed
+After tests pass, implementations MUST run the Simplify and Review Loop defined in the `simplify-review` skill to convergence before the task may be marked Completed. Load the skill for the pass structure, fix semantics, loop control, and convergence criteria. When the cap is reached without convergence, stop, document outstanding findings in the Work Log, and consult the user before marking Completed.
 
 **Each iteration MUST be recorded in the Work Log:**
 
@@ -394,6 +382,7 @@ A task CANNOT be marked Completed unless:
 - TDD workflow is documented in the Work Log
 - No TDD exceptions exist without justification and follow-up plan
 - The Simplify and Review Loop has converged, or the cap was reached with findings documented and accepted by the user
+- Final verification passed per the `simplify-review` skill (unit/integration tests, or manual verification of intended behavior where coverage is absent)
 - Each loop iteration is documented in the Work Log
 
 ## Task Breakdown
