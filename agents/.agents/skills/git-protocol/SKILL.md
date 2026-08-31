@@ -1,3 +1,8 @@
+---
+name: git-protocol
+description: Git protocol covering pre-commit analysis, logical unit grouping, dependency ordering, conventional commit messages, branch naming, staging discipline, force push safety, and no-verify auditing. Use when creating commits or branches, writing commit messages, staging changes, pushing, force pushing, preparing pull requests, or reviewing git history.
+---
+
 # Git Protocol
 
 ---
@@ -8,8 +13,8 @@ This specification defines requirements for version control operations, includin
 
 ### Related Specifications
 
-- [`core.md`](core.md): Core behavioral requirements (formal output standards)
-- [`coding-standards.md`](coding-standards.md): Technical implementation requirements
+- The `core` rule (always loaded): core behavioral requirements (formal output standards)
+- The `coding-standards` rule (always loaded): technical implementation requirements
 
 ---
 
@@ -47,7 +52,7 @@ Related changes MUST be grouped together in the same commit:
 - A refactor with its updated documentation
 - A fix with its new regression test
 
-**Exception:** Changes that ALTER the expected behavior of EXISTING tests MUST be committed separately from the production code, per [`coding-standards.md` "Separation of Code and Test Changes"](coding-standards.md#separation-of-code-and-test-changes). New tests written for new code still group with that code.
+**Exception:** Changes that ALTER the expected behavior of EXISTING tests MUST be committed separately from the production code, per the coding-standards rule's "Separation of Code and Test Changes" section. New tests written for new code still group with that code.
 
 ### Concern Separation
 
