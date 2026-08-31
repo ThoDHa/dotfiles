@@ -35,23 +35,23 @@ This document combines all opencode behavioral rules, coding standards, and conf
 
 EOF
 
-# Add all rule files (in order of importance)
-for rule_file in \
-    "core.md" \
-    "execution-standards.md" \
-    "coding-standards.md" \
-    "git-protocol.md" \
-    "documentation-standards.md"
-do
+# Add all rule files: core.md first, then the rest alphabetically (auto-discovered)
+RULE_FILES=$(ls -1 "$RULES_DIR"/*.md 2>/dev/null | xargs -n1 basename | sort)
+if [ -f "$RULES_DIR/core.md" ]; then
+    RULE_FILES="core.md $(echo "$RULE_FILES" | grep -v '^core.md$')"
+fi
+
+if [ -z "$RULE_FILES" ]; then
+    echo -e "${RED}  Error: no rule files found in $RULES_DIR${NC}"
+    exit 1
+fi
+
+for rule_file in $RULE_FILES; do
     rule_path="$RULES_DIR/$rule_file"
-    if [ -f "$rule_path" ]; then
-        echo "" >> "$OUTPUT_FILE"
-        echo "## Rule File: $rule_file" >> "$OUTPUT_FILE"
-        echo "" >> "$OUTPUT_FILE"
-        cat "$rule_path" >> "$OUTPUT_FILE"
-    else
-        echo -e "${YELLOW}  Warning: $rule_file not found${NC}"
-    fi
+    echo "" >> "$OUTPUT_FILE"
+    echo "## Rule File: $rule_file" >> "$OUTPUT_FILE"
+    echo "" >> "$OUTPUT_FILE"
+    cat "$rule_path" >> "$OUTPUT_FILE"
 done
 
 echo -e "${GREEN}✓ CLAUDE.md generated successfully${NC}"
