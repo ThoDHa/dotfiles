@@ -42,7 +42,7 @@ Convergence proves no further fixes were found; it does not prove the work funct
 
 - Where unit or integration tests cover the changed behavior, run them and confirm they pass
 - Where automated coverage is absent or insufficient for the change, perform manual verification: run the affected functionality and exercise the changed paths (invoke the command, call the API, start the app, render the view) to confirm intended behavior
-- A verification failure counts as a fix: apply the correction, then resume the loop until a complete iteration converges AND final verification passes
+- A verification failure counts as a fix: load the `debugging` skill, correct the failure through its investigation phases, then resume the loop until a complete iteration converges AND final verification passes
 
 The verification method and result (command run, approach used, outcome) MUST be reported when reporting the task complete, and recorded in the Work Log under task files.
 
