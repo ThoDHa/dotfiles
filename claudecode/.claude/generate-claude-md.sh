@@ -14,8 +14,13 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_REPO="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.dotfiles")"
 
-# Source rules from stowed location (what opencode actually uses)
+# Source rules from stowed location (what opencode actually uses); fall back
+# to the repo copy when the opencode package is not stowed (opencode absent).
 RULES_DIR="$HOME/.config/opencode/rules"
+if [ ! -d "$RULES_DIR" ]; then
+    RULES_DIR="$DOTFILES_REPO/opencode/.config/opencode/rules"
+    echo "  opencode rules not stowed — using repo copy: $RULES_DIR"
+fi
 OUTPUT_FILE="$HOME/.claude/CLAUDE.md"
 
 echo -e "${YELLOW}Generating CLAUDE.md for Claude Code...${NC}"
