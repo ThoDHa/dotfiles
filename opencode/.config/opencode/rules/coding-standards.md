@@ -190,8 +190,34 @@ Tests SHOULD:
 - Be fast enough to run frequently
 - Use AAA pattern (Arrange, Act, Assert) when appropriate
 
-### Prohibited Test Behaviors
+### Test Result Verification
 
+**Result Gating:**
+
+Test run verification MUST gate on the tool's own reported result, never on text matching
+against its output: the exit status or result code when it encodes the outcome, and the
+reported result metrics when it does not. Filtering the output through a text match succeeds on
+failed runs too, because failed runs still print summary lines the filter matches. When output
+must be filtered, implementations MUST preserve that result by capturing it directly at the
+point of invocation.
+
+**Full-Outcome Accounting:**
+
+When reporting a test run's result, implementations MUST account for every outcome class the
+runner reports, not only passes: passed, failed, skipped, and error counts. Any non-zero failure
+or skip count MUST be named explicitly and investigated before the run is treated as green,
+because skips can hide failures ([Prohibited Test Behaviors](#prohibited-test-behaviors)). A
+summary of `1 failed | 2530 passed` is a failed run, and `2 passed | 1 skipped` is a run with
+an uninvestigated skip, not a green run.
+
+**Filtered-Output Discipline:**
+
+Where output is truncated or filtered for length, the unfiltered summary (total, passed,
+failed, skipped) and the runner's exit status MUST still be captured and reported. Filtered
+reading MUST NOT be the sole failure signal: a filter pattern chosen for passing output can
+silently drop the lines that name a failure.
+
+### Prohibited Test Behaviors
 
 Implementations MUST NOT skip or disable failing tests.
 
