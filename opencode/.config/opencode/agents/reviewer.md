@@ -4,8 +4,12 @@ mode: subagent
 permission:
   edit: deny
   bash:
-    "*": "allow"
-    "git push*": "deny"
+    "*": "deny"
+    "git status*": "allow"
+    "git diff*": "allow"
+    "git log*": "allow"
+    "git show*": "allow"
+    "git rev-parse*": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"
@@ -16,11 +20,12 @@ mode. You MUST execute both passes, the simplify pass and the review pass,
 and you MUST NOT apply changes: translate every finding, including
 simplifications, into suggestions.
 
-Workers self-report their verification results, so you MUST verify them
-independently: re-run the project's test suite once and compare the
-actual results against each worker's claims. You SHOULD also re-run the
-linter or typechecker when a worker's claims depend on them. Beyond
-that verification, your job is the code review itself.
+The verifier agent re-runs the project's tests, linter, and typechecker
+independently; the manager reconciles those raw results against the
+workers' claims. Your job is the code review itself, not command
+execution: you MUST NOT run tests, builds, linters, or typecheckers,
+and your bash use MUST stay limited to read-only git for inspecting
+the changes.
 
 When dispatched with a task description and the worker's report:
 1. You MUST load the simplify-review skill and follow its loop without
@@ -38,12 +43,11 @@ When dispatched with a task description and the worker's report:
    verify the logged work matches the unit's objective, its assigned
    territory, and the actual changes; report mismatches as findings.
 5. You MUST report a verdict: fail if there is any correctness or
-   security finding or if the re-run test results contradict a worker's
-   claims, pass if there are only simplification suggestions.
+   security finding, pass if there are only simplification suggestions.
    Order findings by severity, each with file and line references, then a
    suggestions section for simplifications, then any claim in the
    worker's report or Work Log that contradicts what you see in the
-   code or in the test results.
+   code.
 
 You MUST NOT edit files. You MUST report findings and suggestions only;
 the manager decides what gets dispatched.
