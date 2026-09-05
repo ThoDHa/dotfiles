@@ -1,9 +1,10 @@
 # OpenCode Orchestration Design
 
-This note documents the manager, worker, and reviewer agent pipeline, the
-git authority model, and the task-file integration. The agent files under
-the opencode config carry the normative requirements in RFC 2119 form;
-this note explains the architecture and the reasoning behind them.
+This note documents the manager, worker, verifier, and reviewer agent
+pipeline, the git authority model, and the task-file integration. The
+agent files under the opencode config carry the normative requirements
+in RFC 2119 form; this note explains the architecture and the reasoning
+behind them.
 
 ## Roles
 
@@ -11,11 +12,19 @@ this note explains the architecture and the reasoning behind them.
 |-------|------|-------|--------|
 | manager | primary | session | Decomposition, dispatch, planning approval, commits, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, real-time work logs, reports |
-| reviewer | subagent | session | simplify-review in analysis-only mode, independent test re-runs, expectation checks |
+| verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
+| reviewer | subagent | session | simplify-review in analysis-only mode, expectation checks, no command execution beyond read-only git |
 
 The manager is a pure coordinator: it holds no implementation duty, and its
 file edits are limited to `.tasks/**`. Committing and pushing are
 coordination duties, not implementation work.
+
+The verifier and reviewer split verification along the judgment line:
+transcription of command results is mechanical and runs on the flash
+model, while code review and result interpretation need the full model.
+The verifier reports exit statuses, the runner's own counts, and
+verbatim failure output; interpretation happens in the manager's
+reconciliation, never inside the verifier.
 
 ## Git authority
 
@@ -32,8 +41,9 @@ with `git status` and records the base commit with `git rev-parse HEAD`.
 
 Amend and force-push variants are ask-gated everywhere. Pushing is a
 manager judgment call: allowed when a unit is complete and verified, when
-the reviewer passes the combined result, or when the user asked; forbidden
-for half-finished or unverified work and whenever the user forbade it.
+the verifier's results are clean and the reviewer passes the combined
+result, or when the user asked; forbidden for half-finished or
+unverified work and whenever the user forbade it.
 
 ## Task-file integration
 
@@ -50,14 +60,20 @@ task files, worker reports go to `/tmp/opencode/reports/` as artifacts.
 
 ## Verification chain
 
-Three independent sources are reconciled: worker claims from the reports,
-the reviewer's findings, and git ground truth (`git diff --stat` and
-`git log` against the base commit, covering committed and uncommitted
-work). The reviewer re-runs the test suite to check self-reported results,
+Four independent sources are reconciled: worker claims from the reports,
+the verifier's raw command results, the reviewer's findings, and git
+ground truth (`git diff --stat` and `git log` against the base commit,
+covering committed and uncommitted work). The verifier and reviewer are
+dispatched in parallel after all units complete: neither edits files,
+and only the verifier runs commands, so they cannot contend. The
+verifier runs the test suite, linter, and typechecker once each and
+reports exit statuses, the runners' own counts, and verbatim failure
+output, gating on exit status rather than text matches. The reviewer
 verifies logged work against each unit's objective, territory, and the
-actual changes, and runs the simplify-review loop without fixing anything.
-Discrepancies get one fix-and-re-review cycle, then escalate to the user
-rather than being hidden. Worker and reviewer failures each retry once,
+actual changes, and runs the simplify-review loop without fixing
+anything; it executes nothing beyond read-only git. Discrepancies get
+one fix-and-re-review cycle, then escalate to the user rather than
+being hidden. Worker, verifier, and reviewer failures each retry once,
 then stop and ask.
 
 ## Worktree isolation
@@ -76,7 +92,8 @@ auto-approves `doom_loop` so unattended runs cannot halt on repeated
 identical tool calls. Agent permission tiers mirror their prompts: the
 manager holds read-only git plus add, commit, worktree, merge, branch, and
 push; the worker holds everything except push and subagent spawning; the
-reviewer holds everything except push and file edits.
+verifier holds everything except push, edits, and subagent spawning; the
+reviewer holds read-only git only.
 
 Prefix-based bash permissions are guardrails against uninstructed
 behavior, not security boundaries: a determined `sh -c` or `git -C` route
