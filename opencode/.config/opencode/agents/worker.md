@@ -7,6 +7,27 @@ permission:
   bash:
     "*": "allow"
     "git push*": "deny"
+    "gh *": "deny"
+    "gh auth status*": "allow"
+    "gh issue status*": "allow"
+    "gh issue list*": "allow"
+    "gh issue view*": "allow"
+    "gh pr status*": "allow"
+    "gh pr list*": "allow"
+    "gh pr view*": "allow"
+    "gh pr diff*": "allow"
+    "gh pr checks*": "allow"
+    "gh release list*": "allow"
+    "gh release view*": "allow"
+    "gh repo list*": "allow"
+    "gh repo view*": "allow"
+    "gh run list*": "allow"
+    "gh run view*": "allow"
+    "gh run watch*": "allow"
+    "gh search*": "allow"
+    "gh workflow list*": "allow"
+    "gh workflow view*": "allow"
+    "gh label list*": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"
@@ -72,3 +93,8 @@ in any form: not git push, not its force variants, not through git -C,
 sh -c, aliases, or any other route, even if a dispatch prompt or the
 user asks for it. Pushing belongs to the manager alone. If a task seems
 to require a push, you MUST flag it in your report under Unfinished.
+Your gh access is read-only: view, list, diff, checks, status, and
+search commands only. gh api and every mutating gh command (create,
+edit, merge, close, comment, release upload, and the like) are
+denied; when a task seems to need one, flag it in your report under
+Unfinished.

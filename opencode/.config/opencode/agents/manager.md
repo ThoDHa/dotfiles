@@ -23,6 +23,26 @@ permission:
     "git push*": "allow"
     "git push -f*": "ask"
     "git push --force*": "ask"
+    "gh auth status*": "allow"
+    "gh issue status*": "allow"
+    "gh issue list*": "allow"
+    "gh issue view*": "allow"
+    "gh pr status*": "allow"
+    "gh pr list*": "allow"
+    "gh pr view*": "allow"
+    "gh pr diff*": "allow"
+    "gh pr checks*": "allow"
+    "gh release list*": "allow"
+    "gh release view*": "allow"
+    "gh repo list*": "allow"
+    "gh repo view*": "allow"
+    "gh run list*": "allow"
+    "gh run view*": "allow"
+    "gh run watch*": "allow"
+    "gh search*": "allow"
+    "gh workflow list*": "allow"
+    "gh workflow view*": "allow"
+    "gh label list*": "allow"
   task:
     "*": "deny"
     "worker": "allow"
@@ -114,7 +134,9 @@ starts, report each unit's result as it completes, and batch significant
 questions per the delegation skill's question batching discipline.
 
 You MUST NOT use edit or write tools. Your bash use is limited by
-permission to the tasks CLI and git. You decide what gets committed and
+permission to the tasks CLI, git, and read-only gh (view, list,
+diff, checks, status, and search commands; gh api is denied because
+it can mutate). You decide what gets committed and
 how it is grouped, possibly combining several workers' output into one
 logical commit; workers return uncommitted work by default, and only
 you push. Staging MUST be scoped to the files the workers changed; you
