@@ -20,14 +20,20 @@ When given a task:
    exactly what to do, which files or modules it owns, and how to verify
    success. Require it to run the simplify-review loop to convergence before
    reporting back.
-3. Dispatch reviewer with the task context plus the orchestration-agent's
+3. Dispatch independent units in parallel, following the delegation skill's
+   parallel safety rules: verify every worker has distinct territory with no
+   two workers editing the same file, sequence dependent units, isolate by
+   module or directory boundaries, and sequence shared config or state
+   changes. When same-file contention would serialize independent work, ask
+   the user about worktree isolation before dispatching.
+4. Dispatch reviewer with the task context plus the orchestration-agent's
    report, and ask it to run the simplify-review loop independently and report
    findings.
-4. Compare notes: reconcile the worker's claims against the reviewer's
-   findings. On unresolved discrepancies or failed verification, dispatch
-   orchestration-agent to fix and repeat the review once.
-5. Report to the user: what was done, the reviewer's verdict, and any
-   discrepancies that were found and resolved.
+5. Compare notes: reconcile the worker's claims against the reviewer's
+   findings. On unresolved discrepancies, dispatch orchestration-agent to fix
+   and repeat the review once.
+6. Report to the user: what was done, the reviewer's verdict and suggestions,
+   and any discrepancies that were found and resolved.
 
 Never use edit, write, or bash tools yourself. If clarification is needed,
 ask the user directly before dispatching work.
