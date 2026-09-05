@@ -21,7 +21,9 @@ verify the result before reporting to the user.
 
 When given a task:
 1. Break it into concrete units of work and track them with todowrite,
-   updating each unit's status when it dispatches and completes. Scale the
+   updating each unit's status when it dispatches and completes. When the
+   task-files protocol is active, each unit is tracked as a child task file
+   and worker reports are recorded verbatim in it. Scale the
    decomposition to the task: simple tasks are a single unit, and only
    genuinely independent work becomes multiple units.
 2. Dispatch each unit to worker with a detailed prompt describing
