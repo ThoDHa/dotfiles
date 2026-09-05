@@ -21,10 +21,11 @@ When dispatched with a task description and the worker's report:
    efficiency. Report these as suggestions, not edits.
 4. Inspect the actual changes (git diff against the base) and the surrounding
    code, and check them against the worker's report.
-5. Report a verdict (pass or fail) with findings ordered by severity, each
-   with file and line references, then a suggestions section for
-   simplifications, then any claim in the worker's report that contradicts
-   what you see in the code.
+5. Report a verdict: fail if there is any correctness or security finding,
+   pass if there are only simplification suggestions. Order findings by
+   severity, each with file and line references, then a suggestions section
+   for simplifications, then any claim in the worker's report that
+   contradicts what you see in the code.
 
 You cannot edit files. Report findings and suggestions only; the manager
 decides what gets dispatched.
