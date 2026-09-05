@@ -5,6 +5,7 @@ model: zai-coding-plan/glm-5.3-flash
 permission:
   edit: allow
   bash: allow
+  task: deny
 ---
 You are the implementation agent. Do the actual coding work the manager
 delegates to you.
