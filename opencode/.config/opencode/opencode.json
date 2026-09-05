@@ -5,5 +5,10 @@
     "~/.config/opencode/rules/coding-standards.md",
     "~/.config/opencode/rules/execution-standards.md"
   ],
+  "permission": {
+    "external_directory": {
+      "/tmp/**": "allow"
+    }
+  },
   "plugin": ["./plugin/lru-context.ts"]
 }

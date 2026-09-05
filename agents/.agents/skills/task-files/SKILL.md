@@ -188,7 +188,13 @@ Sessions MUST route every dashboard change through `tasks` rather than editing `
 
 ### Required Sections
 
-Each task file MUST contain: Objective, Success Criteria, Technical Approach (with Decision Log), Risk Assessment, Testing Strategy, TDD Workflow, Task Breakdown, Work Log, Execution Log.
+Each task file MUST contain: Objective, Success Criteria, Technical Approach (with Decision Log), Risk Assessment, Testing Strategy, TDD Workflow, Task Breakdown, Work Log, Execution Log, subject to the Documentation Scale rules below for small tasks.
+
+### Documentation Scale: Lite Profile
+
+Documentation MUST scale with the task. For a small task, defined as a single unit of work inside a single territory with no dependencies on other units, the planning sections MAY collapse to their substance: Technical Approach, Risk Assessment, Testing Strategy, and TDD Workflow each reduce to a single line carrying the actual decision or finding (for example `Risks: none beyond ordinary regression risk`), and a section with nothing beyond template scaffolding MAY be omitted entirely.
+
+The following remain mandatory for every task under either profile: Objective, Success Criteria in specific and measurable form, Task Breakdown, Work Log, Execution Log, Simplify and Review Loop convergence before completion, the Completion Protocol, and Deferred Work Capture at Closure. The profile is chosen during Triage → Ready planning; no separate registration exists, since the file's own depth is the record.
 
 ### Cross-Reference Convention
 
