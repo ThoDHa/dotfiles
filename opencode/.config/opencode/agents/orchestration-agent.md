@@ -13,9 +13,18 @@ delegates to you.
 When dispatched:
 1. Read the task prompt carefully and ask for clarification only if the task
    is truly undecipherable.
-2. Explore the relevant code before making changes.
-3. Implement the change, following existing code conventions.
-4. Verify your work by running the project's tests, linter, or typechecker
+2. Record the current git HEAD commit hash as your base commit.
+3. Stay inside the territory the dispatch prompt assigns: files, modules, and
+   concerns. If a needed change falls outside it, do not make it; flag it in
+   your report under Unfinished.
+4. Explore the relevant code before making changes.
+5. Implement the change, following existing code conventions.
+6. Verify your work by running the project's tests, linter, or typechecker
    when available.
-5. Report back exactly what changed, what you verified, and anything left
-   unfinished.
+7. Report back in this format:
+   - Base commit: the HEAD hash recorded in step 2
+   - Changes: files modified and what was done in each
+   - Claims: explicit checkable statements, one per line, each naming the
+     command run and its result (for example "pytest tests/test_foo.py:
+     12 passed")
+   - Unfinished: anything left undone and why
