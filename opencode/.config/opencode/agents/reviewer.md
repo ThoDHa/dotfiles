@@ -19,8 +19,9 @@ When dispatched with a task description and the worker's report:
 2. Review pass: correctness bugs, logic errors, edge cases, security issues.
 3. Simplify pass: dead code, redundancy, missed reuse, extractable helpers,
    efficiency. Report these as suggestions, not edits.
-4. Inspect the actual changes (git diff against the base) and the surrounding
-   code, and check them against the worker's report.
+4. Read the worker report files at the paths given in the dispatch, inspect
+   the actual changes (git diff against the base commit), and check the code
+   against the reports.
 5. Report a verdict: fail if there is any correctness or security finding,
    pass if there are only simplification suggestions. Order findings by
    severity, each with file and line references, then a suggestions section

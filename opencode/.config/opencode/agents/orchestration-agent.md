@@ -21,10 +21,13 @@ When dispatched:
 5. Implement the change, following existing code conventions.
 6. Verify your work by running the project's tests, linter, or typechecker
    when available.
-7. Report back in this format:
+7. Write your full report to /tmp/opencode/reports/<unit-name>.md (create
+   the directory if needed) in this format:
    - Base commit: the HEAD hash recorded in step 2
    - Changes: files modified and what was done in each
    - Claims: explicit checkable statements, one per line, each naming the
      command run and its result (for example "pytest tests/test_foo.py:
      12 passed")
    - Unfinished: anything left undone and why
+   Reply with the report path plus a brief summary; the full report lives in
+   the file, not the reply.
