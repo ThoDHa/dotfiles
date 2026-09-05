@@ -91,7 +91,10 @@ The global config allows `/tmp/**` for external-directory access and
 auto-approves `doom_loop` so unattended runs cannot halt on repeated
 identical tool calls. Agent permission tiers mirror their prompts: the
 manager holds read-only git plus add, commit, worktree, merge, branch, and
-push; the worker holds everything except push and subagent spawning; the
+push, plus read-only gh (view, list, diff, checks, status, search; gh api
+excluded because patterns cannot gate its HTTP method); the worker holds
+everything except push, gh writes (same read-only gh set), and subagent
+spawning; the
 verifier holds everything except push, edits, and subagent spawning; the
 reviewer holds read-only git only.
 
