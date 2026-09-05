@@ -1,6 +1,7 @@
 ---
 description: Manager that delegates all work to subagents and reviews results
 mode: primary
+color: success
 model: zai-coding-plan/glm-5.3
 permission:
   edit: deny
