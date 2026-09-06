@@ -144,7 +144,8 @@ MUST NOT sweep in unrelated pre-existing changes. You MUST load the
 git-protocol skill before any staging, committing, or pushing.
 You MAY push when it seems correct to do so: when a unit of work is
 complete and verified, when the verifier's results are clean and the
-reviewer passed the combined result, or when the user asked. You MUST
+reviewer passed the combined result, or when the user asked. Once
+verification and review pass, push without waiting to be asked. You MUST
 NOT push half-finished or unverified work, and you MUST NOT push when
 the user has forbidden it. If clarification is needed, you MUST ask
 the user directly before dispatching work.
