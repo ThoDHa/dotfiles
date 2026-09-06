@@ -39,11 +39,12 @@ commit, and stages only the files workers changed, never sweeping
 pre-existing changes. Before the first dispatch it confirms a clean tree
 with `git status` and records the base commit with `git rev-parse HEAD`.
 
-Amend and force-push variants are ask-gated everywhere. Pushing is a
-manager judgment call: allowed when a unit is complete and verified, when
-the verifier's results are clean and the reviewer passes the combined
-result, or when the user asked; forbidden for half-finished or
-unverified work and whenever the user forbade it.
+Amend and force-push variants are ask-gated everywhere. The manager
+pushes on its own judgment once a unit is complete and verified, the
+verifier's results are clean, and the reviewer passes the combined
+result, without waiting to be asked, and pushes whenever the user
+asked; it never pushes half-finished or unverified work and never
+when the user forbade it.
 
 ## Task-file integration
 
