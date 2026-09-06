@@ -292,10 +292,17 @@ step_tmux() {
 }
 
 step_nvm() {
-    local target="0.40.3"
+    local latest current=""
+    latest=$(gh_latest_tag "nvm-sh/nvm" "v0.40.3")
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-    if [ "$(nvm --version 2>/dev/null)" != "$target" ]; then
-        curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/v${target}/install.sh" | bash
+    command -v nvm &>/dev/null && current="v$(nvm --version 2>/dev/null || true)"
+
+    if [ "$current" = "$latest" ]; then
+        echo "  NVM ${current#v} is up to date"
+    else
+        [ -n "$current" ] && echo "  Upgrading NVM ${current#v} → ${latest#v}..." \
+                          || echo "  Installing NVM ${latest#v}..."
+        _run_floating_installer "https://raw.githubusercontent.com/nvm-sh/nvm/${latest}/install.sh"
         \. "$NVM_DIR/nvm.sh"
     fi
     echo "  Installing Node.js LTS..."
