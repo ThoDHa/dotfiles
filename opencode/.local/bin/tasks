@@ -27,10 +27,19 @@ readonly STATUS_COMPLETED="Completed"
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly NA="N/A"
+readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 now() { date '+%Y-%m-%d %H:%M'; }
+
+# The Status vocabulary is fixed; new/set must reject anything else.
+valid_status() {
+	case "$1" in
+		"$STATUS_TRIAGE"|"$STATUS_READY"|"$STATUS_IN_PROGRESS"|"$STATUS_BLOCKED"|"$STATUS_CANCELLED"|"$STATUS_COMPLETED") return 0 ;;
+		*) return 1 ;;
+	esac
+}
 
 # A stable per-session identifier for claims. Callers may override with
 # --owner or TASKS_SESSION; the pid fallback keeps distinct shells distinct.
@@ -45,7 +54,7 @@ Commands:
   render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
                                        opts: --status S --priority P --dir DIR
-  set <taskfile> Key=Value...          Update header field(s), refresh Updated, render.
+  set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render.
   help                                 Show this help.
@@ -98,10 +107,25 @@ header_created() {
 	printf '%s' "${created:-$NA}"
 }
 
+# Make a value safe inside a dashboard table cell: escape the backslash first,
+# then pipes and brackets (table and link syntax), and collapse newlines so a
+# row stays a single line.
+md_escape() {
+	local s="${1:-}"
+	local nl=$'\n' cr=$'\r'
+	s="${s//\\/\\\\}"
+	s="${s//"$nl"/ }"
+	s="${s//"$cr"/ }"
+	s="${s//|/\\|}"
+	s="${s//[/\\[}"
+	s="${s//]/\\]}"
+	printf '%s' "$s"
+}
+
 # Markdown-link a task's name to its file, relative to the dashboard.
 task_link() {
 	local subdir="$1" file="$2" name="$3"
-	printf '[%s](./%s/%s)' "$name" "$subdir" "$(basename "$file")"
+	printf '[%s](./%s/%s)' "$(md_escape "$name")" "$subdir" "$(md_escape "$(basename "$file")")"
 }
 
 # Normalize a progress value to "<n>%"; empty becomes 0%.
@@ -153,16 +177,16 @@ render_unlocked() {
 			if [[ -n "$updated" && "$updated" > "$newest" ]]; then newest="$updated"; fi
 
 			if [[ "$subdir" == "$ARCHIVE_DIR" ]]; then
-				archive+=("| $link | ${completed_at:-$NA} | $duration |")
+				archive+=("| $link | $(md_escape "${completed_at:-$NA}") | $(md_escape "$duration") |")
 				continue
 			fi
 			case "$status" in
-				"$STATUS_TRIAGE")   triage+=("| $link | $priority | $created | $updated |") ;;
-				"$STATUS_READY")    ready+=("| $link | $priority | $created | $updated |") ;;
-				"$STATUS_IN_PROGRESS") inprogress+=("| $link | $(normalize_progress "$progress") | $updated | $priority |") ;;
-				"$STATUS_BLOCKED"|"$STATUS_CANCELLED") blocked+=("| $link | $status | $created | $updated |") ;;
-				"$STATUS_COMPLETED") completed+=("| $link | ${completed_at:-$updated} | $duration |") ;;
-				*) triage+=("| $link | $priority | $created | $updated |") ;;
+				"$STATUS_TRIAGE")   triage+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
+				"$STATUS_READY")    ready+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
+				"$STATUS_IN_PROGRESS") inprogress+=("| $link | $(md_escape "$(normalize_progress "$progress")") | $(md_escape "$updated") | $(md_escape "$priority") |") ;;
+				"$STATUS_BLOCKED"|"$STATUS_CANCELLED") blocked+=("| $link | $(md_escape "$status") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
+				"$STATUS_COMPLETED") completed+=("| $link | $(md_escape "${completed_at:-$updated}") | $(md_escape "$duration") |") ;;
+				*) triage+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
 			esac
 		done
 	done
@@ -194,15 +218,25 @@ print_sorted() {
 	printf '%s\n' "$@" | LC_ALL=C sort
 }
 
-# Acquire the board lock on fd 9 for this process, then render. The lock is
-# released automatically when the process exits, so an abandoned session never
-# deadlocks the others.
+# Fail unless the .tasks directory exists.
+require_tasks_dir() {
+	[[ -d "$1" ]] || die "no .tasks directory at $1 (run 'tasks init')"
+}
+
+# Acquire the board lock on fd 9 for this process. The lock is released
+# automatically when the process exits, so an abandoned session never
+# deadlocks the others. Every read-modify-render span holds it, so
+# concurrent mutations serialize instead of racing their writes.
+acquire_board_lock() {
+	exec 9>"$1/$LOCK_NAME"
+	flock 9
+}
+
+# Acquire the board lock, then rebuild dashboard.md.
 render() {
 	local tasks_dir="$1"
-	[[ -d "$tasks_dir" ]] || die "no .tasks directory at $tasks_dir (run 'tasks init')"
-	local lock="$tasks_dir/$LOCK_NAME"
-	exec 9>"$lock"
-	flock 9
+	require_tasks_dir "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
 	render_unlocked "$tasks_dir"
 }
 
@@ -233,14 +267,28 @@ set_header_field() {
 # --- commands --------------------------------------------------------------
 
 cmd_init() {
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "${1:-}")"
+	local dir=""
+	while (($#)); do
+		case "$1" in
+			--dir) dir="$2"; shift 2 ;;
+			*) die "init: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
 	mkdir -p "$tasks_dir/$CURRENT_DIR" "$tasks_dir/$ARCHIVE_DIR"
 	render "$tasks_dir"
 	printf '%s\n' "$tasks_dir"
 }
 
 cmd_render() {
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "${1:-}")"
+	local dir=""
+	while (($#)); do
+		case "$1" in
+			--dir) dir="$2"; shift 2 ;;
+			*) die "render: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
 	render "$tasks_dir"
 }
 
@@ -258,16 +306,15 @@ cmd_new() {
 	done
 	[[ -n "$id" ]] || die "new: --id is required"
 	[[ -n "$name" ]] || die "new: --name is required"
+	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
 	[[ -d "$tasks_dir/$CURRENT_DIR" ]] || die "no .tasks directory at $tasks_dir (run 'tasks init')"
+	acquire_board_lock "$tasks_dir"
 
 	local ts; ts="$(now)"
 	local stamp; stamp="$(date '+%Y%m%d-%H%M')"
-	local file="$tasks_dir/$CURRENT_DIR/${stamp}-$(slugify "$name").md"
-	[[ -e "$file" ]] && die "new: task file already exists: $file"
-
-	cat >"$file" <<EOF
+	local body; body="$(cat <<EOF
 # Task: $name
 
 **Created:** $ts
@@ -301,27 +348,65 @@ cmd_new() {
 
 - $ts - Task file created
 EOF
-	render "$tasks_dir"
+)"
+
+	# Exclusive create (noclobber) makes the existence test atomic, so a
+	# concurrent new can never clobber this file; on a same-minute name
+	# collision, retry with an incremented numeric suffix.
+	local slug; slug="$(slugify "$name")"
+	local n=1 candidate file
+	while :; do
+		if ((n == 1)); then candidate="$tasks_dir/$CURRENT_DIR/$stamp-$slug.md"
+		else candidate="$tasks_dir/$CURRENT_DIR/$stamp-$slug-$n.md"; fi
+		if (set -o noclobber; printf '%s\n' "$body" >"$candidate") 2>/dev/null; then
+			file="$candidate"
+			break
+		fi
+		[[ -e "$candidate" ]] || die "new: cannot create task file $candidate (check permissions)"
+		n=$((n + 1))
+	done
+	render_unlocked "$tasks_dir"
 	printf '%s\n' "$file"
 }
 
 cmd_set() {
-	(($# >= 1)) || die "set: usage: tasks set <taskfile> Key=Value..."
-	local args=("$@")
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "")"
-	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+	local dir="" args=()
+	while (($#)); do
+		case "$1" in
+			--dir) dir="$2"; shift 2 ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} >= 1)) || die "set: usage: tasks set <taskfile> Key=Value..."
 
-	local touched_updated=0 pair key value i
+	# Validate every pair before touching the file, so a bad Status cannot
+	# leave a half-applied update behind.
+	local pair key value i
 	for ((i = 1; i < ${#args[@]}; i++)); do
 		pair="${args[$i]}"
 		[[ "$pair" == *=* ]] || die "set: expected Key=Value, got: $pair"
+		key="${pair%%=*}"
+		value="${pair#*=}"
+		if [[ "$key" == "Status" ]]; then
+			valid_status "$value" || die "set: unknown status: $value (valid: $STATUS_VALUES)"
+		fi
+	done
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	local touched_updated=0
+	for ((i = 1; i < ${#args[@]}; i++)); do
+		pair="${args[$i]}"
 		key="${pair%%=*}"
 		value="${pair#*=}"
 		set_header_field "$file" "$key" "$value"
 		[[ "$key" == "Updated" ]] && touched_updated=1
 	done
 	((touched_updated == 0)) && set_header_field "$file" "Updated" "$(now)"
-	render "$tasks_dir"
+	render_unlocked "$tasks_dir"
 }
 
 cmd_claim() {
@@ -337,6 +422,8 @@ cmd_claim() {
 	[[ -n "$owner" ]] || owner="$(session_id)"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	local claim="$file$CLAIM_SUFFIX"
 
@@ -344,10 +431,12 @@ cmd_claim() {
 	if (set -o noclobber; printf '%s\n' "$owner" >"$claim") 2>/dev/null; then
 		set_header_field "$file" "Owner" "$owner"
 		set_header_field "$file" "Updated" "$(now)"
-		render "$tasks_dir"
+		render_unlocked "$tasks_dir"
 		printf 'claimed %s by %s\n' "$(basename "$file")" "$owner"
-	else
+	elif [[ -e "$claim" ]]; then
 		die "already claimed by $(cat "$claim" 2>/dev/null || printf 'unknown')"
+	else
+		die "claim: cannot create $claim (check permissions)"
 	fi
 }
 
@@ -362,11 +451,13 @@ cmd_release() {
 	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile>"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	rm -f "$file$CLAIM_SUFFIX"
 	set_header_field "$file" "Owner" ""
 	set_header_field "$file" "Updated" "$(now)"
-	render "$tasks_dir"
+	render_unlocked "$tasks_dir"
 	printf 'released %s\n' "$(basename "$file")"
 }
 

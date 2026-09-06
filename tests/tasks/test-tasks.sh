@@ -165,6 +165,127 @@ assert_contains "archived task appears in Archive lane" "$arch_lane" "(./archive
 comp_lane="$(awk '/^## Completed/{f=1} /^## Archive/{f=0} f' <<<"$board")"
 assert_not_contains "archived task left the Completed lane" "$comp_lane" "Document Endpoints"
 
+echo "== --dir flag on init/render/new/set =="
+dirtasks="$ROOT/flagtest/.tasks"
+dirout="$(t init --dir "$dirtasks")"
+assert_eq "init --dir reports the requested directory" "$dirtasks" "$dirout"
+[[ -d "$dirtasks/current" && -d "$dirtasks/archive" && -f "$dirtasks/dashboard.md" ]] \
+	&& ok "init --dir scaffolds the requested directory" || bad "init --dir scaffolds the requested directory"
+f_dir="$(t new --id DIR-1 --name "Dir Flag Task" --dir "$dirtasks")"
+[[ -f "$f_dir" ]] && ok "new --dir creates the task in the requested directory" || bad "new --dir creates the task in the requested directory"
+t set --dir "$dirtasks" "$(basename "$f_dir")" Status=Ready Progress=25% >/dev/null
+t render --dir "$dirtasks"
+flagboard="$(cat "$dirtasks/dashboard.md")"
+assert_contains "render --dir rebuilds the requested board" "$flagboard" "Dir Flag Task"
+assert_contains "set --dir applies to the requested board" \
+	"$(awk '/^## Ready/{f=1} /^## In Progress/{f=0} f' <<<"$flagboard")" "Dir Flag Task"
+assert_not_contains "main board is untouched by --dir traffic" "$(cat "$DASH")" "Dir Flag Task"
+
+echo "== concurrent set serializes (no lost update) =="
+f_cs="$(t new --id API-4 --name "Concurrency Set Target")"
+concdir="$(mktemp -d)"
+concfail=0
+file_field() { grep -oP "^\\*\\*$1:\\*\\*\\s+\\K.*" "$f_cs"; }
+board_cell() { grep -F 'Concurrency Set Target' "$DASH" | cut -d'|' -f"$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+for round in 1 2 3 4 5 6 7 8 9 10 11 12; do
+	# Two writers update concurrently: one rewrites Priority, the other
+	# Updated. A stale read-modify-write reverts the other writer's field
+	# while both exit 0; under the board lock both values land no matter
+	# which writer goes first, so any mismatch is a lost update.
+	t set "$f_cs" Priority=Medium Updated="2020-01-01 00:00" >/dev/null
+	t set "$f_cs" Priority=High Updated="2030-01-01 12:00" >"$concdir/a.out" 2>&1 &
+	a_pid=$!
+	t set "$f_cs" Updated="2030-01-01 12:00" >"$concdir/b.out" 2>&1 &
+	b_pid=$!
+	wait "$a_pid"; a_code=$?
+	wait "$b_pid"; b_code=$?
+	[[ "$a_code" == 0 && "$b_code" == 0 ]] || concfail=$((concfail + 1))
+	[[ "$(file_field Priority)" == "High" ]] || concfail=$((concfail + 1))
+	[[ "$(file_field Updated)" == "2030-01-01 12:00" ]] || concfail=$((concfail + 1))
+	# The same lock covers each render, so the dashboard row must equal the file.
+	[[ "$(board_cell 3)" == "$(file_field Priority)" ]] || concfail=$((concfail + 1))
+	[[ "$(board_cell 5)" == "$(file_field Updated)" ]] || concfail=$((concfail + 1))
+done
+assert_eq "concurrent set loses no update across rounds" "0" "$concfail"
+rm -rf "$concdir"
+
+echo "== status enum validation =="
+t set "$f_cs" Status=Bogus >/dev/null 2>&1 && bad "set rejects an unknown status" || ok "set rejects an unknown status"
+assert_contains "rejected status leaves the file untouched" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cs")" "Triage"
+t new --id API-5 --name "Bogus Status Task" --status Bogus >/dev/null 2>&1 \
+	&& bad "new rejects an unknown status" || ok "new rejects an unknown status"
+if t set "$f_cs" Status=Blocked >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
+t set "$f_cs" Status=Triage >/dev/null
+
+echo "== malformed header resilience =="
+malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"
+cat >"$malformed" <<'EOF'
+# Task: Malformed Header
+
+**Status:**Weird No Space
+**Priority:**Medium
+**Updated:** 2024-01-01 11:00
+
+## Objective
+EOF
+if t render >/dev/null 2>&1; then ok "render survives a malformed header"; else bad "render survives a malformed header"; fi
+assert_contains "malformed status falls back to the Triage lane" \
+	"$(awk '/^## Triage/{f=1} /^## Ready/{f=0} f' <"$DASH")" "Malformed Header"
+mal_row="$(grep -F 'Malformed Header' "$DASH")"
+assert_contains "malformed priority falls back to the default" "$mal_row" "| Medium |"
+rm -f "$malformed"
+t render >/dev/null
+
+echo "== pipes and brackets in names/values render escaped =="
+f_pipe="$(t new --id API-6 --name "Piped | Name ](evil")"
+pipe_row="$(grep -F 'Piped' "$DASH")"
+assert_contains "pipe and brackets in name are escaped" "$pipe_row" 'Piped \| Name \](evil'
+assert_not_contains "raw pipe does not split the name cell" "$pipe_row" "Piped | Name"
+if t set "$f_pipe" 'Priority=High | Critical' >/dev/null 2>&1; then ok "set accepts a pipe-bearing value"; else bad "set accepts a pipe-bearing value"; fi
+t render >/dev/null
+pipe_row="$(grep -F 'Piped' "$DASH")"
+assert_contains "pipe in field value is escaped" "$pipe_row" 'High \| Critical'
+assert_not_contains "field pipe does not add a column" "$pipe_row" "High | Critical"
+# Repeated renders must stay byte-identical even with escaped content present
+esc_before="$(cat "$DASH")"
+t render >/dev/null
+esc_after="$(cat "$DASH")"
+assert_eq "render is byte-identical with escaped content on the board" "$esc_before" "$esc_after"
+rm -f "$f_pipe"
+t render >/dev/null
+
+echo "== claim/release with a stale sidecar =="
+printf '%s\n' "stale-session" >"$f_cs.claim"
+t claim "$f_cs" --owner newcomer >/dev/null 2>&1 \
+	&& bad "claim under a stale sidecar is rejected" || ok "claim under a stale sidecar is rejected"
+claim_err="$(t claim "$f_cs" --owner newcomer 2>&1 >/dev/null || true)"
+assert_contains "rejection names the stale owner" "$claim_err" "stale-session"
+t release "$f_cs" >/dev/null
+[[ ! -f "$f_cs.claim" ]] && ok "release removes the stale sidecar" || bad "release removes the stale sidecar"
+owner_now="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_cs" || true)"
+assert_eq "release clears Owner even for a stale claim" "" "${owner_now:-}"
+# With no sidecar present, a claim failure must be reported as a create
+# failure, not conflated with "already claimed".
+perm_dir="$TASKS_DIR/current"
+perm_mode="$(stat -c %a "$perm_dir")"
+chmod 500 "$perm_dir"
+perm_err="$(t claim "$f_cs" --owner someone 2>&1 >/dev/null || true)"
+chmod "$perm_mode" "$perm_dir"
+assert_contains "permission failure is reported as a create failure" "$perm_err" "cannot create"
+assert_not_contains "permission failure is not misreported as claimed" "$perm_err" "already claimed"
+if t claim "$f_cs" --owner newcomer >/dev/null 2>&1; then ok "claim succeeds after stale release"; else bad "claim succeeds after stale release"; fi
+t release "$f_cs" >/dev/null
+
+echo "== render stays byte-identical across repeated runs =="
+before="$(cat "$DASH")"
+t render >/dev/null
+mid="$(cat "$DASH")"
+t render >/dev/null
+after="$(cat "$DASH")"
+assert_eq "repeated renders are byte-identical" "$before" "$after"
+assert_eq "render output is stable between runs" "$mid" "$after"
+
 echo
 printf 'Result: \033[0;32m%d passed\033[0m, ' "$pass"
 if ((fail > 0)); then printf '\033[0;31m%d failed\033[0m\n' "$fail"; exit 1; fi
