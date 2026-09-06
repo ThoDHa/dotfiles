@@ -11,9 +11,11 @@ TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
 pass=0
 fail=0
+skip=0
 
 ok()   { printf '  \033[0;32m✓\033[0m %s\n' "$1"; pass=$((pass + 1)); }
 bad()  { printf '  \033[0;31m✗\033[0m %s\n' "$1"; fail=$((fail + 1)); }
+skip_test() { printf '  \033[0;33m- skipped\033[0m %s\n' "$1"; skip=$((skip + 1)); }
 
 assert_eq() { # label expected actual
 	if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (expected [$2], got [$3])"; fi
@@ -265,15 +267,22 @@ t release "$f_cs" >/dev/null
 [[ ! -f "$f_cs.claim" ]] && ok "release removes the stale sidecar" || bad "release removes the stale sidecar"
 owner_now="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_cs" || true)"
 assert_eq "release clears Owner even for a stale claim" "" "${owner_now:-}"
-# With no sidecar present, a claim failure must be reported as a create
-# failure, not conflated with "already claimed".
-perm_dir="$TASKS_DIR/current"
-perm_mode="$(stat -c %a "$perm_dir")"
-chmod 500 "$perm_dir"
-perm_err="$(t claim "$f_cs" --owner someone 2>&1 >/dev/null || true)"
-chmod "$perm_mode" "$perm_dir"
-assert_contains "permission failure is reported as a create failure" "$perm_err" "cannot create"
-assert_not_contains "permission failure is not misreported as claimed" "$perm_err" "already claimed"
+	# With no sidecar present, a claim failure must be reported as a create
+	# failure, not conflated with "already claimed". Root is immune to mode
+	# bits, so under root the chmod cannot provoke the failure and the
+	# assertions are skipped rather than run as happy-path no-ops.
+	if ((EUID == 0)); then
+		skip_test "permission failure is reported as a create failure (skipped under root)"
+		skip_test "permission failure is not misreported as claimed (skipped under root)"
+	else
+		perm_dir="$TASKS_DIR/current"
+		perm_mode="$(stat -c %a "$perm_dir")"
+		chmod 500 "$perm_dir"
+		perm_err="$(t claim "$f_cs" --owner someone 2>&1 >/dev/null || true)"
+		chmod "$perm_mode" "$perm_dir"
+		assert_contains "permission failure is reported as a create failure" "$perm_err" "cannot create"
+		assert_not_contains "permission failure is not misreported as claimed" "$perm_err" "already claimed"
+	fi
 if t claim "$f_cs" --owner newcomer >/dev/null 2>&1; then ok "claim succeeds after stale release"; else bad "claim succeeds after stale release"; fi
 t release "$f_cs" >/dev/null
 
@@ -288,5 +297,7 @@ assert_eq "render output is stable between runs" "$mid" "$after"
 
 echo
 printf 'Result: \033[0;32m%d passed\033[0m, ' "$pass"
-if ((fail > 0)); then printf '\033[0;31m%d failed\033[0m\n' "$fail"; exit 1; fi
-printf '%d failed\n' "$fail"
+if ((fail > 0)); then printf '\033[0;31m%d failed\033[0m' "$fail"; else printf '%d failed' "$fail"; fi
+if ((skip > 0)); then printf ', \033[0;33m%d skipped\033[0m' "$skip"; fi
+printf '\n'
+((fail == 0)) || exit 1
