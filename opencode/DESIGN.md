@@ -74,8 +74,18 @@ verifies logged work against each unit's objective, territory, and the
 actual changes, and runs the simplify-review loop without fixing
 anything; it executes nothing beyond read-only git. Discrepancies get
 one fix-and-re-review cycle, then escalate to the user rather than
-being hidden. Worker, verifier, and reviewer failures each retry once,
-then stop and ask.
+being hidden. Reviewer suggestions each get one disposition: small
+ones (mechanical, contained in the unit's changed files) are done
+now by a worker and re-verified once, big ones and any scope creep
+are deferred to their own new task as maybe-later work and proposed
+as the next one, and only suggestions that do not serve the user's
+intent may be declined, with a recorded reason. Every disposition is
+recorded (Decision Log
+under task files, the completion report otherwise), and undecided or
+unactioned suggestions are restated verbatim to the user when work
+stops; without task files the report is the only durable record.
+Worker, verifier, and reviewer failures each retry once, then stop
+and ask.
 
 ## Worktree isolation
 

@@ -125,9 +125,34 @@ When given a task:
    verification and review once. If the second round still reports the
    discrepancy, you MUST stop and report it to the user as unresolved;
    you MUST NOT hide or minimize it.
-9. You MUST report to the user: what was done, the verifier's results,
-   the reviewer's verdict and suggestions, and any discrepancies that
-   were found, resolved, or left unresolved.
+9. Every reviewer suggestion MUST receive exactly one disposition:
+   done now, deferred, or declined. Small ones (inside the unit's
+   territory, only files it already changed, mechanical: dead code,
+   a rename, an extractable helper, missed reuse) SHOULD be done
+   now: appended to the current task's tracking (child task file
+   under the task-files protocol, todo list otherwise), implemented
+   by a worker, verification and review repeated once; one that
+   resurfaces in that repeat MUST be deferred instead. Big ones
+   (needing their own planning and verification cycle, crossing
+   territory, or changing design beyond the unit's objective) MUST
+   be deferred: a new task (a Triage task file under the task-files
+   protocol, a todo entry otherwise), proposed as the next task at
+   completion. You MAY decline one that does not serve the user's
+   intent (churn without benefit, speculative generality), recording
+   the reason; scope creep is never a decline, it is deferred as
+   maybe-later work. When unsure whether the user would want it,
+   you MUST ask, batching the question per the delegation skill.
+10. You MUST report to the user: what was done, the verifier's
+    results, the reviewer's verdict, each suggestion's disposition,
+    and any discrepancies found, resolved, or left unresolved.
+
+No suggestion may be lost, and none done without a decision: record
+every disposition, in the task file's Decision Log under the
+task-files protocol and in your report otherwise, and when work
+stops before a disposition is decided or executed, restate every
+undecided or unactioned suggestion verbatim in your report. Todo
+entries do not outlive the session: without task files the report
+is the only durable record.
 
 You MUST keep the user informed throughout: announce each dispatch when it
 starts, report each unit's result as it completes, and batch significant
@@ -142,10 +167,9 @@ logical commit; workers return uncommitted work by default, and only
 you push. Staging MUST be scoped to the files the workers changed; you
 MUST NOT sweep in unrelated pre-existing changes. You MUST load the
 git-protocol skill before any staging, committing, or pushing.
-You MAY push when it seems correct to do so: when a unit of work is
-complete and verified, when the verifier's results are clean and the
-reviewer passed the combined result, or when the user asked. Once
-verification and review pass, push without waiting to be asked. You MUST
-NOT push half-finished or unverified work, and you MUST NOT push when
-the user has forbidden it. If clarification is needed, you MUST ask
-the user directly before dispatching work.
+You SHOULD push without waiting to be asked once a unit is complete,
+verified, with clean verifier results and a passing review, and
+whenever the user asked. You MUST NOT push half-finished or
+unverified work, and you MUST NOT push when the user has forbidden
+it. If clarification is needed, you MUST ask the user directly
+before dispatching work.
