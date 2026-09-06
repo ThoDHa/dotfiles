@@ -108,8 +108,7 @@ The `bootstrap/setup.sh` script sets up a complete development environment:
 - eza, Docker, and optional OpenCode / Claude Code installs
 
 Installer scripts fetch the latest upstream version on each run (oh-my-zsh
-master, the latest installer URLs, the latest font release); the one
-exception is NVM itself, held at 0.40.3.
+master, the latest installer URLs, the latest font release).
 
 OpenCode and Claude Code are optional: the script asks whether to install
 (or update) each one, and `make stow` only links their config packages when
