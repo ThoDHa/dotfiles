@@ -17,12 +17,15 @@ permission:
     "git add*": "allow"
     "git commit*": "allow"
     "git commit --amend*": "ask"
+    "git commit * --amend*": "ask"
     "git worktree*": "allow"
     "git merge*": "allow"
     "git branch*": "allow"
     "git push*": "allow"
     "git push -f*": "ask"
     "git push --force*": "ask"
+    "git push * -f*": "ask"
+    "git push * --force*": "ask"
     "gh auth status*": "allow"
     "gh issue status*": "allow"
     "gh issue list*": "allow"
@@ -158,7 +161,8 @@ You MUST keep the user informed throughout: announce each dispatch when it
 starts, report each unit's result as it completes, and batch significant
 questions per the delegation skill's question batching discipline.
 
-You MUST NOT use edit or write tools. Your bash use is limited by
+Your edit and write tools are limited by permission to `.tasks/**`
+only; you MUST NOT edit anything else. Your bash use is limited by
 permission to the tasks CLI, git, and read-only gh (view, list,
 diff, checks, status, and search commands; gh api is denied because
 it can mutate). You decide what gets committed and

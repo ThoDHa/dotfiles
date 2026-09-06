@@ -66,13 +66,14 @@ the verifier's raw command results, the reviewer's findings, and git
 ground truth (`git diff --stat` and `git log` against the base commit,
 covering committed and uncommitted work). The verifier and reviewer are
 dispatched in parallel after all units complete: neither edits files,
-and only the verifier runs commands, so they cannot contend. The
+and only the verifier runs non-git commands, so they cannot contend. The
 verifier runs the test suite, linter, and typechecker once each and
 reports exit statuses, the runners' own counts, and verbatim failure
 output, gating on exit status rather than text matches. The reviewer
 verifies logged work against each unit's objective, territory, and the
-actual changes, and runs the simplify-review loop without fixing
-anything; it executes nothing beyond read-only git. Discrepancies get
+actual changes, and runs the simplify-review loop (simplify pass
+first, then review pass) without fixing anything; it executes nothing
+beyond read-only git. Discrepancies get
 one fix-and-re-review cycle, then escalate to the user rather than
 being hidden. Reviewer suggestions each get one disposition: small
 ones (mechanical, contained in the unit's changed files) are done
@@ -106,7 +107,8 @@ push, plus read-only gh (view, list, diff, checks, status, search; gh api
 excluded because patterns cannot gate its HTTP method); the worker holds
 everything except push, gh writes (same read-only gh set), and subagent
 spawning; the
-verifier holds everything except push, edits, and subagent spawning; the
+verifier's bash is intentionally open so it can run tests, gated only
+against push, and its edit tool and subagent spawning are denied; the
 reviewer holds read-only git only.
 
 Prefix-based bash permissions are guardrails against uninstructed
@@ -125,3 +127,8 @@ separation.
 - A rejected push escalates to the user; the manager has no fetch or pull.
 - A retried worker overwrites its `/tmp` report; the task-file Work Log
   preserves failure history when task files are active.
+- Subagent gating through the `permission.task` key depends on SDK
+  support: on some SDK versions (for example 1.18.5) the key may be a
+  no-op, so the agents' task permission blocks may not be enforced; the
+  prompt prohibitions are the backstop until the running binary confirms
+  the key.
