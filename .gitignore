@@ -1,6 +1,3 @@
-# Backup directories
-.backup-before-stow/
-
 # Log files
 *.log
 
@@ -15,3 +12,6 @@ Thumbs.db
 
 # Task management artifacts
 .tasks/
+
+# Manager Mode worktrees
+.worktrees/

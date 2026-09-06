@@ -10,8 +10,11 @@
 # Bootstrap scripts and Docker (not dotfiles)
 ^bootstrap$
 
-# Windows-only configs (managed separately)
-^windows$
+# Repo data directories (never linked into $HOME)
+^\.tasks$
+^reference$
+^tests$
+^\.worktrees$
 
 # This file
 ^\.stow-local-ignore$

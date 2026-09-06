@@ -74,7 +74,13 @@ ZSH_THEME="robbyrussell"
 # Add wisely, as too many plugins slow down shell startup.
 #
 #
-plugins=( git z zsh-interactive-cd zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-syntax-highlighting)
+plugins=( git z zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-syntax-highlighting)
+
+# zsh-interactive-cd is optional and not installed by bootstrap; only request
+# it when its plugin directory exists.
+[[ -d ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-interactive-cd ]] && \
+    plugins+=( zsh-interactive-cd )
+
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
@@ -215,7 +221,12 @@ mkdir -p ~/.tmux/resurrect
 
 # Load the first key that exists; a fresh machine (or Termux install) may
 # have none yet, and ssh-add with a missing path just prints an error.
-eval $(ssh-agent) &> /dev/null
+# Reuse an agent that already answers (ssh-add -l exits 0 with keys, 1
+# with an empty agent); exit 2 means nothing is listening, so spawn one.
+ssh-add -l &> /dev/null
+if [[ -z $SSH_AUTH_SOCK || $? -eq 2 ]]; then
+    eval $(ssh-agent) &> /dev/null
+fi
 for _key in ~/.ssh/id_rsa ~/.ssh/id_ed25519; do
     [ -f "$_key" ] && ssh-add "$_key" &> /dev/null && break
 done

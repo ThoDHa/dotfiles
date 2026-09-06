@@ -23,7 +23,7 @@ OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
-.PHONY: all stow unstow restow install uninstall run build help bootstrap
+.PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
 .PHONY: clean-stow test test-links test-rules test-tasks test-termux
 .PHONY: sync-claudecode stow-claudecode
 
