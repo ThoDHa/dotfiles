@@ -8,6 +8,11 @@
 #   make bootstrap
 #
 
+# Fail loudly on unset variables and failed pipelines. -e is safe at top
+# level: run_step runs each step in an if-guarded subshell with its own
+# `set -e`, so one failed step is reported and the remaining steps still run.
+set -euo pipefail
+
 # ── Resolve dotfiles root regardless of call site ─────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -81,16 +86,19 @@ git_clone_or_pull() {
 gh_latest_tag() {
     local repo="$1" fallback="$2"
     local tag
-    tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-        | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    if ! tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+        | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/'); then
+        echo "  WARNING: could not fetch latest tag for $repo — falling back to $fallback" >&2
+    fi
     [ -n "$tag" ] && echo "$tag" || echo "$fallback"
 }
 
 _install_nvim() {
     local version="$1"
     echo "  Installing NeoVim $version..."
-    local tmp; tmp=$(mktemp -d)
     (
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
         cd "$tmp"
         curl -fLO "https://github.com/neovim/neovim/releases/download/${version}/nvim-linux-x86_64.appimage"
         chmod u+x nvim-linux-x86_64.appimage
@@ -99,13 +107,13 @@ _install_nvim() {
         sudo mv squashfs-root /opt/nvim
         sudo ln -sf /opt/nvim/AppRun /usr/local/bin/nvim
     )
-    rm -rf "$tmp"
 }
 
 _install_eza() {
     local version="$1" arch="$2"
-    local tmp; tmp=$(mktemp -d)
     (
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
         cd "$tmp"
         if curl -fLO "https://github.com/eza-community/eza/releases/download/${version}/eza_${arch}.tar.gz"; then
             tar -xzf "eza_${arch}.tar.gz"
@@ -115,26 +123,38 @@ _install_eza() {
             echo "  eza download failed — skipping"
         fi
     )
-    rm -rf "$tmp"
 }
 
 # Checksum of the carried tmux patches; part of the build stamp so that a
 # patch change triggers a rebuild even when the tmux version is unchanged.
 _tmux_patch_sum() {
-    cat "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch 2>/dev/null | md5sum | awk '{print $1}'
+    local sum
+    if ! sum=$(cat "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch 2>/dev/null | md5sum | awk '{print $1}'); then
+        echo "  No tmux patches found in $DOTFILES_DIR/bootstrap/patches" >&2
+        return 1
+    fi
+    echo "$sum"
 }
 
 _install_tmux() {
-    local version="$1"
+    local version="$1" p
     echo "  Building tmux $version from source..."
-    local tmp p; tmp=$(mktemp -d)
+    local -a tmux_patches=()
+    for p in "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch; do
+        if [ -e "$p" ]; then tmux_patches+=("$p"); fi
+    done
+    if [ ${#tmux_patches[@]} -eq 0 ]; then
+        echo "  No tmux patches found in $DOTFILES_DIR/bootstrap/patches — refusing to build unpatched" >&2
+        return 1
+    fi
     (
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
         cd "$tmp"
         curl -fLO "https://github.com/tmux/tmux/releases/download/${version}/tmux-${version}.tar.gz"
         tar -xzf "tmux-${version}.tar.gz"
         cd "tmux-${version}"
-        for p in "$DOTFILES_DIR"/bootstrap/patches/tmux-*.patch; do
-            [ -e "$p" ] || continue
+        for p in "${tmux_patches[@]}"; do
             echo "  Applying $(basename "$p")..."
             patch -p1 < "$p"
         done
@@ -142,7 +162,6 @@ _install_tmux() {
         make -j"$(nproc)"
         sudo make install
     )
-    rm -rf "$tmp"
     mkdir -p "$HOME/.local/state/dotfiles"
     echo "$version $(_tmux_patch_sum)" > "$HOME/.local/state/dotfiles/tmux-build-stamp"
 }
@@ -172,7 +191,7 @@ step_system_packages() {
     # libevent-dev/libncurses-dev/bison/pkg-config are tmux build deps: tmux is
     # built from source in step_tmux rather than installed from apt.
     sudo apt-get install -y \
-        git curl wget zip unzip tree stow \
+        git curl wget zip unzip tree stow patch \
         zsh \
         gcc make python3 python3-venv python3-dev python3-pip default-jdk \
         ripgrep fd-find bat util-linux \
@@ -218,7 +237,9 @@ step_zsh() {
     make -C "$DOTFILES_DIR" clean-stow
     make -C "$DOTFILES_DIR" restow-shell
 
-    if [ "$SHELL" != "$(command -v zsh)" ]; then
+    # SKIP_CHSH=1 (set by the Docker build) opts out: chsh does not work
+    # inside a container.
+    if [ "${SKIP_CHSH:-0}" != "1" ] && [ "${SHELL:-}" != "$(command -v zsh)" ]; then
         echo "  Setting zsh as default shell..."
         chsh -s "$(command -v zsh)"
     fi
@@ -227,7 +248,13 @@ step_zsh() {
 step_fzf() {
     git_clone_or_pull "fzf" "https://github.com/junegunn/fzf.git" "$HOME/.fzf" --depth 1
     if ! command -v fzf &>/dev/null; then
-        yes | "$HOME/.fzf/install" --no-update-rc
+        # The installer exits once it has its answers, so `yes` dies by
+        # SIGPIPE (141) on success; keep pipefail from reporting that as
+        # an installer failure.
+        local status=0
+        yes | "$HOME/.fzf/install" --no-update-rc || status=$?
+        [ "$status" -eq 141 ] && status=0
+        return "$status"
     fi
 }
 
@@ -241,7 +268,7 @@ step_tmux() {
     #      source build stays even once the distro package reaches 3.7+.
     local latest current="" stamp="" want
     latest=$(gh_latest_tag "tmux/tmux" "3.7b")
-    command -v tmux &>/dev/null && current=$(tmux -V 2>/dev/null | awk '{print $2}')
+    command -v tmux &>/dev/null && current=$(tmux -V 2>/dev/null | awk '{print $2}' || true)
     want="$latest $(_tmux_patch_sum)"
     [ -f "$HOME/.local/state/dotfiles/tmux-build-stamp" ] \
         && stamp=$(cat "$HOME/.local/state/dotfiles/tmux-build-stamp")
@@ -281,7 +308,7 @@ step_neovim() {
     local latest current=""
     latest=$(gh_latest_tag "neovim/neovim" "v0.10.2")
     command -v nvim &>/dev/null \
-        && current=$(nvim --version 2>/dev/null | sed -nE 's/NVIM (v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p')
+        && current=$(nvim --version 2>/dev/null | sed -nE 's/NVIM (v[0-9]+\.[0-9]+\.[0-9]+).*/\1/p' || true)
 
     if [ "$current" = "$latest" ]; then
         echo "  NeoVim $current is up to date"
@@ -313,7 +340,7 @@ step_eza() {
         _install_eza "$latest" "$arch"
     else
         local current
-        current=$(eza --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^/v/')
+        current=$(eza --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 | sed 's/^/v/' || true)
         if [ "$current" = "$latest" ]; then
             echo "  eza $current is up to date"
         else
@@ -323,43 +350,56 @@ step_eza() {
     fi
 }
 
+# Fetch <url> to a temp file and execute it. The floating installers always
+# install the latest release; the temp file keeps nothing piped straight from
+# the network into a shell.
+_run_floating_installer() {
+    (
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
+        cd "$tmp"
+        curl -fsSL "$1" -o install.sh
+        bash install.sh
+    )
+}
+
 step_opencode() {
     if ! command -v opencode &>/dev/null; then
         echo "  Installing opencode..."
-        curl -fsSL https://opencode.ai/install | bash
+        _run_floating_installer "https://opencode.ai/install"
         return
     fi
     local current latest
-    current=$(opencode --version 2>/dev/null | head -1)
+    current=$(opencode --version 2>/dev/null | head -1 | awk '{print $1}' || true)
     latest=$(curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest 2>/dev/null \
-        | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -1)
+        | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -1 || true)
     if [ -z "$latest" ]; then
         echo "  Could not fetch opencode version — skipping update"
     elif [ "$current" = "$latest" ]; then
         echo "  opencode $current is up to date"
     else
         echo "  Upgrading opencode $current → $latest..."
-        curl -fsSL https://opencode.ai/install | bash
+        _run_floating_installer "https://opencode.ai/install"
     fi
 }
 
 step_claude() {
     if ! command -v claude &>/dev/null; then
         echo "  Installing claude..."
-        curl -fsSL https://claude.ai/install.sh | bash
+        _run_floating_installer "https://claude.ai/install.sh"
         return
     fi
     local current latest
-    current=$(claude --version 2>/dev/null | awk '{print $1}')
+    current=$(claude --version 2>/dev/null | awk '{print $1}' || true)
     latest=$(curl -fsSL https://registry.npmjs.org/@anthropic-ai/claude-code/latest 2>/dev/null \
-        | grep -o '"version":"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+        | grep -o '"version":"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
     if [ -z "$latest" ]; then
         echo "  Could not fetch claude version — skipping update"
     elif [ "$current" = "$latest" ]; then
         echo "  claude $current is up to date"
     else
         echo "  Upgrading claude $current → $latest..."
-        curl -fsSL https://claude.ai/install.sh | bash
+        _run_floating_installer "https://claude.ai/install.sh"
     fi
 }
 
@@ -394,11 +434,15 @@ https://download.docker.com/linux/$ID $VERSION_CODENAME stable" \
         docker-ce docker-ce-cli containerd.io \
         docker-buildx-plugin docker-compose-plugin
 
-    if ! id -nG "$USER" | grep -qw docker; then
-        sudo usermod -aG docker "$USER"
-        echo "  Added $USER to docker group (run 'newgrp docker' or log out/in)"
+    # USER is not exported in non-interactive contexts (Docker builds), so
+    # resolve the invoking user from the process instead of the environment.
+    local user="${USER:-$(id -un)}"
+
+    if ! id -nG "$user" | grep -qw docker; then
+        sudo usermod -aG docker "$user"
+        echo "  Added $user to docker group (run 'newgrp docker' or log out/in)"
     else
-        echo "  $USER already in docker group"
+        echo "  $user already in docker group"
     fi
 
     sudo systemctl enable --now docker 2>/dev/null \

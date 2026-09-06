@@ -5,11 +5,10 @@ Personal configuration files managed with [GNU Stow](https://www.gnu.org/softwar
 ## Quick Start
 
 ```bash
-# Clone, stow configs, and bootstrap everything
+# Clone and bootstrap everything (tools + configs)
 git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
 cd ~/dotfiles
-make stow
-./bootstrap/install.sh
+make bootstrap
 
 # Restart shell when done
 exec zsh
@@ -32,9 +31,8 @@ dotfiles/
 ├── shell/              # Zsh configuration
 │   └── .zshrc          # -> ~/.zshrc
 ├── tmux/               # Tmux configuration
-│   └── .tmux.conf      # -> ~/.tmux.conf
-├── scripts/            # Custom scripts
-│   └── .local/bin/
+│   ├── .tmux.conf      # -> ~/.tmux.conf
+│   └── .local/bin/     # -> ~/.local/bin
 │       ├── tmux-sessionizer
 │       └── tmux-windowizer
 ├── isort/              # Python isort config
@@ -44,18 +42,22 @@ dotfiles/
 │   └── .config/opencode/
 │       ├── opencode.json
 │       └── rules/      # RFC 2119 specification files
+├── claudecode/         # Claude Code settings
+│   └── .claude/        # -> ~/.claude (stowed only when claude is installed)
 ├── agents/             # Shared agent skills (opencode, Claude Code, pi)
 │   └── .agents/skills/
 │       ├── delegation/SKILL.md
 │       └── task-files/SKILL.md
 ├── bootstrap/          # Setup scripts (not stowed)
-│   ├── install.sh
-│   ├── opencode-install.sh
+│   ├── setup.sh        # Desktop (Debian/Ubuntu) bootstrap
+│   ├── termux.sh       # Android (Termux) bootstrap
+│   ├── patches/        # tmux source patches applied by setup.sh
 │   └── Dockerfile
 ├── reference/          # Template configs (not stowed)
 │   ├── markdownlint.json
 │   ├── PowerToys/
 │   └── windows_terminal_settings.json
+├── tests/              # Host-side tests (make test)
 ├── Makefile
 └── README.md
 ```
@@ -84,8 +86,7 @@ dotfiles/
 | Package | Target | Description |
 |---------|--------|-------------|
 | `shell` | `~/.zshrc` | Zsh config with oh-my-zsh, FZF, aliases |
-| `tmux` | `~/.tmux.conf` | Tmux config with TPM plugins, rose-pine theme |
-| `scripts` | `~/.local/bin/` | tmux-sessionizer and tmux-windowizer |
+| `tmux` | `~/.tmux.conf`, `~/.local/bin/` | Tmux config with TPM plugins, rose-pine theme, plus tmux-sessionizer and tmux-windowizer |
 | `isort` | `~/.config/isort/` | Python import sorter config |
 | `opencode` | `~/.config/opencode/` | OpenCode AI rules; stowed only when `opencode` is installed |
 | `claudecode` | `~/.claude/` | Claude Code settings and skills link; stowed only when `claude` is installed |
@@ -93,16 +94,22 @@ dotfiles/
 
 ## Bootstrap
 
-The `bootstrap/install.sh` script sets up a complete development environment:
+The `bootstrap/setup.sh` script sets up a complete development environment:
 
-- System packages (git, curl, zsh, tmux, ripgrep, etc.)
+- System packages (git, curl, zsh, ripgrep, etc.)
 - oh-my-zsh with plugins (syntax highlighting, autosuggestions, completions)
 - fzf (fuzzy finder)
-- TPM (Tmux Plugin Manager) with plugin installation
+- tmux built from source with the local patches in `bootstrap/patches/`
+  (duplicate device-attribute replies from some terminals leak into panes
+  on stock builds), plus TPM and plugin installation
 - NeoVim (latest version via AppImage)
 - NeoVim configuration from [ThoDHa/nvim](https://github.com/ThoDHa/nvim)
 - NVM with Node.js LTS
-- OpenCode configuration symlinks
+- eza, Docker, and optional OpenCode / Claude Code installs
+
+Installer scripts fetch the latest upstream version on each run (oh-my-zsh
+master, the latest installer URLs, the latest font release); the one
+exception is NVM itself, held at 0.40.3.
 
 OpenCode and Claude Code are optional: the script asks whether to install
 (or update) each one, and `make stow` only links their config packages when
