@@ -54,6 +54,8 @@ Implementations MUST maintain these behavioral standards:
 
 When a task generates 4 or more todo items, implementations MUST pause and present execution options to the user.
 
+The prompt is satisfied and MUST NOT be re-asked when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent).
+
 ### Required Prompt
 
 Implementations MUST present the following options:
@@ -122,6 +124,7 @@ These requirements apply to ALL parallel operations, including standard parallel
 - **Boundary isolation**: assign agents separate modules, directories, or concerns
 - **Shared state coordination**: sequence modifications to shared configuration or state
 - **Pre-dispatch verification**: before dispatching, verify each agent has distinct territory, no two agents write the same file, and dependencies are respected
+- **Runtime footprint disjointness**: parallel units MUST NOT share ports, databases, package installs, caches, build outputs, or git write operations, since verification reading a sibling's half-written state produces false results; units whose verification steps contend MUST run sequentially
 
 If conflicts are unavoidable, run the conflicting tasks sequentially, unless git worktree isolation removes the conflict and preserves parallelism. The full protocol, including worktree teardown, lives in the `delegation` skill.
 
