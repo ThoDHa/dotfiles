@@ -32,7 +32,7 @@ A "fix" is any change applied during the iteration, from either pass.
 - After applying any fix, re-run the test suite (where tests exist) to confirm no regressions
 - The loop repeats as long as an iteration produced at least one fix
 - The loop **converges** when one complete iteration produces **no fixes**
-- Cap at a reasonable iteration count (default: 5). If not converged at the cap, stop, document outstanding findings, and consult the user before reporting the task complete
+- Cap at 5 iterations unless the user explicitly approves a higher cap. If not converged at the cap, stop, document outstanding findings, and consult the user before reporting the task complete
 
 ---
 
