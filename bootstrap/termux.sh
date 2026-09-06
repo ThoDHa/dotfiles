@@ -10,6 +10,11 @@
 # Usage:
 #   ./bootstrap/termux.sh
 
+# Fail loudly on unset variables and failed pipelines. -e is safe at top
+# level: run_step runs each step in an if-guarded subshell with its own
+# `set -e`, so one failed step is reported and the remaining steps still run.
+set -euo pipefail
+
 # ── Termux guard ──────────────────────────────────────────────────────────────
 if [ -z "${TERMUX_VERSION:-}" ] && ! echo "${PREFIX:-}" | grep -q com.termux; then
     echo "This script is for Termux on Android only. Use bootstrap/setup.sh elsewhere." >&2
@@ -107,15 +112,15 @@ step_font() {
         return 0
     fi
     echo "  Installing JetBrainsMono Nerd Font..."
-    local tmp; tmp=$(mktemp -d)
     (
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
         cd "$tmp"
         curl -fLO "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip"
         unzip -o JetBrainsMono.zip "JetBrainsMonoNerdFont-Regular.ttf"
         mkdir -p "$HOME/.termux"
         mv JetBrainsMonoNerdFont-Regular.ttf "$HOME/.termux/font.ttf"
     )
-    rm -rf "$tmp"
     command -v termux-reload-settings &>/dev/null && termux-reload-settings
 }
 
