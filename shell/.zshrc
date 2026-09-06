@@ -74,12 +74,16 @@ ZSH_THEME="robbyrussell"
 # Add wisely, as too many plugins slow down shell startup.
 #
 #
-plugins=( git z zsh-autosuggestions zsh-completions fancy-ctrl-z zsh-syntax-highlighting)
+plugins=( git z zsh-autosuggestions zsh-completions fancy-ctrl-z)
 
 # zsh-interactive-cd is optional and not installed by bootstrap; only request
 # it when its plugin directory exists.
 [[ -d ${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-interactive-cd ]] && \
     plugins+=( zsh-interactive-cd )
+
+# zsh-syntax-highlighting must stay the last plugin (oh-my-zsh convention),
+# so it is appended after everything else.
+plugins+=( zsh-syntax-highlighting )
 
 source $ZSH/oh-my-zsh.sh
 

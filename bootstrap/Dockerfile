@@ -1,11 +1,12 @@
 FROM debian:stable
 
 # DEBIAN_FRONTEND inline so it doesn't persist into runtime environment.
-# sudo curl git make patch are needed before setup.sh's own apt step: the
-# first bootstrap step stows via the repo Makefile, and the tmux build
-# applies the carried patches.
+# sudo and make are needed before setup.sh's own apt step: the first bootstrap
+# step stows via the repo Makefile and apt-installs stow through sudo; curl,
+# git, and ca-certificates back the bootstrap's network installs. patch is not
+# pre-installed here because setup.sh installs it before the tmux build needs it.
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
-    && apt-get install -y --no-install-recommends sudo curl git make patch ca-certificates \
+    && apt-get install -y --no-install-recommends sudo curl git make ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/dotfiles
