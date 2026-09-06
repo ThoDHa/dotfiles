@@ -48,6 +48,8 @@ Solo persists until the user announces resources ("now you have 2 agents"), requ
 
 In Manager Mode (Delegating), implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds. When uncertain whether to execute directly or delegate, implementations MUST delegate.
 
+### Direct Execution Exceptions
+
 The manager MUST execute directly: quick tasks (< 30 seconds), planning and strategic thinking, coordinating between agents, synthesizing reports from multiple agents, communicating with the user, and tactical decisions requiring judgment.
 
 **Solo exception**: in Manager Mode (Solo) the manager inverts the rule and MUST execute all tasks directly, including the delegable items above, regardless of duration or complexity, while Solo state persists.
@@ -107,7 +109,7 @@ Update frequency: short tasks get a summary at completion; long tasks get period
 
 ### Question Batching Discipline
 
-In Manager Mode (Delegating), questions arise from delegated agents and the manager's own decisions while parallel work is in flight. The manager MUST handle them so the user is interrupted no more than necessary. This discipline applies to all delegating work, whether or not it is recorded in a task file (when it is, see Question Tracking in the `task-files` skill).
+In Manager Mode (both Delegating and Solo), questions arise from delegated agents, the manager's own decisions, and the work the manager executes directly. The manager MUST handle them so the user is interrupted no more than necessary. This discipline applies to all Manager Mode work, whether or not it is recorded in a task file (when it is, see Question Tracking in the `task-files` skill).
 
 **Classification** by impact:
 
