@@ -52,7 +52,7 @@ Project Root/
         └── YYYYMMDD-HHMM-task-description.md      # Archived task files
 ```
 
-Only `dashboard.md` sits at the top of `.tasks/`; every individual task file lives in `current/` or `archive/`. When a task is moved to the dashboard's Archive table, its file MUST be moved from `current/` into `archive/`. The directory is task-specific; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
+Only `dashboard.md` sits at the top of `.tasks/`; every individual task file lives in `current/` or `archive/`. When a task is moved to the dashboard's Archive table, its file MUST be moved from `current/` into `archive/`. The directory is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
 
 ### Gitignore Recommendation
 
@@ -349,6 +349,8 @@ A child task file MUST be registered in the master index dashboard and move betw
 6. **Refactor If Needed:** improve quality while maintaining coverage; document significant refactoring
 7. **Final Verification:** run tests again to ensure no regressions
 8. **Simplify and Review Loop:** run the loop below to convergence
+
+For tasks producing no testable behavior (documentation-only, configuration-only), steps 2 through 5 are vacuous; record this in the task's Testing Strategy line.
 
 ### Simplify and Review Loop
 
@@ -704,7 +706,7 @@ This is the file-based bookkeeping for the question policy canonical in the `del
 | **Resolved** | User answered, resolution recorded |
 | **Cancelled** | No longer relevant, reason recorded |
 
-Permitted transitions: `Open → Self-Answered`; `Open → Queued → Blocking → Asked → Resolved`; `Queued → Asked → Resolved`; any Queued/Blocking/Asked state `→ Cancelled` with a recorded reason.
+Permitted transitions: `Open → Self-Answered`; `Open → Queued → Blocking → Asked → Resolved`; `Queued → Asked → Resolved`; any non-terminal state `→ Cancelled` with a recorded reason.
 
 ### Question Log and Queue Format
 
@@ -712,12 +714,12 @@ The Question Queue MUST be kept current in real time per [Real-Time Updates](#re
 
 ```
 Question Log (Basic, self-answered):
-- [Timestamp] Q (source: API-001 agent): [question]
+- [Timestamp] Q (source: API-1 agent): [question]
   - Answer: [manager answer]
   - Rationale: [why answering autonomously was justified]
 
 Question Queue (Significant):
-- [Timestamp] Q (source: API-002 agent): [question]
+- [Timestamp] Q (source: API-2 agent): [question]
   - State: Queued | Blocking | Asked | Resolved | Cancelled
   - Blocks: [task IDs, or "none yet"]
   - Resolution: [user answer once Resolved]
