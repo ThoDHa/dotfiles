@@ -109,9 +109,10 @@ header_created() {
 
 # Make a value safe inside a dashboard table cell: escape the backslash first,
 # then pipes and brackets (table and link syntax), and collapse newlines so a
-# row stays a single line.
+# row stays a single line. Writes the result into the variable named by the
+# first argument (printf -v), so rendering a cell never forks a subshell.
 md_escape() {
-	local s="${1:-}"
+	local s="${2:-}"
 	local nl=$'\n' cr=$'\r'
 	s="${s//\\/\\\\}"
 	s="${s//"$nl"/ }"
@@ -119,13 +120,16 @@ md_escape() {
 	s="${s//|/\\|}"
 	s="${s//[/\\[}"
 	s="${s//]/\\]}"
-	printf '%s' "$s"
+	printf -v "$1" '%s' "$s"
 }
 
 # Markdown-link a task's name to its file, relative to the dashboard.
 task_link() {
 	local subdir="$1" file="$2" name="$3"
-	printf '[%s](./%s/%s)' "$(md_escape "$name")" "$subdir" "$(md_escape "$(basename "$file")")"
+	local esc_name esc_file
+	md_escape esc_name "$name"
+	md_escape esc_file "${file##*/}"
+	printf '[%s](./%s/%s)' "$esc_name" "$subdir" "$esc_file"
 }
 
 # Normalize a progress value to "<n>%"; empty becomes 0%.
@@ -155,14 +159,15 @@ render_unlocked() {
 	local triage=() ready=() inprogress=() blocked=() completed=() archive=()
 	local newest=""
 
-	local subdir file hdr name status priority progress created updated completed_at duration link
+	local subdir file hdr name status priority progress created updated completed_at duration link prog
+	local esc_priority esc_created esc_updated esc_status esc_prog esc_completed_at esc_duration
 	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
 		[[ -d "$tasks_dir/$subdir" ]] || continue
 		for file in "$tasks_dir/$subdir"/*.md; do
 			[[ -e "$file" ]] || continue
 			hdr="$(header_of "$file")"
 			name="$(printf '%s\n' "$hdr" | header_name)"
-			[[ -z "$name" ]] && name="$(basename "$file" .md)"
+			[[ -z "$name" ]] && { name="${file##*/}"; name="${name%.md}"; }
 			status="$(printf '%s\n' "$hdr" | header_field "Status")"
 			priority="$(printf '%s\n' "$hdr" | header_field "Priority")"
 			progress="$(printf '%s\n' "$hdr" | header_field "Progress")"
@@ -177,16 +182,28 @@ render_unlocked() {
 			if [[ -n "$updated" && "$updated" > "$newest" ]]; then newest="$updated"; fi
 
 			if [[ "$subdir" == "$ARCHIVE_DIR" ]]; then
-				archive+=("| $link | $(md_escape "${completed_at:-$NA}") | $(md_escape "$duration") |")
+				md_escape esc_completed_at "${completed_at:-$NA}"
+				md_escape esc_duration "$duration"
+				archive+=("| $link | $esc_completed_at | $esc_duration |")
 				continue
 			fi
+			md_escape esc_priority "$priority"
+			md_escape esc_created "$created"
+			md_escape esc_updated "$updated"
+			md_escape esc_status "$status"
 			case "$status" in
-				"$STATUS_TRIAGE")   triage+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
-				"$STATUS_READY")    ready+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
-				"$STATUS_IN_PROGRESS") inprogress+=("| $link | $(md_escape "$(normalize_progress "$progress")") | $(md_escape "$updated") | $(md_escape "$priority") |") ;;
-				"$STATUS_BLOCKED"|"$STATUS_CANCELLED") blocked+=("| $link | $(md_escape "$status") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
-				"$STATUS_COMPLETED") completed+=("| $link | $(md_escape "${completed_at:-$updated}") | $(md_escape "$duration") |") ;;
-				*) triage+=("| $link | $(md_escape "$priority") | $(md_escape "$created") | $(md_escape "$updated") |") ;;
+				"$STATUS_TRIAGE")   triage+=("| $link | $esc_priority | $esc_created | $esc_updated |") ;;
+				"$STATUS_READY")    ready+=("| $link | $esc_priority | $esc_created | $esc_updated |") ;;
+				"$STATUS_IN_PROGRESS")
+					prog="$(normalize_progress "$progress")"
+					md_escape esc_prog "$prog"
+					inprogress+=("| $link | $esc_prog | $esc_updated | $esc_priority |") ;;
+				"$STATUS_BLOCKED"|"$STATUS_CANCELLED") blocked+=("| $link | $esc_status | $esc_created | $esc_updated |") ;;
+				"$STATUS_COMPLETED")
+					md_escape esc_completed_at "${completed_at:-$updated}"
+					md_escape esc_duration "$duration"
+					completed+=("| $link | $esc_completed_at | $esc_duration |") ;;
+				*) triage+=("| $link | $esc_priority | $esc_created | $esc_updated |") ;;
 			esac
 		done
 	done
@@ -309,7 +326,7 @@ cmd_new() {
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	[[ -d "$tasks_dir/$CURRENT_DIR" ]] || die "no .tasks directory at $tasks_dir (run 'tasks init')"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 
 	local ts; ts="$(now)"
