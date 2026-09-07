@@ -130,6 +130,9 @@ const PROTECTED_PRESSURE_BUNDLE_CHARS =
 const PROTECTED_PRESSURE_DEFICIT_TOKENS = PROTECTED_OUTPUT_BYTES / CHARS_PER_TOKEN
 const STASH_SESSION_BOUND = 8
 const STASH_SESSION_OVERFLOW_COUNT = 9
+const STASH_MISS_PROBE_SUBJECT = "/data/stash-probe-miss.txt"
+const LIMIT_SESSION_BOUND = 8
+const LIMIT_SESSION_OVERFLOW_COUNT = 9
 const RENDERED_SUBJECT_CAP = 160
 const ELLIPSIS_MARKER = "…"
 const HEREDOC_LINE = "printf segment\n"
@@ -1700,7 +1703,11 @@ test("read_evicted drops the least recently active session stash when a ninth se
 
   assert.equal(
     await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
-    stashMissFor(stashSessionSubject(0)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(1), stashSessionId(1)),
+    stashMissFor(stashSessionSubject(1)),
   )
   assert.equal(
     await readEvicted(hooks, stashSessionSubject(STASH_SESSION_BOUND - 1), stashSessionId(STASH_SESSION_BOUND - 1)),
@@ -1731,6 +1738,78 @@ test("read_evicted protects a refreshed hot session stash when a ninth session s
     await readEvicted(hooks, stashSessionSubject(STASH_SESSION_OVERFLOW_COUNT - 1), stashSessionId(STASH_SESSION_OVERFLOW_COUNT - 1)),
     outputOfBytes(MIN_EVICTABLE_BYTES),
   )
+})
+
+test("read_evicted refreshes a reloading session stash so it survives when a ninth session stashes an eviction", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < STASH_SESSION_BOUND; index += 1) await evictStashSession(hooks, index)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+
+  await evictStashSession(hooks, STASH_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(1), stashSessionId(1)),
+    stashMissFor(stashSessionSubject(1)),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_OVERFLOW_COUNT - 1), stashSessionId(STASH_SESSION_OVERFLOW_COUNT - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+})
+
+test("read_evicted does not refresh a session stash on a miss probe so the probing session drops when a ninth session stashes an eviction", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < STASH_SESSION_BOUND; index += 1) await evictStashSession(hooks, index)
+
+  assert.equal(
+    await readEvicted(hooks, STASH_MISS_PROBE_SUBJECT, stashSessionId(0)),
+    stashMissFor(STASH_MISS_PROBE_SUBJECT),
+  )
+
+  await evictStashSession(hooks, STASH_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    stashMissFor(stashSessionSubject(0)),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(1), stashSessionId(1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_OVERFLOW_COUNT - 1), stashSessionId(STASH_SESSION_OVERFLOW_COUNT - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+})
+
+const limitSessionId = (index: number): string => `lru-limit-session-${index}`
+
+test("chat params drops the least recently informed session limit when a ninth session stores a context limit", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < LIMIT_SESSION_BOUND; index += 1) {
+    await setContextLimit(hooks, limitSessionId(index), WATERMARK_PROBE_CONTEXT_LIMIT)
+  }
+  await setContextLimit(hooks, limitSessionId(0), WATERMARK_PROBE_CONTEXT_LIMIT)
+  await setContextLimit(hooks, limitSessionId(LIMIT_SESSION_OVERFLOW_COUNT - 1), WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const refreshed = buildStandardBundle(limitSessionId(0), "/data/limit-refreshed.txt")
+  const evicted = buildStandardBundle(limitSessionId(1), "/data/limit-evicted.txt")
+  const newest = buildStandardBundle(limitSessionId(LIMIT_SESSION_OVERFLOW_COUNT - 1), "/data/limit-newest.txt")
+  await runTransform(hooks, refreshed)
+  await runTransform(hooks, evicted)
+  await runTransform(hooks, newest)
+
+  assert.ok(toolPartAt(refreshed.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
+  assert.equal(toolPartAt(evicted.messages[0], 0).state.output, outputOfBytes(MIN_EVICTABLE_BYTES))
+  assert.ok(toolPartAt(newest.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
 })
 
 const truncatedRenderOf = (raw: string): string => {

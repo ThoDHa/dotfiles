@@ -25,6 +25,7 @@ const PATH_RANGE_SEPARATOR = ":"
 const RANGE_SEPARATOR = "-"
 const DEFAULT_STASH_LIMIT = 50
 const MAX_STASH_SESSIONS = 8
+const MAX_LIMIT_SESSIONS = 8
 const RELOAD_TOOL_NAME = "read_evicted"
 const RELOAD_ARG_NAME = "subject"
 const RELOAD_TOOL_DESCRIPTION =
@@ -265,18 +266,32 @@ const buildReloadPointer = (subject: string): string =>
 const stashKeyOf = (tool: string, subject: string, msgIndex: number, partIndex: number): string =>
   `${tool}:${subject}:${msgIndex}:${partIndex}`
 
-const stashForSession = (stashes: StashStore, sessionKey: string): SessionStash => {
-  const existing = stashes.get(sessionKey)
-  if (existing !== undefined) {
-    stashes.delete(sessionKey)
-    stashes.set(sessionKey, existing)
-    return existing
-  }
-  while (stashes.size >= MAX_STASH_SESSIONS) {
-    const leastRecentlyActive = stashes.keys().next()
+const touchMapEntry = <T>(map: Map<string, T>, key: string): T | undefined => {
+  const existing = map.get(key)
+  if (existing === undefined) return undefined
+  map.delete(key)
+  map.set(key, existing)
+  return existing
+}
+
+const trimMapToBound = <T>(map: Map<string, T>, bound: number): void => {
+  while (map.size >= bound) {
+    const leastRecentlyActive = map.keys().next()
     if (leastRecentlyActive.done === true) break
-    stashes.delete(leastRecentlyActive.value)
+    map.delete(leastRecentlyActive.value)
   }
+}
+
+const rememberSessionLimit = (limits: Map<string, number>, sessionID: string, context: number): void => {
+  limits.delete(sessionID)
+  trimMapToBound(limits, MAX_LIMIT_SESSIONS)
+  limits.set(sessionID, context)
+}
+
+const stashForSession = (stashes: StashStore, sessionKey: string): SessionStash => {
+  const touched = touchMapEntry(stashes, sessionKey)
+  if (touched !== undefined) return touched
+  trimMapToBound(stashes, MAX_STASH_SESSIONS)
   const created: SessionStash = new Map()
   stashes.set(sessionKey, created)
   return created
@@ -323,9 +338,11 @@ const sessionKeyFromContext = (toolContext: unknown): string => {
 const executeReadEvicted = (stashes: StashStore, args: unknown, toolContext: unknown): string => {
   const subject = typeof args === "object" && args !== null ? (args as { subject?: unknown }).subject : undefined
   if (typeof subject !== "string" || subject.length === 0) return invalidSubjectTextFor(typeof subject)
-  const stash = stashes.get(sessionKeyFromContext(toolContext))
+  const sessionKey = sessionKeyFromContext(toolContext)
+  const stash = stashes.get(sessionKey)
   const matches = stash === undefined ? [] : stashedMatchesFor(stash, subject)
   if (matches.length === 0) return stashMissTextFor(subject)
+  touchMapEntry(stashes, sessionKey)
   const newest = matches[matches.length - 1]
   const older = matches.slice(0, -1)
   return older.length === 0 ? newest.output : `${newest.output}\n${olderMatchesLineFor(subject, older)}`
@@ -463,14 +480,15 @@ export default (async (_input, rawOptions) => {
   return {
     "chat.params": async (input: { sessionID: string; model?: { limit?: { context?: number } } }) => {
       const context = input.model?.limit?.context
-      if (typeof context === "number" && context > 0) contextTokensBySession.set(input.sessionID, context)
+      if (typeof context === "number" && context > 0) rememberSessionLimit(contextTokensBySession, input.sessionID, context)
     },
     "experimental.chat.messages.transform": async (_input: unknown, output: { messages: MessageBundle[] }) => {
       const messages = output.messages
       if (!Array.isArray(messages) || messages.length === 0) return
       const sessionID = messages[0]?.info?.sessionID
       const sessionKey = typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
-      const contextTokens = (sessionID !== undefined ? contextTokensBySession.get(sessionID) : undefined) ?? options.defaultContextTokens
+      const contextTokens =
+        (sessionID !== undefined ? touchMapEntry(contextTokensBySession, sessionID) : undefined) ?? options.defaultContextTokens
       const sessionStash = stashForSession(stashBySession, sessionKey)
       deduplicateToolOutputs(messages, options)
       purgeErroredToolInputs(messages, options)
