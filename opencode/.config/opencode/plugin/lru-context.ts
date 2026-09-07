@@ -4,6 +4,8 @@ const EVICTION_MARKER = "[lru-evicted]"
 const HINT_MARKER = "[lru-hot]"
 const HINT_LABEL = "recently active:"
 const SUBJECT_SEPARATOR = ", "
+const MAX_RENDERED_SUBJECT_CHARS = 160
+const ELLIPSIS_MARKER = "…"
 const CHARS_PER_TOKEN = 4
 const DEFAULT_WATERMARK_RATIO = 0.5
 const DEFAULT_RECENT_WINDOW_MESSAGES = 4
@@ -22,6 +24,7 @@ const UNKNOWN_TARGET_LABEL = "unknown target"
 const PATH_RANGE_SEPARATOR = ":"
 const RANGE_SEPARATOR = "-"
 const DEFAULT_STASH_LIMIT = 50
+const MAX_STASH_SESSIONS = 8
 const RELOAD_TOOL_NAME = "read_evicted"
 const RELOAD_ARG_NAME = "subject"
 const RELOAD_TOOL_DESCRIPTION =
@@ -74,6 +77,7 @@ type EvictableEntry = {
   stateRef: { output: string }
   tool: string
   msgIndex: number
+  partIndex: number
   lastTouch: number
   bytes: number
   subjects: Subject[]
@@ -97,9 +101,12 @@ type StashEntry = {
   tool: string
   subject: string
   msgIndex: number
+  partIndex: number
 }
 
 type SessionStash = Map<string, StashEntry>
+
+type StashStore = Map<string, SessionStash>
 
 const resolveOptions = (raw: LruContextOptions = {}): ResolvedOptions => ({
   watermark: typeof raw.watermark === "number" && raw.watermark > 0 && raw.watermark < 1 ? raw.watermark : DEFAULT_WATERMARK_RATIO,
@@ -145,8 +152,15 @@ const subjectsOf = (tool: string, input: Record<string, unknown>): Subject[] => 
   return subjects
 }
 
-const renderSubject = (subject: Subject): string =>
-  subject.range ? `${subject.path}${PATH_RANGE_SEPARATOR}${subject.range.start}${RANGE_SEPARATOR}${subject.range.end}` : subject.path
+const renderSubject = (subject: Subject): string => {
+  const rendered = subject.range
+    ? `${subject.path}${PATH_RANGE_SEPARATOR}${subject.range.start}${RANGE_SEPARATOR}${subject.range.end}`
+    : subject.path
+  const singleLine = rendered.replaceAll("\n", " ")
+  return singleLine.length > MAX_RENDERED_SUBJECT_CHARS
+    ? `${singleLine.slice(0, MAX_RENDERED_SUBJECT_CHARS - ELLIPSIS_MARKER.length)}${ELLIPSIS_MARKER}`
+    : singleLine
+}
 
 const appearanceTouches = (entrySubjects: Subject[], appearance: ToolAppearance): boolean =>
   appearance.subjects.some((appearanceSubject) =>
@@ -248,11 +262,21 @@ const buildTombstone = (tool: string, subject: string, bytes: number, messagesAg
 const buildReloadPointer = (subject: string): string =>
   `${RELOAD_POINTER_LEAD} ${RELOAD_TOOL_NAME} (subject "${subject}").`
 
-const stashKeyOf = (tool: string, subject: string, msgIndex: number): string => `${tool}:${subject}:${msgIndex}`
+const stashKeyOf = (tool: string, subject: string, msgIndex: number, partIndex: number): string =>
+  `${tool}:${subject}:${msgIndex}:${partIndex}`
 
-const stashForSession = (stashes: Map<string, SessionStash>, sessionKey: string): SessionStash => {
+const stashForSession = (stashes: StashStore, sessionKey: string): SessionStash => {
   const existing = stashes.get(sessionKey)
-  if (existing) return existing
+  if (existing !== undefined) {
+    stashes.delete(sessionKey)
+    stashes.set(sessionKey, existing)
+    return existing
+  }
+  while (stashes.size >= MAX_STASH_SESSIONS) {
+    const leastRecentlyActive = stashes.keys().next()
+    if (leastRecentlyActive.done === true) break
+    stashes.delete(leastRecentlyActive.value)
+  }
   const created: SessionStash = new Map()
   stashes.set(sessionKey, created)
   return created
@@ -267,7 +291,7 @@ const trimStash = (stash: SessionStash): void => {
 }
 
 const stashEvictedOutput = (stash: SessionStash, entry: StashEntry): void => {
-  stash.set(stashKeyOf(entry.tool, entry.subject, entry.msgIndex), entry)
+  stash.set(stashKeyOf(entry.tool, entry.subject, entry.msgIndex, entry.partIndex), entry)
   trimStash(stash)
 }
 
@@ -296,7 +320,7 @@ const sessionKeyFromContext = (toolContext: unknown): string => {
   return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
 }
 
-const executeReadEvicted = (stashes: Map<string, SessionStash>, args: unknown, toolContext: unknown): string => {
+const executeReadEvicted = (stashes: StashStore, args: unknown, toolContext: unknown): string => {
   const subject = typeof args === "object" && args !== null ? (args as { subject?: unknown }).subject : undefined
   if (typeof subject !== "string" || subject.length === 0) return invalidSubjectTextFor(typeof subject)
   const stash = stashes.get(sessionKeyFromContext(toolContext))
@@ -318,14 +342,13 @@ const evictLeastRecentlyUsed = (
   messages: MessageBundle[],
   options: ResolvedOptions,
   watermarkTokens: number,
-  stashes: Map<string, SessionStash>,
-  sessionKey: string,
+  stash: SessionStash,
 ): EvictionResult => {
   const appearances: ToolAppearance[] = []
   const entries: EvictableEntry[] = []
 
   messages.forEach((message, msgIndex) => {
-    for (const part of message.parts) {
+    for (const [partIndex, part] of message.parts.entries()) {
       if (part["type"] !== "tool") continue
       const state = part["state"]
       if (typeof state !== "object" || state === null) continue
@@ -344,6 +367,7 @@ const evictLeastRecentlyUsed = (
         stateRef: typedState as { output: string },
         tool,
         msgIndex,
+        partIndex,
         lastTouch: msgIndex,
         bytes: output.length,
         subjects,
@@ -372,8 +396,14 @@ const evictLeastRecentlyUsed = (
       if (reclaimedTokens >= deficitTokens) break
       const subject = entry.subjects.length > 0 ? renderSubject(entry.subjects[0]) : UNKNOWN_TARGET_LABEL
       const tombstone = buildTombstone(entry.tool, subject, entry.bytes, messages.length - entry.lastTouch)
-      const stashed: StashEntry = { output: entry.stateRef.output, tool: entry.tool, subject, msgIndex: entry.msgIndex }
-      stashEvictedOutput(stashForSession(stashes, sessionKey), stashed)
+      const stashed: StashEntry = {
+        output: entry.stateRef.output,
+        tool: entry.tool,
+        subject,
+        msgIndex: entry.msgIndex,
+        partIndex: entry.partIndex,
+      }
+      stashEvictedOutput(stash, stashed)
       entry.stateRef.output = `${tombstone}${buildReloadPointer(subject)}`
       reclaimedTokens += entry.bytes / CHARS_PER_TOKEN
     }
@@ -433,7 +463,7 @@ export default (async (_input, rawOptions) => {
   return {
     "chat.params": async (input: { sessionID: string; model?: { limit?: { context?: number } } }) => {
       const context = input.model?.limit?.context
-      contextTokensBySession.set(input.sessionID, typeof context === "number" && context > 0 ? context : options.defaultContextTokens)
+      if (typeof context === "number" && context > 0) contextTokensBySession.set(input.sessionID, context)
     },
     "experimental.chat.messages.transform": async (_input: unknown, output: { messages: MessageBundle[] }) => {
       const messages = output.messages
@@ -441,9 +471,10 @@ export default (async (_input, rawOptions) => {
       const sessionID = messages[0]?.info?.sessionID
       const sessionKey = typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
       const contextTokens = (sessionID !== undefined ? contextTokensBySession.get(sessionID) : undefined) ?? options.defaultContextTokens
+      const sessionStash = stashForSession(stashBySession, sessionKey)
       deduplicateToolOutputs(messages, options)
       purgeErroredToolInputs(messages, options)
-      const { hotSubjects } = evictLeastRecentlyUsed(messages, options, contextTokens * options.watermark, stashBySession, sessionKey)
+      const { hotSubjects } = evictLeastRecentlyUsed(messages, options, contextTokens * options.watermark, sessionStash)
       applyHint(messages, hotSubjects, options.hintSubjects)
     },
     tool: {

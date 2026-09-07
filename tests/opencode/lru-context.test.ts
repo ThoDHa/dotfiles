@@ -43,6 +43,7 @@ const DEFAULT_WATERMARK_CHARS = DEFAULT_CONTEXT_TOKENS * WATERMARK_RATIO * CHARS
 const FALLBACK_TRAILING_FILLER_MESSAGES = 3
 const FALLBACK_EXTRA_CHARS = 1
 const SMALL_CONTEXT_LIMIT = 600
+const ZERO_CONTEXT_LIMIT = 0
 const TEXT_BUDGET_CONTEXT_LIMIT = 1060
 const EXTRA_TEXT_CHARS = 64
 const UNCOMPLETED_OUTPUT_BYTES = 5000
@@ -127,6 +128,13 @@ const HINT_PROTECTED_COMMAND = "deploy --target staging"
 const PROTECTED_PRESSURE_BUNDLE_CHARS =
   PROTECTED_OUTPUT_BYTES * 2 + RECENT_WINDOW_FILLER_MESSAGES * FILLER_TEXT_CHARS
 const PROTECTED_PRESSURE_DEFICIT_TOKENS = PROTECTED_OUTPUT_BYTES / CHARS_PER_TOKEN
+const STASH_SESSION_BOUND = 8
+const STASH_SESSION_OVERFLOW_COUNT = 9
+const RENDERED_SUBJECT_CAP = 160
+const ELLIPSIS_MARKER = "…"
+const HEREDOC_LINE = "printf segment\n"
+const HEREDOC_LINE_REPEAT = 200
+const HEREDOC_COMMAND = HEREDOC_LINE.repeat(HEREDOC_LINE_REPEAT)
 
 const hintLineFor = (subjects: string[]): string =>
   `${HINT_MARKER} ${HINT_LABEL} ${subjects.join(HINT_SUBJECT_SEPARATOR)}`
@@ -284,6 +292,10 @@ const setContextLimit = async (hooks: HookMap, sessionID: string, contextTokens:
 
 const setChatParamsWithoutContext = async (hooks: HookMap, sessionID: string): Promise<void> => {
   await hooks[CHAT_PARAMS_HOOK]({ sessionID }, {})
+}
+
+const setChatParamsWithZeroContext = async (hooks: HookMap, sessionID: string): Promise<void> => {
+  await hooks[CHAT_PARAMS_HOOK]({ sessionID, model: { limit: { context: ZERO_CONTEXT_LIMIT } } }, {})
 }
 
 const runTransform = async (hooks: HookMap, bundle: StrictBundle): Promise<void> => {
@@ -665,6 +677,28 @@ test("transform falls back to the default budget when chat params carry no conte
   await setChatParamsWithoutContext(hooks, SESSION_ID)
 
   const bundle = buildFallbackBudgetBundle(FALLBACK_BUNDLE_LARGE_TEXT_CHARS + FALLBACK_EXTRA_CHARS)
+  await runTransform(hooks, bundle)
+
+  assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
+})
+
+test("transform keeps a stored real context limit when a later chat params event carries none", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+  await setChatParamsWithoutContext(hooks, SESSION_ID)
+
+  const bundle = buildStandardBundle(SESSION_ID, "/data/retained-limit.txt")
+  await runTransform(hooks, bundle)
+
+  assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
+})
+
+test("transform keeps a stored real context limit when a later chat params event carries a zero limit", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+  await setChatParamsWithZeroContext(hooks, SESSION_ID)
+
+  const bundle = buildStandardBundle(SESSION_ID, "/data/retained-limit-zero.txt")
   await runTransform(hooks, bundle)
 
   assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
@@ -1635,4 +1669,144 @@ test("transform lists a protected live subject in the hint line like any live su
   const hintParts = hintPartsIn(bundle)
   assert.equal(hintParts.length, 1)
   assert.equal(hintParts[0].text, hintLineFor([HINT_PROTECTED_COMMAND]))
+})
+
+const stashSessionId = (index: number): string => `lru-stash-session-${index}`
+
+const stashSessionSubject = (index: number): string => `/data/stash-session-${index}.txt`
+
+const stashOverflowSessionBundle = (index: number): StrictBundle =>
+  buildStandardBundle(stashSessionId(index), stashSessionSubject(index))
+
+const evictStashSession = async (hooks: HookMap, index: number): Promise<void> => {
+  await setContextLimit(hooks, stashSessionId(index), WATERMARK_PROBE_CONTEXT_LIMIT)
+  await runTransform(hooks, stashOverflowSessionBundle(index))
+}
+
+test("read_evicted drops the least recently active session stash when a ninth session stashes an eviction", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < STASH_SESSION_BOUND; index += 1) await evictStashSession(hooks, index)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_BOUND - 1), stashSessionId(STASH_SESSION_BOUND - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+
+  await evictStashSession(hooks, STASH_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    stashMissFor(stashSessionSubject(0)),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_BOUND - 1), stashSessionId(STASH_SESSION_BOUND - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_OVERFLOW_COUNT - 1), stashSessionId(STASH_SESSION_OVERFLOW_COUNT - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+})
+
+test("read_evicted protects a refreshed hot session stash when a ninth session stashes an eviction", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < STASH_SESSION_BOUND; index += 1) await evictStashSession(hooks, index)
+
+  await runTransform(hooks, stashOverflowSessionBundle(0))
+  await evictStashSession(hooks, STASH_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(0), stashSessionId(0)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(1), stashSessionId(1)),
+    stashMissFor(stashSessionSubject(1)),
+  )
+  assert.equal(
+    await readEvicted(hooks, stashSessionSubject(STASH_SESSION_OVERFLOW_COUNT - 1), stashSessionId(STASH_SESSION_OVERFLOW_COUNT - 1)),
+    outputOfBytes(MIN_EVICTABLE_BYTES),
+  )
+})
+
+const truncatedRenderOf = (raw: string): string => {
+  const singleLine = raw.replaceAll("\n", " ")
+  return singleLine.length > RENDERED_SUBJECT_CAP
+    ? `${singleLine.slice(0, RENDERED_SUBJECT_CAP - ELLIPSIS_MARKER.length)}${ELLIPSIS_MARKER}`
+    : singleLine
+}
+
+test("transform truncates a multi kilobyte heredoc subject in the tombstone and reload pointer and still reloads from the truncated name", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildBundle([[bashToolPart(HEREDOC_COMMAND, MIN_EVICTABLE_BYTES)], ...fillerMessages()])
+  await runTransform(hooks, bundle)
+
+  const truncated = truncatedRenderOf(HEREDOC_COMMAND)
+  assert.equal(truncated.length, RENDERED_SUBJECT_CAP)
+  assert.ok(truncated.endsWith(ELLIPSIS_MARKER))
+  assert.equal(
+    toolPartAt(bundle.messages[0], 0).state.output,
+    `${TOMBSTONE_MARKER} bash ${truncated} (2048 bytes, ~5 messages ago)${TOMBSTONE_SUFFIX}${reloadPointerFor(truncated)}`,
+  )
+  assert.equal(await readEvicted(hooks, truncated, SESSION_ID), outputOfBytes(MIN_EVICTABLE_BYTES))
+})
+
+test("transform renders a newline bearing heredoc subject as one truncated single line hint entry", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([[bashToolPart(HEREDOC_COMMAND, MIN_EVICTABLE_BYTES)], ...fillerMessages()])
+  await runTransform(hooks, bundle)
+
+  const hintParts = hintPartsIn(bundle)
+  assert.equal(hintParts.length, 1)
+  assert.equal(hintParts[0].text, hintLineFor([truncatedRenderOf(HEREDOC_COMMAND)]))
+  assert.ok(!hintParts[0].text.includes("\n"))
+})
+
+test("transform refresh matches a huge multi line subject on its raw value despite the truncated render", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildBundle([
+    [bashToolPart(HEREDOC_COMMAND, MIN_EVICTABLE_BYTES)],
+    ...fillerMessages(1),
+    [bashToolPart(HEREDOC_COMMAND, APPEARANCE_ONLY_OUTPUT_BYTES)],
+    ...fillerMessages(2),
+  ])
+  await runTransform(hooks, bundle)
+
+  assert.equal(toolPartAt(bundle.messages[0], 0).state.output, outputOfBytes(MIN_EVICTABLE_BYTES))
+  assert.equal(toolPartAt(bundle.messages[2], 0).state.output, outputOfBytes(APPEARANCE_ONLY_OUTPUT_BYTES))
+})
+
+const COLLISION_SUBJECT_PATH = "/data/collide.txt"
+const COLLISION_ENCODING_KEY = "encoding"
+
+test("read_evicted keeps both same message same subject evictions reloadable instead of overwriting the first stash", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildBundle([
+    [
+      completedToolPart(
+        READ_TOOL,
+        { [PATH_INPUT_KEY]: COLLISION_SUBJECT_PATH, [COLLISION_ENCODING_KEY]: DEDUP_ENCODING_VALUE },
+        outputOfBytes(THREE_ENTRY_OUTPUT_BYTES),
+      ),
+      pathToolPart(COLLISION_SUBJECT_PATH, COLD_OUTPUT_BYTES),
+    ],
+    ...fillerMessages(),
+  ])
+  await runTransform(hooks, bundle)
+
+  assert.equal(
+    await readEvicted(hooks, COLLISION_SUBJECT_PATH, SESSION_ID),
+    `${outputOfBytes(COLD_OUTPUT_BYTES)}\n${olderMatchesLineFor(COLLISION_SUBJECT_PATH, [pointerFor(READ_TOOL, 0)])}`,
+  )
 })
