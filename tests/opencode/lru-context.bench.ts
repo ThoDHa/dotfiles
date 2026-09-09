@@ -6,6 +6,7 @@ import { performance } from "node:perf_hooks"
 import lruContextFactory from "../../opencode/.config/opencode/plugin/lru-context.ts"
 
 const TRANSFORM_HOOK = "experimental.chat.messages.transform"
+const SYSTEM_TRANSFORM_HOOK = "experimental.chat.system.transform"
 const SESSION_ID = "lru-bench-session"
 const READ_TOOL = "read"
 const GREP_TOOL = "grep"
@@ -37,6 +38,8 @@ const EVICTION_MARKER = "[lru-evicted]"
 const DEDUP_MARKER = "[lru-deduped]"
 const PURGE_MARKER = "[lru-purged-input]"
 const HINT_MARKER = "[lru-hot]"
+const HINT_LABEL = "recently active:"
+const HINT_LINE_PREFIX = `${HINT_MARKER} ${HINT_LABEL}`
 
 type Message = { info: { sessionID?: string }; parts: Array<Record<string, unknown>> }
 type Bundle = { messages: Message[] }
@@ -131,38 +134,46 @@ const hooks = (await lruContextFactory({}, { defaultContextTokens: BENCH_CONTEXT
   (input: unknown, output: unknown) => Promise<unknown>
 >
 const transform = hooks[TRANSFORM_HOOK]
+const systemTransform = hooks[SYSTEM_TRANSFORM_HOOK]
 const base = buildBundle()
 const baseChars = JSON.stringify(base).length
 
-for (let run = 0; run < WARMUP_RUNS; run += 1) await transform({}, structuredClone(base))
+for (let run = 0; run < WARMUP_RUNS; run += 1) {
+  const clone = structuredClone(base)
+  await transform({}, clone)
+  await systemTransform({ sessionID: SESSION_ID }, { system: [] })
+}
 
 const samples: number[] = []
-let last: Bundle | undefined
+let last: { bundle: Bundle; system: string[] } | undefined
 for (let run = 0; run < MEASURED_RUNS; run += 1) {
   const clone = structuredClone(base)
+  const systemOutput: { system: string[] } = { system: [] }
   const started = performance.now()
   await transform({}, clone)
+  await systemTransform({ sessionID: SESSION_ID }, systemOutput)
   samples.push(performance.now() - started)
-  last = clone
+  last = { bundle: clone, system: systemOutput.system }
 }
 if (last === undefined) {
   console.error(`lru-context.bench: FAIL: no measured runs executed (MEASURED_RUNS=${MEASURED_RUNS})`)
   process.exit(1)
 }
 
-const evicted = countWhere(last, (part) => outputStartsWith(part, EVICTION_MARKER))
-const deduped = countWhere(last, (part) => outputStartsWith(part, DEDUP_MARKER))
-const purged = countWhere(last, inputIsMarker)
-const hinted = countWhere(last, (part) => part["type"] === "text" && typeof part["text"] === "string" && part["text"].startsWith(HINT_MARKER))
+const evicted = countWhere(last.bundle, (part) => outputStartsWith(part, EVICTION_MARKER))
+const deduped = countWhere(last.bundle, (part) => outputStartsWith(part, DEDUP_MARKER))
+const purged = countWhere(last.bundle, inputIsMarker)
+const messageHints = countWhere(last.bundle, (part) => part["type"] === "text" && typeof part["text"] === "string" && part["text"].startsWith(HINT_MARKER))
+const systemHints = last.system.filter((block) => typeof block === "string" && block.startsWith(HINT_LINE_PREFIX)).length
 const medianMs = median(samples)
 
 console.log(`lru-context.bench: bundle=${MESSAGE_COUNT} messages, ${baseChars} serialized chars, context=${BENCH_CONTEXT_TOKENS} tokens, watermark=${BENCH_CONTEXT_TOKENS * WATERMARK_RATIO} tokens`)
-console.log(`lru-context.bench: path coverage evicted=${evicted} deduped=${deduped} purged=${purged} hinted=${hinted}`)
+console.log(`lru-context.bench: path coverage evicted=${evicted} deduped=${deduped} purged=${purged} messageHints=${messageHints} systemHints=${systemHints}`)
 samples.forEach((sample, index) => console.log(`lru-context.bench: run ${index + 1}: ${sample.toFixed(3)} ms`))
 console.log(`lru-context.bench: median of ${MEASURED_RUNS}: ${medianMs.toFixed(3)} ms (budget ${BUDGET_MS} ms)`)
 
-if (evicted === 0 || deduped === 0 || purged === 0 || hinted !== 1) {
-  console.error(`lru-context.bench: FAIL: transform did not exercise every path (evicted=${evicted} deduped=${deduped} purged=${purged} hinted=${hinted})`)
+if (evicted === 0 || deduped === 0 || purged === 0 || messageHints !== 0 || systemHints !== 1) {
+  console.error(`lru-context.bench: FAIL: plugin run did not exercise every path (evicted=${evicted} deduped=${deduped} purged=${purged} messageHints=${messageHints} systemHints=${systemHints})`)
   process.exit(1)
 }
 if (medianMs >= BUDGET_MS) {
