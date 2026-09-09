@@ -3,6 +3,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 const EVICTION_MARKER = "[lru-evicted]"
 const HINT_MARKER = "[lru-hot]"
 const HINT_LABEL = "recently active:"
+const HINT_LINE_PREFIX = `${HINT_MARKER} ${HINT_LABEL}`
 const SUBJECT_SEPARATOR = ", "
 const MAX_RENDERED_SUBJECT_CHARS = 160
 const ELLIPSIS_MARKER = "…"
@@ -26,6 +27,7 @@ const RANGE_SEPARATOR = "-"
 const DEFAULT_STASH_LIMIT = 50
 const MAX_STASH_SESSIONS = 8
 const MAX_LIMIT_SESSIONS = 8
+const MAX_HINT_SESSIONS = 8
 const RELOAD_TOOL_NAME = "read_evicted"
 const RELOAD_ARG_NAME = "subject"
 const RELOAD_TOOL_DESCRIPTION =
@@ -257,6 +259,18 @@ const purgeErroredToolInputs = (messages: MessageBundle[], options: ResolvedOpti
   }
 }
 
+const stripLegacyHintParts = (messages: MessageBundle[]): void => {
+  for (const message of messages) {
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex]
+      const text = part["text"]
+      if (part["type"] === "text" && typeof text === "string" && text.startsWith(HINT_LINE_PREFIX)) {
+        message.parts.splice(partIndex, 1)
+      }
+    }
+  }
+}
+
 const buildTombstone = (tool: string, subject: string, bytes: number, messagesAgo: number): string =>
   `${EVICTION_MARKER} ${tool} ${subject} (${bytes} bytes, ~${messagesAgo} messages ago) was evicted to reclaim context; re-run the tool to reload its output.`
 
@@ -282,10 +296,10 @@ const trimMapToBound = <T>(map: Map<string, T>, bound: number): void => {
   }
 }
 
-const rememberSessionLimit = (limits: Map<string, number>, sessionID: string, context: number): void => {
-  limits.delete(sessionID)
-  trimMapToBound(limits, MAX_LIMIT_SESSIONS)
-  limits.set(sessionID, context)
+const rememberSessionValue = <T>(map: Map<string, T>, key: string, value: T, bound: number): void => {
+  map.delete(key)
+  trimMapToBound(map, bound)
+  map.set(key, value)
 }
 
 const stashForSession = (stashes: StashStore, sessionKey: string): SessionStash => {
@@ -329,9 +343,9 @@ const stashedMatchesFor = (stash: SessionStash, subject: string): StashEntry[] =
   return matches
 }
 
-const sessionKeyFromContext = (toolContext: unknown): string => {
+const sessionKeyFromContext = (source: unknown): string => {
   const sessionID =
-    typeof toolContext === "object" && toolContext !== null ? (toolContext as { sessionID?: unknown }).sessionID : undefined
+    typeof source === "object" && source !== null ? (source as { sessionID?: unknown }).sessionID : undefined
   return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
 }
 
@@ -440,29 +454,30 @@ const buildHintLine = (hotSubjects: HotSubject[], limit: number): string | undef
     if (rendered.length >= limit) break
   }
   if (rendered.length === 0) return undefined
-  return `${HINT_MARKER} ${HINT_LABEL} ${rendered.join(SUBJECT_SEPARATOR)}`
+  return `${HINT_LINE_PREFIX} ${rendered.join(SUBJECT_SEPARATOR)}`
 }
 
-const applyHint = (messages: MessageBundle[], hotSubjects: HotSubject[], limit: number): void => {
+const storeHint = (hintBySession: Map<string, string>, sessionKey: string, hotSubjects: HotSubject[], limit: number): void => {
   if (limit <= 0) return
   const hintLine = buildHintLine(hotSubjects, limit)
+  if (hintLine !== undefined) rememberSessionValue(hintBySession, sessionKey, hintLine, MAX_HINT_SESSIONS)
+}
+
+const deliverHint = (hintBySession: Map<string, string>, input: unknown, output: { system: string[] }): void => {
+  if (!Array.isArray(output.system)) return
+  const sessionKey = sessionKeyFromContext(input)
+  const hintLine = touchMapEntry(hintBySession, sessionKey)
   if (hintLine === undefined) return
-  for (const message of messages) {
-    for (const part of message.parts) {
-      const text = part["text"]
-      if (part["type"] === "text" && typeof text === "string" && text.startsWith(HINT_MARKER)) {
-        part["text"] = hintLine
-        return
-      }
-    }
-  }
-  messages[messages.length - 1].parts.push({ type: "text", text: hintLine })
+  const existingIndex = output.system.findIndex((block) => typeof block === "string" && block.startsWith(HINT_LINE_PREFIX))
+  if (existingIndex === -1) output.system.push(hintLine)
+  else output.system[existingIndex] = hintLine
 }
 
 export default (async (_input, rawOptions) => {
   const options = resolveOptions(rawOptions as LruContextOptions)
   const contextTokensBySession = new Map<string, number>()
   const stashBySession = new Map<string, SessionStash>()
+  const hintBySession = new Map<string, string>()
 
   // Workaround: read_evicted is registered as a plain { description, args, execute }
   // definition instead of calling tool() from @opencode-ai/plugin. The package only
@@ -480,20 +495,26 @@ export default (async (_input, rawOptions) => {
   return {
     "chat.params": async (input: { sessionID: string; model?: { limit?: { context?: number } } }) => {
       const context = input.model?.limit?.context
-      if (typeof context === "number" && context > 0) rememberSessionLimit(contextTokensBySession, input.sessionID, context)
+      if (typeof context === "number" && context > 0)
+        rememberSessionValue(contextTokensBySession, input.sessionID, context, MAX_LIMIT_SESSIONS)
     },
     "experimental.chat.messages.transform": async (_input: unknown, output: { messages: MessageBundle[] }) => {
       const messages = output.messages
       if (!Array.isArray(messages) || messages.length === 0) return
-      const sessionID = messages[0]?.info?.sessionID
-      const sessionKey = typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
+      const info = messages[0]?.info
+      const sessionKey = sessionKeyFromContext(info)
+      const sessionID = info?.sessionID
       const contextTokens =
         (sessionID !== undefined ? touchMapEntry(contextTokensBySession, sessionID) : undefined) ?? options.defaultContextTokens
       const sessionStash = stashForSession(stashBySession, sessionKey)
+      stripLegacyHintParts(messages)
       deduplicateToolOutputs(messages, options)
       purgeErroredToolInputs(messages, options)
       const { hotSubjects } = evictLeastRecentlyUsed(messages, options, contextTokens * options.watermark, sessionStash)
-      applyHint(messages, hotSubjects, options.hintSubjects)
+      storeHint(hintBySession, sessionKey, hotSubjects, options.hintSubjects)
+    },
+    "experimental.chat.system.transform": async (input: { sessionID?: string }, output: { system: string[] }) => {
+      deliverHint(hintBySession, input, output)
     },
     tool: {
       [RELOAD_TOOL_NAME]: {

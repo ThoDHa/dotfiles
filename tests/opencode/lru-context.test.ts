@@ -74,10 +74,19 @@ const HINT_SUBJECT_SEPARATOR = ", "
 const HINT_TEST_SUBJECT_CAP = 2
 const HINT_DEFAULT_ENTRY_COUNT = 11
 const DEFAULT_HINT_SUBJECT_COUNT = 10
-const GROWN_BUNDLE_TOTAL_PARTS = 5
-const FIRST_HINT_MESSAGE_INDEX = 2
 const REPEAT_TRANSFORM_COUNT = 3
 const NEGATIVE_HINT_SUBJECTS = -1
+const SYSTEM_HOOK = "experimental.chat.system.transform"
+const BASE_SYSTEM_BLOCK = "base system prompt block"
+const SYSTEM_BLOCK_COUNT_WITH_HINT = 2
+const LEGACY_HINT_SUBJECT = "/data/legacy.txt"
+const HINT_SESSION_BOUND = 8
+const HINT_SESSION_OVERFLOW_COUNT = 9
+const FOREIGN_HINT_BLOCK_TAIL = "foreign config block"
+const USER_TEXT_AFTER_BARE_MARKER = "plain user note"
+const NO_SESSION_HINT_PATH = "/data/no-session-hint.txt"
+const SYSTEM_GUARD_HINT_PATH = "/data/system-guard.txt"
+const SYSTEM_GUARD_NON_ARRAY_VALUE = "not a block array"
 const RELOAD_TOOL_NAME = "read_evicted"
 const RELOAD_TOOL_MAP_KEY = "tool"
 const RELOAD_POINTER_LEAD = " Evicted output stashed; reload it with"
@@ -220,6 +229,18 @@ const hintPartsIn = (bundle: StrictBundle): HintPartRef[] => {
   })
   return found
 }
+
+const runSystemTransform = async (
+  hooks: HookMap,
+  sessionID: string | undefined,
+  blocks: string[] = [],
+): Promise<string[]> => {
+  const output: { system: string[] } = { system: blocks }
+  await hooks[SYSTEM_HOOK]({ sessionID }, output)
+  return blocks
+}
+
+const hintBlocksIn = (blocks: string[]): string[] => blocks.filter((block) => block.startsWith(HINT_MARKER))
 
 const totalPartCount = (bundle: StrictBundle): number =>
   bundle.messages.reduce((count, message) => count + message.parts.length, 0)
@@ -934,7 +955,24 @@ test("transform refreshes a pattern entry regardless of its include qualifier", 
   )
 })
 
-test("transform appends a single hint line listing live subjects most recent first", async () => {
+test("transform keeps every message part byte-identical while the hint reaches the system prompt", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([
+    [pathToolPart("/data/older.txt", MIN_EVICTABLE_BYTES)],
+    [pathToolPart("/data/newer.txt", MIN_EVICTABLE_BYTES)],
+    ...fillerMessages(2),
+  ])
+  const snapshot = structuredClone(bundle)
+  await runTransform(hooks, bundle)
+
+  assert.deepEqual(bundle, snapshot)
+  assert.equal(hintPartsIn(bundle).length, 0)
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+  assert.equal(hintBlocksIn(blocks).length, 1)
+})
+
+test("chat system transform appends a single hint block listing live subjects most recent first", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([
@@ -944,14 +982,110 @@ test("transform appends a single hint line listing live subjects most recent fir
   ])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].messageIndex, bundle.messages.length - 1)
-  assert.equal(hintParts[0].text, hintLineFor(["/data/newer.txt", "/data/older.txt"]))
-  assert.ok(!hintParts[0].text.includes("\n"))
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+  assert.equal(blocks.length, SYSTEM_BLOCK_COUNT_WITH_HINT)
+  assert.equal(blocks[0], BASE_SYSTEM_BLOCK)
+  assert.equal(blocks[1], hintLineFor(["/data/newer.txt", "/data/older.txt"]))
+  assert.ok(!blocks[1].includes("\n"))
 })
 
-test("transform caps the hint at the configured subject count keeping the most recent", async () => {
+test("chat system transform replaces a prior hint block in place keeping one block", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([[pathToolPart("/data/a.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
+  await runTransform(hooks, bundle)
+
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [hintLineFor([LEGACY_HINT_SUBJECT]), BASE_SYSTEM_BLOCK])
+  assert.equal(blocks.length, SYSTEM_BLOCK_COUNT_WITH_HINT)
+  assert.equal(blocks[0], hintLineFor(["/data/a.txt"]))
+  assert.equal(blocks[1], BASE_SYSTEM_BLOCK)
+})
+
+test("chat system transform keeps a foreign block that starts with the bare hint marker and appends the stored hint separately", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([[pathToolPart("/data/a.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
+  await runTransform(hooks, bundle)
+
+  const foreignBlock = `${HINT_MARKER} ${FOREIGN_HINT_BLOCK_TAIL}`
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [foreignBlock, BASE_SYSTEM_BLOCK])
+
+  assert.equal(blocks.length, SYSTEM_BLOCK_COUNT_WITH_HINT + 1)
+  assert.equal(blocks[0], foreignBlock)
+  assert.equal(blocks[1], BASE_SYSTEM_BLOCK)
+  assert.equal(blocks[2], hintLineFor(["/data/a.txt"]))
+})
+
+test("chat system transform leaves the system blocks untouched for a session without a stored hint", async () => {
+  const hooks = await loadPluginHooks()
+
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+
+  assert.deepEqual(blocks, [BASE_SYSTEM_BLOCK])
+})
+
+test("transform strips a legacy hint text part recorded inside a message by earlier delivery", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([
+    [pathToolPart("/data/older.txt", MIN_EVICTABLE_BYTES)],
+    [textPart(hintLineFor([LEGACY_HINT_SUBJECT]))],
+    ...fillerMessages(2),
+  ])
+  await runTransform(hooks, bundle)
+
+  assert.equal(hintPartsIn(bundle).length, 0)
+  const blocks = await runSystemTransform(hooks, SESSION_ID)
+  assert.equal(hintBlocksIn(blocks).length, 1)
+  assert.equal(blocks[0], hintLineFor(["/data/older.txt"]))
+})
+
+test("transform preserves a user text part that starts with the bare hint marker without the hint label", async () => {
+  const hooks = await loadPluginHooks()
+  const userText = `${HINT_MARKER} ${USER_TEXT_AFTER_BARE_MARKER}`
+
+  const bundle = buildBundle([
+    [pathToolPart("/data/older.txt", MIN_EVICTABLE_BYTES)],
+    [textPart(userText)],
+    ...fillerMessages(2),
+  ])
+  await runTransform(hooks, bundle)
+
+  assert.deepEqual(
+    bundle.messages[1].parts.map((part) => part["text"]),
+    [userText],
+  )
+})
+
+const buildNoSessionBundle = (partsPerMessage: MessagePart[][]): StrictBundle => ({
+  messages: partsPerMessage.map((parts) => ({ info: {}, parts })),
+})
+
+test("chat system transform delivers the hint stored under the no-session fallback when the system hook carries no session id", async () => {
+  const hooks = await loadPluginHooks()
+  await runTransform(
+    hooks,
+    buildNoSessionBundle([[pathToolPart(NO_SESSION_HINT_PATH, MIN_EVICTABLE_BYTES)], ...fillerMessages(2)]),
+  )
+
+  const blocks = await runSystemTransform(hooks, undefined)
+
+  assert.equal(hintBlocksIn(blocks).length, 1)
+  assert.equal(blocks[0], hintLineFor([NO_SESSION_HINT_PATH]))
+})
+
+test("chat system transform is a no-op without throwing when the system output is not an array", async () => {
+  const hooks = await loadPluginHooks()
+  const bundle = buildBundle([[pathToolPart(SYSTEM_GUARD_HINT_PATH, MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
+  await runTransform(hooks, bundle)
+
+  const output = { system: SYSTEM_GUARD_NON_ARRAY_VALUE } as unknown as { system: string[] }
+  await hooks[SYSTEM_HOOK]({ sessionID: SESSION_ID }, output)
+
+  assert.equal(output.system, SYSTEM_GUARD_NON_ARRAY_VALUE)
+})
+
+test("chat system transform caps the hint at the configured subject count keeping the most recent", async () => {
   const hooks = await loadPluginHooksWith({ hintSubjects: HINT_TEST_SUBJECT_CAP })
 
   const bundle = buildBundle([
@@ -962,13 +1096,14 @@ test("transform caps the hint at the configured subject count keeping the most r
   ])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor(["/data/c.txt", "/data/b.txt"]))
-  assert.ok(!hintParts[0].text.includes("/data/a.txt"))
+  const blocks = await runSystemTransform(hooks, SESSION_ID)
+  const hintBlocks = hintBlocksIn(blocks)
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor(["/data/c.txt", "/data/b.txt"]))
+  assert.ok(!hintBlocks[0].includes("/data/a.txt"))
 })
 
-test("transform defaults the hint to ten subjects dropping older ones", async () => {
+test("chat system transform defaults the hint to ten subjects dropping older ones", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle(
@@ -982,23 +1117,25 @@ test("transform defaults the hint to ten subjects dropping older ones", async ()
     { length: DEFAULT_HINT_SUBJECT_COUNT },
     (_, offset) => `/data/hint${HINT_DEFAULT_ENTRY_COUNT - 1 - offset}.txt`,
   )
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor(expectedSubjects))
-  assert.ok(!hintParts[0].text.includes("/data/hint0.txt"))
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor(expectedSubjects))
+  assert.ok(!hintBlocks[0].includes("/data/hint0.txt"))
 })
 
-test("transform emits no hint when hintSubjects is zero", async () => {
+test("chat system transform emits no hint block when hintSubjects is zero", async () => {
   const hooks = await loadPluginHooksWith({ hintSubjects: 0 })
 
   const bundle = buildBundle([[pathToolPart("/data/live.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
   await runTransform(hooks, bundle)
 
-  assert.equal(hintPartsIn(bundle).length, 0)
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+  assert.equal(hintBlocksIn(blocks).length, 0)
+  assert.equal(blocks.length, 1)
   assert.equal(toolPartAt(bundle.messages[0], 0).state.output, outputOfBytes(MIN_EVICTABLE_BYTES))
 })
 
-test("transform emits no hint when every entry is tombstoned", async () => {
+test("chat system transform emits no hint block when every entry is tombstoned before any hint was stored", async () => {
   const hooks = await loadPluginHooks()
   await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
 
@@ -1006,39 +1143,38 @@ test("transform emits no hint when every entry is tombstoned", async () => {
   await runTransform(hooks, bundle)
 
   assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
-  assert.equal(hintPartsIn(bundle).length, 0)
+  const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+  assert.equal(hintBlocksIn(blocks).length, 0)
+  assert.equal(blocks.length, 1)
 })
 
-test("transform replaces the existing hint part in place when the working set grows", async () => {
+test("transform serves the refreshed hint when the working set grows without adding message parts", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([[pathToolPart("/data/a.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
   await runTransform(hooks, bundle)
 
-  const firstHint = hintPartsIn(bundle)
-  assert.equal(firstHint.length, 1)
-  assert.equal(firstHint[0].messageIndex, FIRST_HINT_MESSAGE_INDEX)
-  assert.equal(firstHint[0].text, hintLineFor(["/data/a.txt"]))
+  const firstBlocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+  assert.equal(hintBlocksIn(firstBlocks).length, 1)
+  assert.equal(firstBlocks[1], hintLineFor(["/data/a.txt"]))
+  const partCountAfterFirst = totalPartCount(bundle)
 
   bundle.messages.push(syntheticMessageFor(SESSION_ID, [pathToolPart("/data/b.txt", MIN_EVICTABLE_BYTES)]))
   await runTransform(hooks, bundle)
+  const secondBlocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
 
-  const secondHint = hintPartsIn(bundle)
-  assert.equal(secondHint.length, 1)
-  assert.equal(secondHint[0].messageIndex, FIRST_HINT_MESSAGE_INDEX)
-  assert.equal(secondHint[0].partIndex, firstHint[0].partIndex)
-  assert.equal(secondHint[0].text, hintLineFor(["/data/b.txt", "/data/a.txt"]))
-  assert.equal(totalPartCount(bundle), GROWN_BUNDLE_TOTAL_PARTS)
-  assert.equal(hintPartsIn(bundle).length, 1)
+  assert.equal(hintBlocksIn(secondBlocks).length, 1)
+  assert.equal(secondBlocks[1], hintLineFor(["/data/b.txt", "/data/a.txt"]))
+  assert.equal(totalPartCount(bundle), partCountAfterFirst + 1)
+  assert.equal(hintPartsIn(bundle).length, 0)
 })
 
-test("transform leaves an existing hint untouched when no live subjects remain", async () => {
+test("chat system transform keeps the last stored hint when no live subjects remain", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([[pathToolPart("/data/fading.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
   await runTransform(hooks, bundle)
-
-  const firstHint = hintPartsIn(bundle)
+  const firstHint = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
   assert.equal(firstHint.length, 1)
 
   bundle.messages.push(syntheticMessageFor(SESSION_ID, [textPart(textOfChars(OVER_WATERMARK_FILLER_TEXT_CHARS))]))
@@ -1047,28 +1183,26 @@ test("transform leaves an existing hint untouched when no live subjects remain",
   await runTransform(hooks, bundle)
 
   assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
-  const secondHint = hintPartsIn(bundle)
+  const secondHint = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
   assert.equal(secondHint.length, 1)
-  assert.equal(secondHint[0].text, firstHint[0].text)
-  assert.equal(secondHint[0].messageIndex, firstHint[0].messageIndex)
+  assert.equal(secondHint[0], firstHint[0])
 })
 
-test("transform never grows the bundle beyond a single hint part across repeated transforms", async () => {
+test("transform never adds message parts across repeated transforms and system deliveries", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([[pathToolPart("/data/stable.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
-  let previousPartCount = 0
+  const partCountBefore = totalPartCount(bundle)
   for (let run = 0; run < REPEAT_TRANSFORM_COUNT; run += 1) {
     await runTransform(hooks, bundle)
-    const hintParts = hintPartsIn(bundle)
-    assert.equal(hintParts.length, 1)
-    const partCount = totalPartCount(bundle)
-    if (run > 0) assert.equal(partCount, previousPartCount)
-    previousPartCount = partCount
+    const blocks = await runSystemTransform(hooks, SESSION_ID, [BASE_SYSTEM_BLOCK])
+    assert.equal(hintBlocksIn(blocks).length, 1)
   }
+  assert.equal(totalPartCount(bundle), partCountBefore)
+  assert.equal(hintPartsIn(bundle).length, 0)
 })
 
-test("transform keeps hint subjects isolated between sessions", async () => {
+test("chat system transform keeps hint subjects isolated between sessions", async () => {
   const hooks = await loadPluginHooks()
 
   const sessionA = buildBundle([[pathToolPart("/data/from-a.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)], SESSION_ID)
@@ -1077,26 +1211,26 @@ test("transform keeps hint subjects isolated between sessions", async () => {
   await runTransform(hooks, sessionB)
   await runTransform(hooks, sessionA)
 
-  const hintA = hintPartsIn(sessionA)
+  const hintA = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
   assert.equal(hintA.length, 1)
-  assert.equal(hintA[0].text, hintLineFor(["/data/from-a.txt"]))
-  const hintB = hintPartsIn(sessionB)
+  assert.equal(hintA[0], hintLineFor(["/data/from-a.txt"]))
+  const hintB = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID_B))
   assert.equal(hintB.length, 1)
-  assert.equal(hintB[0].text, hintLineFor(["/data/from-b.txt"]))
+  assert.equal(hintB[0], hintLineFor(["/data/from-b.txt"]))
 })
 
-test("transform falls back to the default hint count when hintSubjects is negative", async () => {
+test("chat system transform falls back to the default hint count when hintSubjects is negative", async () => {
   const hooks = await loadPluginHooksWith({ hintSubjects: NEGATIVE_HINT_SUBJECTS })
 
   const bundle = buildBundle([[pathToolPart("/data/fallback.txt", MIN_EVICTABLE_BYTES)], ...fillerMessages(2)])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor(["/data/fallback.txt"]))
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor(["/data/fallback.txt"]))
 })
 
-test("transform renders ranged subjects with start and end in the hint line", async () => {
+test("chat system transform renders ranged subjects with start and end in the hint block", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([
@@ -1111,15 +1245,15 @@ test("transform renders ranged subjects with start and end in the hint line", as
   ])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
   assert.equal(
-    hintParts[0].text,
+    hintBlocks[0],
     hintLineFor([`${RANGE_PATH}:${READ_OFFSET_LINES}-${READ_OFFSET_LINES + READ_LIMIT_LINES}`]),
   )
 })
 
-test("transform lists one hint entry from the retained copy when identical calls repeat a subject", async () => {
+test("chat system transform lists one hint entry from the retained copy when identical calls repeat a subject", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([
@@ -1129,10 +1263,10 @@ test("transform lists one hint entry from the retained copy when identical calls
   ])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor(["/data/dup.txt"]))
-  assert.equal(hintParts[0].text.split("/data/dup.txt").length - 1, 1)
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor(["/data/dup.txt"]))
+  assert.equal(hintBlocks[0].split("/data/dup.txt").length - 1, 1)
 })
 
 test("read_evicted returns the full original output named by the tombstone after eviction", async () => {
@@ -1309,9 +1443,9 @@ test("transform lists a deduped subject once from the retained copy and never fr
   await runTransform(hooks, bundle)
 
   assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(DEDUP_MARKER))
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor([DEDUP_PATH]))
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor([DEDUP_PATH]))
 })
 
 test("transform dedups identical inputs whose object keys appear in a different order", async () => {
@@ -1669,9 +1803,9 @@ test("transform lists a protected live subject in the hint line like any live su
   await runTransform(hooks, bundle)
 
   assert.equal(toolPartAt(bundle.messages[0], 0).state.output, outputOfBytes(MIN_EVICTABLE_BYTES))
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor([HINT_PROTECTED_COMMAND]))
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor([HINT_PROTECTED_COMMAND]))
 })
 
 const stashSessionId = (index: number): string => `lru-stash-session-${index}`
@@ -1812,6 +1946,29 @@ test("chat params drops the least recently informed session limit when a ninth s
   assert.ok(toolPartAt(newest.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
 })
 
+const hintSessionId = (index: number): string => `lru-hint-session-${index}`
+
+const hintSessionSubject = (index: number): string => `/data/hint-session-${index}.txt`
+
+const storeHintSession = async (hooks: HookMap, index: number): Promise<void> => {
+  await runTransform(hooks, buildStandardBundle(hintSessionId(index), hintSessionSubject(index)))
+}
+
+test("chat system transform drops the least recently active session hint when a ninth session stores a hint", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < HINT_SESSION_BOUND; index += 1) await storeHintSession(hooks, index)
+
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(0))).length, 1)
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(HINT_SESSION_BOUND - 1))).length, 1)
+
+  await storeHintSession(hooks, HINT_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(0))).length, 1)
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(1))).length, 0)
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(HINT_SESSION_BOUND - 1))).length, 1)
+  assert.equal(hintBlocksIn(await runSystemTransform(hooks, hintSessionId(HINT_SESSION_OVERFLOW_COUNT - 1))).length, 1)
+})
+
 const truncatedRenderOf = (raw: string): string => {
   const singleLine = raw.replaceAll("\n", " ")
   return singleLine.length > RENDERED_SUBJECT_CAP
@@ -1836,16 +1993,16 @@ test("transform truncates a multi kilobyte heredoc subject in the tombstone and 
   assert.equal(await readEvicted(hooks, truncated, SESSION_ID), outputOfBytes(MIN_EVICTABLE_BYTES))
 })
 
-test("transform renders a newline bearing heredoc subject as one truncated single line hint entry", async () => {
+test("chat system transform renders a newline bearing heredoc subject as one truncated single line hint entry", async () => {
   const hooks = await loadPluginHooks()
 
   const bundle = buildBundle([[bashToolPart(HEREDOC_COMMAND, MIN_EVICTABLE_BYTES)], ...fillerMessages()])
   await runTransform(hooks, bundle)
 
-  const hintParts = hintPartsIn(bundle)
-  assert.equal(hintParts.length, 1)
-  assert.equal(hintParts[0].text, hintLineFor([truncatedRenderOf(HEREDOC_COMMAND)]))
-  assert.ok(!hintParts[0].text.includes("\n"))
+  const hintBlocks = hintBlocksIn(await runSystemTransform(hooks, SESSION_ID))
+  assert.equal(hintBlocks.length, 1)
+  assert.equal(hintBlocks[0], hintLineFor([truncatedRenderOf(HEREDOC_COMMAND)]))
+  assert.ok(!hintBlocks[0].includes("\n"))
 })
 
 test("transform refresh matches a huge multi line subject on its raw value despite the truncated render", async () => {
