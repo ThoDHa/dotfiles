@@ -24,7 +24,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks test-termux
+.PHONY: clean-stow test test-links test-rules test-tasks test-termux test-plugin check
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -164,9 +164,12 @@ EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 EXPECTED_SKILLS := $(foreach d,$(wildcard agents/.agents/skills/*),$(notdir $(d)))
 
 # Test all symlinks exist and opencode loads rules
-test: test-links test-rules test-tasks test-termux
+test: test-links test-rules test-tasks test-termux test-plugin
 	@echo ""
 	@echo "All tests passed!"
+
+# Full check flow: the complete test suite
+check: test
 
 # Test that all expected symlinks exist
 test-links:
@@ -222,6 +225,11 @@ test-termux:
 	@echo "Testing termux bootstrap script..."
 	@bash tests/termux/test-termux.sh
 
+# Test the lru-context plugin through its public factory surface
+test-plugin:
+	@echo "Testing lru-context plugin..."
+	@node --test tests/opencode/lru-context.test.ts
+
 # Help
 help:
 	@echo "Dotfiles Management"
@@ -248,10 +256,12 @@ help:
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (symlinks + rules loading)"
+	@echo "  make test        - Run all tests (symlinks + rules + tasks + termux + plugin)"
+	@echo "  make check       - Alias for make test"
 	@echo "  make test-links  - Verify all symlinks exist"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
+	@echo "  make test-plugin - Run lru-context plugin tests"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
