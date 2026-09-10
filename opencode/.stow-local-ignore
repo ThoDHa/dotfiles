@@ -1,0 +1,4 @@
+# Stow local ignore file for the opencode package
+# Repo documentation lives here but must never be linked into $HOME.
+
+^DESIGN\.md$
