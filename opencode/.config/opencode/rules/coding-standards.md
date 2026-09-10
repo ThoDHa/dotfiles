@@ -26,11 +26,12 @@ Before writing any utility function, implementations MUST:
 2. Search package registries for established libraries
 3. Evaluate whether existing solutions meet requirements
 
-Implementations MUST NOT create custom implementations when adequate solutions exist, unless:
+Implementations MUST NOT create custom implementations when adequate solutions exist, unless an existing solution has a concrete technical limitation that disqualifies it:
 
 - Existing solutions have unacceptable performance characteristics
 - Existing solutions introduce unacceptable dependencies
-- The limitation is documented in a code comment
+
+A bypass MUST be justified by the specific limitation, not merely asserted, and MUST be documented in a code comment explaining why each existing solution was rejected.
 
 ### Project Utility Reuse
 
@@ -77,7 +78,7 @@ Implementations MUST use named exports with descriptive identifiers over default
 Implementations MUST NOT use literal numeric values in code except:
 
 - 0, 1, -1 in loop constructs and simple arithmetic
-- Mathematical constants with obvious meaning (e.g., 100 for percentage)
+- Mathematical constants and unit conversion factors with obvious meaning (e.g., 100 for percentage, 60 for seconds per minute)
 - Array/string indices when context is clear
 
 All other numeric literals MUST be extracted to named constants with descriptive identifiers.
@@ -116,18 +117,18 @@ The error-handling mechanism MUST:
 
 1. Catch or propagate errors explicitly (never silently swallow)
 2. Provide meaningful context for debugging
-3. Clean up resources on failure paths
-4. Log errors at appropriate severity levels
+3. Release resources on both success and failure paths ([Resource Cleanup](#resource-cleanup))
+4. Log errors at appropriate severity levels, at the boundary where the error is handled or transformed rather than at every catch point
 
 ### Error Message Standards
 
 Error messages MUST:
 
 - Describe what operation failed
-- Include relevant context (identifiers, parameters, state)  
+- Include relevant context (identifiers, parameters, state)
 - Suggest remediation when a known remediation exists
 - Be appropriate for the intended audience (user vs developer)
-- Protect sensitive information (credentials, internal paths, stack traces from end users)
+- Protect sensitive information (internal paths and stack traces from end users; secrets per [Secrets Management](#secrets-management))
 - Provide actionable information
 - Focus on the system issue rather than user fault
 
@@ -166,7 +167,7 @@ Critical path tests MUST verify both success and failure conditions.
 
 Implementations SHOULD write tests for all new functionality.
 
-Implementations MUST NOT reduce existing test coverage when modifying code, except where the covered code is itself removed.
+Implementations MUST NOT reduce existing test coverage when modifying code. Reducing coverage includes deleting tests, disabling or skipping them, and weakening assertions or fixtures (for example, loosening expected outcomes or narrowing tested inputs), whether the tests verify success conditions or failure conditions. The sole exception is removal of the covered code itself.
 
 ### Test Standards
 
@@ -178,7 +179,6 @@ Test names MUST describe the system under test, the scenario, and the expected b
 
 Tests MUST:
 
-- Have descriptive names indicating expected behavior
 - Test one logical concept per test case
 - Be independent and not rely on test execution order
 - Clean up any state they create
@@ -273,29 +273,23 @@ If the intent behind a test is unclear or disputed, implementers MUST escalate t
 
 ## Documentation Requirements
 
-### Non-Obvious Function Documentation
+### Function Documentation
 
-Implementations MUST document functions when:
+Every function MUST carry a function header (docstring) documenting its behavior.
 
-- The function name does not fully convey its purpose
-- The function has non-obvious side effects
-- The function has complex parameter requirements
-- The function implements business logic that requires context
-
-Documentation MUST include:
+Function documentation MUST include the following items where applicable:
 
 - Purpose description
 - Parameter descriptions with types and constraints
 - Return value description
-- Side effects (if any)
+- Side effects
 - Exceptions/errors that may be thrown
 
 ### General Documentation
 
 Implementations SHOULD document:
 
-- All public API functions and methods
-- Complex algorithms with explanatory comments
+- Complex algorithms with explanatory comments, subject to the [Comment Policy](#comment-policy)
 - Non-obvious implementation decisions
 
 ### Code-Documentation Synchronization
@@ -305,6 +299,8 @@ When modifying code, implementations MUST update associated documentation.
 Implementations MUST NOT leave documentation stale after a code change; stale documentation is worse than no documentation.
 
 ### Comment Policy
+
+This policy governs inline code comments. Function headers (docstrings) are not subject to it; they follow [Function Documentation](#function-documentation) above.
 
 Comments are absent by default. Implementations MUST NOT add comments unless the user explicitly requests them, or the narrow exception below applies. Before adding any comment, implementations MUST first attempt self-explanatory code: renaming variables, functions, or types; extracting logic into named functions; simplifying expressions; introducing named constants.
 
@@ -323,6 +319,8 @@ External library workarounds are the exception: they MUST be documented in comme
 
 Choose the right home for information: inline comments for immediate code context and library workarounds; commit messages for what changed, why, and bug-fix history; formal documentation for architecture, API specifications, and deployment guidance.
 
+---
+
 ## Type Safety Requirements
 
 ### Strict Typing Requirement
@@ -333,16 +331,17 @@ This includes:
 
 - Enabling strict/pedantic compiler flags
 - Using static type checkers where available
-- Annotating function signatures with explicit types
+- Annotating function signatures per [Type Annotation Boundaries](#type-annotation-boundaries)
 - Avoiding type-escape mechanisms (e.g., `any`, `Object`, `void*`, dynamic casts)
 
 ### Type-Escape Exceptions
 
-Type-escape mechanisms MAY be used ONLY when:
+Type-escape mechanisms MAY be used ONLY when a concrete technical constraint requires it:
 
 - Interfacing with untyped external libraries
 - The type system cannot express the required constraint
-- The limitation is documented in a code comment explaining why
+
+An escape MUST be justified by the specific constraint, not merely asserted, and MUST be documented in a code comment explaining why the type system cannot express the requirement.
 
 ### Type Annotation Boundaries
 
@@ -379,6 +378,20 @@ Implementations MUST NOT suppress:
 - Unused variable warnings (remove the variable instead)
 - Any warning that can be resolved by fixing the code
 
+For these categories the sanctioned responses are fixing the code, restructuring the implementation, or escalating to the user or maintainer; suppression is barred even where the warning appears to be an unfixable false positive.
+
+### Naming Conventions
+
+Case style (camelCase, snake_case, and similar) follows the project's linter or formatter configuration per [Community Standards and Configuration](#community-standards-and-configuration); this subsection governs semantic naming.
+
+Implementations MUST use descriptive, proportionate names for variables and functions:
+
+- Variables and functions MUST have descriptive names; one- and two-letter names are barred except for loop counters in tight scopes (e.g., `i`) and established identifiers (e.g., `id`)
+- Function names MUST state the operation performed as a concise verb phrase (`parseConfig`), neither cryptic (`do`) nor padded (`parseTheConfigurationFileFromDisk`)
+- Abbreviations MUST NOT truncate words into opaque fragments (`cnt`, `usrMgr`); established domain terms (`config`, `auth`) are acceptable
+- One concept keeps one name across the codebase; mixing synonyms for the same concept (`fetch` and `retrieve` for one operation) is barred
+- Boolean identifiers MUST read as predicates (`isValid`, `hasAccess`)
+
 ### Community Standards and Configuration
 
 Implementations MUST use widely accepted community coding standards, linters, and formatters for the target language and framework.
@@ -387,8 +400,9 @@ Implementations MUST use widely accepted community coding standards, linters, an
 - Minimize deviations; when deviations are necessary, document specific justifications.
 - Commit lint and format configurations to version control and enforce them in CI.
 - Where a standard formatter exists, implementations MUST use it consistently rather than introducing competing tools.
-- Implementations SHOULD prefer stable, well‑maintained tools with broad adoption.
+- Implementations SHOULD prefer stable, well-maintained tools with broad adoption.
 
+---
 
 ## Security Requirements
 
@@ -437,7 +451,7 @@ Secrets MUST be loaded from:
 
 ### Extended Security Considerations
 
-For security-sensitive applications, implementations MUST address the following according to project security requirements:
+An application is security-sensitive when it exposes a network service or handles authentication, personal data, or payment data. For security-sensitive applications, implementations MUST address the following according to project security requirements:
 
 - Authentication and authorization patterns
 - Session management and token handling
@@ -514,7 +528,7 @@ When a simple solution is chosen over a more comprehensive one for pragmatic rea
 
 1. Document that a simpler approach was taken
 2. Describe what the more comprehensive/correct solution would entail
-3. Create a tracking item (issue, TODO, or ticket) for the future improvement
+3. Create a tracking item (issue, tracked TODO, or ticket) for the future improvement
 
 This documentation ensures technical debt is visible and actionable.
 
