@@ -47,9 +47,9 @@ Project Root/
 └── .tasks/
     ├── dashboard.md                              # Jira-style dashboard board
     ├── current/
-    │   └── YYYYMMDD-HHMM-task-description.md      # Active and recently completed task files
+    │   └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Active and recently completed task files
     └── archive/
-        └── YYYYMMDD-HHMM-task-description.md      # Archived task files
+        └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Archived task files
 ```
 
 Only `dashboard.md` sits at the top of `.tasks/`; every individual task file lives in `current/` or `archive/`. When a task is moved to the dashboard's Archive table, its file MUST be moved from `current/` into `archive/`. The directory is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
@@ -62,12 +62,13 @@ Users SHOULD add `.tasks/` to their global gitignore, or MAY commit it selective
 
 | Component | Requirement |
 |-----------|-------------|
-| Pattern | `YYYYMMDD-HHMM-task-description.md` |
+| Pattern | `PREFIX-N-YYYYMMDD-HHMM-task-description.md` |
+| Task ID | Verbatim Task ID in its canonical case (e.g. `AUTH-1`, `LRU-4-2`), so `ID` references, tab completion, and `ls PREFIX-N*` resolve directly to the file |
 | Date/Time | 24-hour format, local time |
 | Description | Kebab-case, 3-5 words maximum |
-| Example | `20241222-0710-api-auth-refactor.md` |
+| Example | `AUTH-1-20241222-0710-api-auth-refactor.md` |
 
-The kebab-case rule governs the **filename** only. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title, the dashboard link text, and prose references) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles, coordinating conjunctions, and prepositions of three letters or fewer when mid-title. Example: filename `20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`.
+The kebab-case rule governs the **description component of the filename** only; the Task ID component keeps its canonical uppercase form. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title, the dashboard link text, and prose references) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles, coordinating conjunctions, and prepositions of three letters or fewer when mid-title. Example: filename `AUTH-1-20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`.
 
 ---
 
@@ -98,7 +99,7 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 | Task | Progress | Updated | Priority |
 |------|----------|---------|----------|
-| [Task Name](./current/20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
+| [Task Name](./current/AUTH-1-20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
 
 **Note:** Details of what was done and what remains live in the task file itself, not on the board.
 

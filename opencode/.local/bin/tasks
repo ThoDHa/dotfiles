@@ -6,7 +6,7 @@
 # files under a process-held flock on .tasks/.lock, so concurrent sessions
 # serialize harmlessly and never lose an update. Task ownership is claimed
 # atomically via an O_EXCL sidecar (<taskfile>.claim), never by editing a
-# text field. See ~/.config/opencode/rules/task-files.md, section
+# text field. See ~/.agents/skills/task-files/SKILL.md, section
 # "Concurrency and Multi-Session Safety".
 
 set -euo pipefail
@@ -39,6 +39,13 @@ valid_status() {
 		"$STATUS_TRIAGE"|"$STATUS_READY"|"$STATUS_IN_PROGRESS"|"$STATUS_BLOCKED"|"$STATUS_CANCELLED"|"$STATUS_COMPLETED") return 0 ;;
 		*) return 1 ;;
 	esac
+}
+
+# Task IDs are PREFIX-N with optional hierarchical -N segments (LRU-4,
+# LRU-4-2). The ID leads the filename, so anything outside this shape
+# (spaces, slashes, glob characters) must never reach a path.
+valid_task_id() {
+	[[ "$1" =~ ^[A-Za-z]+(-[0-9]+)+$ ]]
 }
 
 # A stable per-session identifier for claims. Callers may override with
@@ -323,6 +330,7 @@ cmd_new() {
 	done
 	[[ -n "$id" ]] || die "new: --id is required"
 	[[ -n "$name" ]] || die "new: --name is required"
+	valid_task_id "$id" || die "new: invalid task ID: $id (expected PREFIX-N, hierarchically PREFIX-N-N)"
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
@@ -373,8 +381,8 @@ EOF
 	local slug; slug="$(slugify "$name")"
 	local n=1 candidate file
 	while :; do
-		if ((n == 1)); then candidate="$tasks_dir/$CURRENT_DIR/$stamp-$slug.md"
-		else candidate="$tasks_dir/$CURRENT_DIR/$stamp-$slug-$n.md"; fi
+		if ((n == 1)); then candidate="$tasks_dir/$CURRENT_DIR/$id-$stamp-$slug.md"
+		else candidate="$tasks_dir/$CURRENT_DIR/$id-$stamp-$slug-$n.md"; fi
 		if (set -o noclobber; printf '%s\n' "$body" >"$candidate") 2>/dev/null; then
 			file="$candidate"
 			break
