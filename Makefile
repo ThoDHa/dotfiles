@@ -24,7 +24,8 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks test-termux test-litellm
+.PHONY: clean-stow test test-links test-rules test-tasks test-termux test-litellm test-agents
+.PHONY: generate-safe-agents
 .PHONY: litellm-refresh
 .PHONY: sync-claudecode stow-claudecode
 
@@ -165,7 +166,7 @@ EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 EXPECTED_SKILLS := $(foreach d,$(wildcard agents/.agents/skills/*),$(notdir $(d)))
 
 # Test all symlinks exist and opencode loads rules
-test: test-links test-rules test-tasks test-termux test-litellm
+test: test-links test-rules test-tasks test-termux test-litellm test-agents
 	@echo ""
 	@echo "All tests passed!"
 
@@ -228,6 +229,16 @@ test-litellm:
 	@echo "Testing litellm package..."
 	@bash tests/litellm/test-litellm.sh
 
+# Test the agent suite: safe-variant pinning, preamble, dispatch isolation
+test-agents:
+	@echo "Testing agent suite..."
+	@bash tests/agents/test-agents.sh
+
+# Regenerate the PII-safe agent files from their base agents after any
+# base-agent edit; tests/agents/test-agents.sh fails on divergence
+generate-safe-agents:
+	@bash opencode/.local/bin/generate-safe-agents
+
 # Refresh the LiteLLM model_list from the live Zen catalog (explicit-run
 # only; see opencode/GATEWAY.md maintenance section for why never at start)
 litellm-refresh:
@@ -264,6 +275,10 @@ help:
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-litellm - Verify LiteLLM gateway config and model generator"
+	@echo "  make test-agents  - Verify agent suite pinning and dispatch isolation"
+	@echo ""
+	@echo "Generation:"
+	@echo "  make generate-safe-agents - Regenerate PII-safe agents from base agents"
 	@echo ""
 	@echo "Gateway:"
 	@echo "  make litellm-refresh - Refresh LiteLLM model_list from the live Zen catalog"

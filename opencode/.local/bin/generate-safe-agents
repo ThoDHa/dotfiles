@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Derives the four PII-safe agent files from their base agents: frontmatter
+# deltas (description, pinning policy, inverse task allow-list), agent-name
+# renames in the manager body, and the safe preamble. The base files are
+# the single source of truth: after editing a base agent, run
+# `make generate-safe-agents` and commit the regenerated twins together.
+# tests/agents/test-agents.sh enforces parity by regenerating and diffing.
+
+set -euo pipefail
+
+AGENTS_DIR="${AGENTS_DIR:-$(cd "$(dirname "$0")/../../.config/opencode/agents" && pwd)}"
+
+AGENTS_DIR="$AGENTS_DIR" python3 <<'PY'
+import os
+import re
+
+agents_dir = os.environ["AGENTS_DIR"]
+
+def read(name):
+    with open(os.path.join(agents_dir, name)) as f:
+        return f.read()
+
+def split_frontmatter(text):
+    parts = text.split("---\n", 2)
+    return parts[1], parts[2]
+
+def rename_agents(body):
+    body = re.sub(r"\bworkers\b", "workers-safe", body)
+    body = re.sub(r"\bworker\b", "worker-safe", body)
+    body = re.sub(r"\bverifier\b", "verifier-safe", body)
+    body = re.sub(r"\breviewer\b", "reviewer-safe", body)
+    return body
+
+PREAMBLE_MANAGER = """You are the PII-safe manager variant. Every request in this suite runs
+on the paid z.ai coding plan through the native provider: you MUST
+dispatch exclusively to worker-safe, verifier-safe, and reviewer-safe, and
+you MUST NOT dispatch worker, verifier, or reviewer, whose prompts and
+models are not PII-safe. You MUST NOT select, name, or suggest gateway
+models such as gateway/cascade for any purpose, and you MUST NOT use
+webfetch or MCP tools on sensitive content.
+
+"""
+
+PREAMBLE_SUB = """You are the PII-safe {role} variant: your model is pinned to the paid
+z.ai coding plan, and nothing you run goes through the LiteLLM gateway or
+free-tier models. If a task seems to require a gateway model or any other
+provider switch, flag it in your report under Unfinished instead of
+attempting it.
+
+"""
+
+def write(name, fm, body):
+    with open(os.path.join(agents_dir, name), "w") as f:
+        f.write("---\n" + fm + "---\n" + body)
+
+fm, body = split_frontmatter(read("manager.md"))
+fm = fm.replace(
+    "description: Manager that delegates all work to subagents and reviews results",
+    "description: PII-safe manager that delegates exclusively to safe subagents on paid models",
+)
+fm = fm.replace("color: success", "color: warning")
+fm = rename_agents(fm)
+write("manager-safe.md", fm, PREAMBLE_MANAGER + rename_agents(body))
+
+fm, body = split_frontmatter(read("worker.md"))
+fm = fm.replace(
+    "description: Executes implementation tasks end to end",
+    "description: Executes implementation tasks end to end (PII-safe: paid model, no gateway)",
+)
+write("worker-safe.md", fm, PREAMBLE_SUB.format(role="worker") + body)
+
+fm, body = split_frontmatter(read("verifier.md"))
+fm = fm.replace(
+    "description: Runs tests, linters, and typecheckers and reports raw results without interpretation",
+    "description: Runs tests, linters, and typecheckers and reports raw results (PII-safe: paid model, no gateway)",
+)
+write("verifier-safe.md", fm, PREAMBLE_SUB.format(role="verifier") + body)
+
+fm, body = split_frontmatter(read("reviewer.md"))
+fm = fm.replace(
+    "description: Reviews completed work via the simplify-review loop and reports findings",
+    "description: Reviews completed work via the simplify-review loop (PII-safe: paid model, no gateway)",
+)
+write("reviewer-safe.md", fm, PREAMBLE_SUB.format(role="reviewer") + body)
+PY
