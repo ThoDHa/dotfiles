@@ -110,8 +110,10 @@ dry-run:
 #   isort config               — may exist from a prior isort install
 #   .config/opencode           — may exist from a prior opencode install
 #   .claude/{...}              — targeted removal: ~/.claude also holds runtime data
+#   .agents                    — whole tree is stow-owned; drops links to a moved repo
+#   DESIGN/GATEWAY/PII-SAFE.md — legacy links from before these docs were ignored
 clean-stow:
-	@echo "Cleaning up conflicting files for stow..."
+	@echo "Cleaning up conflicting files for stowing..."
 	@rm -f \
 		$(STOW_TARGET)/.zshrc \
 		$(STOW_TARGET)/.tmux.conf \
@@ -120,8 +122,11 @@ clean-stow:
 		$(STOW_TARGET)/.config/isort/config.toml \
 		$(STOW_TARGET)/.claude/generate-claude-md.sh \
 		$(STOW_TARGET)/.claude/settings.json \
-		$(STOW_TARGET)/.claude/.gitignore
-	@rm -rf $(STOW_TARGET)/.config/opencode
+		$(STOW_TARGET)/.claude/.gitignore \
+		$(STOW_TARGET)/DESIGN.md \
+		$(STOW_TARGET)/GATEWAY.md \
+		$(STOW_TARGET)/PII-SAFE.md
+	@rm -rf $(STOW_TARGET)/.config/opencode $(STOW_TARGET)/.agents
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
 # ── Claude Code Configuration ─────────────────────────────────────────────────
