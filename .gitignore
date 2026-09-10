@@ -15,3 +15,6 @@ Thumbs.db
 
 # Manager Mode worktrees
 .worktrees/
+
+# LiteLLM secrets
+litellm/.config/litellm/env

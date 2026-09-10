@@ -2,7 +2,7 @@ CURRENT_DIR := $(notdir $(CURDIR))
 CONTAINER   := base_dev
 
 # Stow packages (Linux dotfiles)
-STOW_PACKAGES_ALL := shell tmux isort agents opencode claudecode
+STOW_PACKAGES_ALL := shell tmux isort agents opencode claudecode litellm
 STOW_TARGET   := $(HOME)
 
 # Optional tool packages are stowed only when the tool is installed.
@@ -12,7 +12,7 @@ OPENCODE_PRESENT  := $(shell command -v opencode >/dev/null 2>&1 && echo 1)
 CLAUDE_PRESENT    := $(shell command -v claude >/dev/null 2>&1 && echo 1)
 OPENCODE_STOW     := $(if $(or $(FORCE_OPENCODE),$(OPENCODE_PRESENT)),opencode)
 CLAUDECODE_STOW   := $(if $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT)),claudecode)
-STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
+STOW_PACKAGES     := shell tmux isort agents litellm $(OPENCODE_STOW) $(CLAUDECODE_STOW)
 SKIPPED_PACKAGES  := $(filter-out $(STOW_PACKAGES),$(STOW_PACKAGES_ALL))
 CLAUDE_SYNC       := $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT))
 
@@ -24,7 +24,8 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks test-termux
+.PHONY: clean-stow test test-links test-rules test-tasks test-termux test-litellm
+.PHONY: litellm-refresh
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -164,7 +165,7 @@ EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 EXPECTED_SKILLS := $(foreach d,$(wildcard agents/.agents/skills/*),$(notdir $(d)))
 
 # Test all symlinks exist and opencode loads rules
-test: test-links test-rules test-tasks test-termux
+test: test-links test-rules test-tasks test-termux test-litellm
 	@echo ""
 	@echo "All tests passed!"
 
@@ -222,6 +223,16 @@ test-termux:
 	@echo "Testing termux bootstrap script..."
 	@bash tests/termux/test-termux.sh
 
+# Test the litellm package: config structure, compose posture, generator merge
+test-litellm:
+	@echo "Testing litellm package..."
+	@bash tests/litellm/test-litellm.sh
+
+# Refresh the LiteLLM model_list from the live Zen catalog (explicit-run
+# only; see opencode/GATEWAY.md maintenance section for why never at start)
+litellm-refresh:
+	@bash litellm/.config/litellm/generate-models.sh
+
 # Help
 help:
 	@echo "Dotfiles Management"
@@ -252,6 +263,10 @@ help:
 	@echo "  make test-links  - Verify all symlinks exist"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
+	@echo "  make test-litellm - Verify LiteLLM gateway config and model generator"
+	@echo ""
+	@echo "Gateway:"
+	@echo "  make litellm-refresh - Refresh LiteLLM model_list from the live Zen catalog"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
