@@ -1,6 +1,6 @@
 ---
 name: task-files
-description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, and the tasks CLI. Use when the user requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode, or mentions dashboard.md or .tasks.
+description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode, or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
 ---
 
 > Manager Mode mechanics are defined in the `delegation` skill. Load it when Manager Mode activates.
@@ -28,13 +28,23 @@ Task files MUST be created ONLY when:
 - User explicitly requests task file creation or planning documentation
 - User requests in-depth documentation of work performed, findings, or decisions (e.g., "full report", "document your findings", "write up what you found")
 - User explicitly activates Manager Mode
-- User explicitly confirms delegation at the 4+ todo item threshold
+- User explicitly confirms task file tracking after being offered for a large task (4+ todos) per [Large Task Offer](#large-task-offer)
 
 Casual summary requests ("summarize", "quick recap") do NOT trigger task file creation.
+
+Choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt does NOT by itself authorize task file creation.
 
 ### Creation Prohibition
 
 Task files MUST NOT be created proactively without user request. Standard todo tracking via TodoWrite is sufficient for most operations.
+
+### Directory Presence Is Not Activation
+
+An existing `.tasks/` directory (from prior sessions, other work, or `tasks init`) does NOT activate this protocol. Implementations MUST NOT load this skill, create task files, or update the dashboard merely because the directory exists or appears in tool output (listings, glob results, context hints). Usage begins ONLY through the explicit triggers in [Creation Triggers](#creation-triggers); absent such a trigger, track work with TodoWrite and leave `.tasks/` untouched.
+
+### Large Task Offer
+
+When a task generates 4 or more todos, implementations MUST offer task file tracking separately from the execution approach prompt: after the user chooses Sequential, Parallel delegation, or Parallel with worktrees, ask whether to track the work in a task file, and create one ONLY on explicit confirmation. Declining task files does NOT change the chosen execution approach.
 
 ---
 

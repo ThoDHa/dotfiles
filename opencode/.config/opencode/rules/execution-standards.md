@@ -77,6 +77,8 @@ Implementations MUST wait for user response before proceeding.
 
 The keywords in each row are accepted synonyms for the options presented in the [Required Prompt](#required-prompt) prompt. The "Parallel with worktrees" row applies only when that option was listed per the [Required Prompt](#required-prompt) conditions.
 
+Task file tracking is NOT part of this prompt. Choosing Sequential, Parallel delegation, or Parallel with worktrees decides execution approach only and does NOT authorize task file creation. Task files require a separate explicit confirmation per the `task-files` skill [Large Task Offer](#large-task-offer).
+
 Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
 
 ---
