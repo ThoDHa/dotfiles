@@ -5,6 +5,18 @@
     "~/.config/opencode/rules/coding-standards.md",
     "~/.config/opencode/rules/execution-standards.md"
   ],
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "-y", "@playwright/mcp"],
+      "enabled": true
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true
+    }
+  },
   "permission": {
     "external_directory": {
       "/tmp/**": "allow"
