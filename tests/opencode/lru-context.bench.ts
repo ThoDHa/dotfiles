@@ -129,7 +129,7 @@ const median = (values: number[]): number => {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
 }
 
-const hooks = (await lruContextFactory({}, { defaultContextTokens: BENCH_CONTEXT_TOKENS })) as Record<
+const hooks = (await lruContextFactory({}, { defaultContextTokens: BENCH_CONTEXT_TOKENS, metricsLog: false })) as Record<
   string,
   (input: unknown, output: unknown) => Promise<unknown>
 >

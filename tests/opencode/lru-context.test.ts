@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
+import { join } from "node:path"
 import { test } from "node:test"
 
 import lruContextFactory from "../../opencode/.config/opencode/plugin/lru-context.ts"
@@ -210,10 +213,10 @@ const buildSmallBundle = (): MessageBundle => ({
   ],
 })
 
-const loadPluginHooks = async (): Promise<HookMap> => (await lruContextFactory({}, {})) as HookMap
+const loadPluginHooks = async (): Promise<HookMap> => (await lruContextFactory({}, { metricsLog: false })) as HookMap
 
 const loadPluginHooksWith = async (options: Record<string, unknown>): Promise<HookMap> =>
-  (await lruContextFactory({}, options)) as HookMap
+  (await lruContextFactory({}, { metricsLog: false, ...options })) as HookMap
 
 type HintPartRef = { messageIndex: number; partIndex: number; text: string }
 
@@ -2045,4 +2048,410 @@ test("read_evicted keeps both same message same subject evictions reloadable ins
     await readEvicted(hooks, COLLISION_SUBJECT_PATH, SESSION_ID),
     `${outputOfBytes(COLD_OUTPUT_BYTES)}\n${olderMatchesLineFor(COLLISION_SUBJECT_PATH, [pointerFor(READ_TOOL, 0)])}`,
   )
+})
+
+const STATS_TOOL_NAME = "lru_stats"
+const METRICS_DIR_SEGMENTS = [".local", "share", "opencode"]
+const METRICS_LOG_BASENAME = "lru-metrics.jsonl"
+const DEFAULT_METRICS_PATH = join(homedir(), ...METRICS_DIR_SEGMENTS, METRICS_LOG_BASENAME)
+const METRICS_TEMP_DIR_PREFIX = "lru-metrics-test-"
+const METRICS_LOG_FILE_NAME = "metrics.jsonl"
+const METRICS_BLOCKED_DIR_NAME = "missing-subdir"
+const METRICS_LINE_SEPARATOR = "\n"
+const CONTEXT_TOKENS_SOURCE_MODEL = "model"
+const CONTEXT_TOKENS_SOURCE_DEFAULT = "default"
+const POST_EVICT_TOUCH_PATH = "/data/post-touch.txt"
+const POST_EVICT_UNMATCHED_PATH = "/data/post-touch-unmatched.txt"
+const STATS_MISS_SUBJECT = "/data/stats-miss.txt"
+const STATS_HIT_SUBJECT = "/data/stats-hit.txt"
+const STATS_STASH_SUBJECT_PREFIX = "/data/stats-stash"
+const STATS_STASH_SUBJECT_SUFFIX = ".txt"
+const STATS_LOGGED_SUBJECT = "/data/logged.txt"
+const STATS_RELOADED_SUBJECT = "/data/reload-logged.txt"
+const STATS_UNLOGGED_SUBJECT = "/data/unlogged.txt"
+const STATS_BLOCKED_SUBJECT = "/data/blocked-log.txt"
+const STATS_SINGLE_EVICTION_SUBJECT = "/data/isolated-a.txt"
+const STATS_ISOLATION_B_SUBJECTS = ["/data/isolated-b1.txt", "/data/isolated-b2.txt", "/data/isolated-b3.txt"]
+const STATS_ISOLATION_B_EVICTED_COUNT = 2
+const METRICS_SESSION_BOUND = 8
+const METRICS_SESSION_OVERFLOW_COUNT = 9
+const METRICS_PROBE_SESSION_ID = "lru-metrics-probe-session"
+const METRICS_PROBE_MISS_SUBJECT = "/data/metrics-probe-miss.txt"
+const METRICS_LINES_AFTER_RELOAD = 2
+const METRICS_LINES_AFTER_RECOVERY = 1
+const STATS_ZEROED_COUNTERS = {
+  evictions: 0,
+  bytesReclaimed: 0,
+  stashHits: 0,
+  stashMisses: 0,
+  stashDropped: 0,
+  deduped: 0,
+  postEvictionTouches: 0,
+}
+const STATS_LOG_FILE_LINES = 1
+
+type StatsToolDefinition = { execute: (args: unknown, context: unknown) => Promise<unknown> }
+
+const lruStats = async (hooks: HookMap, sessionID: string): Promise<Record<string, unknown>> =>
+  JSON.parse(
+    (await (hooks as Record<string, Record<string, StatsToolDefinition>>)[RELOAD_TOOL_MAP_KEY][STATS_TOOL_NAME].execute(
+      {},
+      { sessionID },
+    )) as string,
+  ) as Record<string, unknown>
+
+const countersOf = (stats: Record<string, unknown>): Record<string, number> => stats.counters as Record<string, number>
+
+const makeMetricsDir = (): string => mkdtempSync(join(tmpdir(), METRICS_TEMP_DIR_PREFIX))
+
+const metricsLogPathIn = (dir: string): string => join(dir, METRICS_LOG_FILE_NAME)
+
+const blockedMetricsPathIn = (dir: string): string => join(dir, METRICS_BLOCKED_DIR_NAME, METRICS_LOG_FILE_NAME)
+
+const cleanupMetricsDir = (dir: string): void => rmSync(dir, { recursive: true, force: true })
+
+const loadPluginHooksWithMetricsLog = async (metricsPath: string): Promise<HookMap> =>
+  loadPluginHooksWith({ metricsLog: true, metricsPath })
+
+const metricsLinesIn = (metricsPath: string): Record<string, unknown>[] =>
+  readFileSync(metricsPath, "utf8")
+    .split(METRICS_LINE_SEPARATOR)
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+const metricsSessionId = (index: number): string => `lru-metrics-session-${index}`
+
+const metricsSessionSubject = (index: number): string => `/data/metrics-session-${index}.txt`
+
+const storeMetricsSession = async (hooks: HookMap, index: number): Promise<void> => {
+  await setContextLimit(hooks, metricsSessionId(index), WATERMARK_PROBE_CONTEXT_LIMIT)
+  await runTransform(hooks, buildStandardBundle(metricsSessionId(index), metricsSessionSubject(index)))
+}
+
+test("lru_stats reports zeroed counters default budget and empty stash for a session without activity", async () => {
+  const hooks = await loadPluginHooks()
+
+  const stats = await lruStats(hooks, SESSION_ID)
+
+  assert.equal(stats.session, SESSION_ID)
+  assert.deepEqual(stats.options, {
+    watermark: WATERMARK_RATIO,
+    recentWindow: RECENT_WINDOW_MESSAGES,
+    minEvictableBytes: MIN_EVICTABLE_BYTES,
+    defaultContextTokens: DEFAULT_CONTEXT_TOKENS,
+    metricsLog: false,
+    metricsPath: DEFAULT_METRICS_PATH,
+  })
+  assert.equal(stats.modelContextTokens, DEFAULT_CONTEXT_TOKENS)
+  assert.equal(stats.modelContextTokensSource, CONTEXT_TOKENS_SOURCE_DEFAULT)
+  assert.deepEqual(stats.stash, { entries: 0, capacity: STASH_LIMIT })
+  assert.deepEqual(countersOf(stats), STATS_ZEROED_COUNTERS)
+  assert.equal(stats.lastRun, null)
+  assert.equal(Object.hasOwn(stats, "logWriteError"), false)
+})
+
+test("lru_stats counts the eviction reclaimed bytes stash entry and last run deficit after one eviction run", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+  const bundle = buildStandardBundle(SESSION_ID, STATS_SINGLE_EVICTION_SUBJECT)
+  await runTransform(hooks, bundle)
+
+  const stats = await lruStats(hooks, SESSION_ID)
+  assert.equal(stats.modelContextTokens, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+  assert.equal(stats.modelContextTokensSource, CONTEXT_TOKENS_SOURCE_MODEL)
+  assert.deepEqual(countersOf(stats), {
+    ...STATS_ZEROED_COUNTERS,
+    evictions: 1,
+    bytesReclaimed: MIN_EVICTABLE_BYTES,
+  })
+  assert.deepEqual(stats.stash, { entries: 1, capacity: STASH_LIMIT })
+  assert.deepEqual(stats.lastRun, {
+    estimatedTokens: tokensForChars(STANDARD_BUNDLE_CHARS),
+    watermarkTokens: tokensForChars(STANDARD_BUNDLE_CHARS) - OVER_BY_ONE_TOKENS,
+    deficitTokens: OVER_BY_ONE_TOKENS,
+  })
+})
+
+test("lru_stats counts stash hits and misses from read_evicted and leaves invalid subject arguments uncounted", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  assert.equal(await readEvicted(hooks, STATS_MISS_SUBJECT, SESSION_ID), stashMissFor(STATS_MISS_SUBJECT))
+  assert.deepEqual(countersOf(await lruStats(hooks, SESSION_ID)), STATS_ZEROED_COUNTERS)
+
+  const bundle = buildStandardBundle(SESSION_ID, STATS_HIT_SUBJECT)
+  await runTransform(hooks, bundle)
+
+  assert.equal(await readEvicted(hooks, STATS_MISS_SUBJECT, SESSION_ID), stashMissFor(STATS_MISS_SUBJECT))
+  const afterMiss = await lruStats(hooks, SESSION_ID)
+  assert.deepEqual(countersOf(afterMiss), {
+    ...STATS_ZEROED_COUNTERS,
+    evictions: 1,
+    bytesReclaimed: MIN_EVICTABLE_BYTES,
+    stashMisses: 1,
+  })
+
+  assert.equal(await readEvicted(hooks, INVALID_SUBJECT_VALUE, SESSION_ID), invalidSubjectMissFor("number"))
+  assert.equal(await readEvicted(hooks, "", SESSION_ID), invalidSubjectMissFor("string"))
+  const afterInvalid = await lruStats(hooks, SESSION_ID)
+  assert.equal(countersOf(afterInvalid).stashMisses, 1)
+  assert.equal(countersOf(afterInvalid).stashHits, 0)
+
+  assert.equal(await readEvicted(hooks, STATS_HIT_SUBJECT, SESSION_ID), outputOfBytes(MIN_EVICTABLE_BYTES))
+  const afterHit = await lruStats(hooks, SESSION_ID)
+  assert.deepEqual(countersOf(afterHit), {
+    ...STATS_ZEROED_COUNTERS,
+    evictions: 1,
+    bytesReclaimed: MIN_EVICTABLE_BYTES,
+    stashHits: 1,
+    stashMisses: 1,
+  })
+})
+
+test("lru_stats counts a post eviction touch exactly once for a matching later call and never recounts repeated transforms", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildStandardBundle(SESSION_ID, POST_EVICT_TOUCH_PATH)
+  await runTransform(hooks, bundle)
+  assert.ok(toolPartAt(bundle.messages[0], 0).state.output.startsWith(TOMBSTONE_MARKER))
+
+  bundle.messages.push(syntheticMessageFor(SESSION_ID, [pathToolPart(POST_EVICT_TOUCH_PATH, APPEARANCE_ONLY_OUTPUT_BYTES)]))
+  await runTransform(hooks, bundle)
+  assert.equal(countersOf(await lruStats(hooks, SESSION_ID)).postEvictionTouches, 1)
+
+  await runTransform(hooks, bundle)
+  assert.equal(countersOf(await lruStats(hooks, SESSION_ID)).postEvictionTouches, 1)
+})
+
+test("lru_stats leaves post eviction touches at zero when a later call matches nothing evicted", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildStandardBundle(SESSION_ID, POST_EVICT_TOUCH_PATH)
+  await runTransform(hooks, bundle)
+
+  bundle.messages.push(
+    syntheticMessageFor(SESSION_ID, [pathToolPart(POST_EVICT_UNMATCHED_PATH, APPEARANCE_ONLY_OUTPUT_BYTES)]),
+  )
+  await runTransform(hooks, bundle)
+
+  assert.equal(countersOf(await lruStats(hooks, SESSION_ID)).postEvictionTouches, 0)
+})
+
+test("lru_stats counts dedup tombstones without counting evictions and stays incremental across repeated transforms", async () => {
+  const hooks = await loadPluginHooks()
+
+  const bundle = buildBundle([
+    [pathToolPart(DEDUP_PATH, THREE_ENTRY_OUTPUT_BYTES)],
+    ...fillerMessages(2),
+    [pathToolPart(DEDUP_PATH, THREE_ENTRY_OUTPUT_BYTES)],
+    ...fillerMessages(2),
+  ])
+  await runTransform(hooks, bundle)
+
+  const stats = await lruStats(hooks, SESSION_ID)
+  assert.equal(countersOf(stats).deduped, 1)
+  assert.equal(countersOf(stats).evictions, 0)
+
+  await runTransform(hooks, bundle)
+  assert.equal(countersOf(await lruStats(hooks, SESSION_ID)).deduped, 1)
+})
+
+test("lru_stats counts stash drops when a single run evicts fifty one entries past the stash bound", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, WATERMARK_PROBE_CONTEXT_LIMIT)
+
+  const bundle = buildBundle([
+    ...Array.from(
+      { length: STASH_OVERFLOW_COUNT },
+      (_, index) => [pathToolPart(`${STATS_STASH_SUBJECT_PREFIX}${index}${STATS_STASH_SUBJECT_SUFFIX}`, MIN_EVICTABLE_BYTES)],
+    ),
+    ...fillerMessages(),
+  ])
+  await runTransform(hooks, bundle)
+
+  const stats = await lruStats(hooks, SESSION_ID)
+  assert.equal(countersOf(stats).evictions, STASH_OVERFLOW_COUNT)
+  assert.equal(countersOf(stats).stashDropped, 1)
+  assert.equal(countersOf(stats).bytesReclaimed, STASH_OVERFLOW_COUNT * MIN_EVICTABLE_BYTES)
+  assert.deepEqual(stats.stash, { entries: STASH_LIMIT, capacity: STASH_LIMIT })
+})
+
+test("metrics log appends one eventful jsonl line with expected fields and nothing for a quiet repeated run", async () => {
+  const metricsDir = makeMetricsDir()
+  try {
+    const hooks = await loadPluginHooksWithMetricsLog(metricsLogPathIn(metricsDir))
+    await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+    const bundle = buildStandardBundle(SESSION_ID, STATS_LOGGED_SUBJECT)
+    await runTransform(hooks, bundle)
+
+    const lines = metricsLinesIn(metricsLogPathIn(metricsDir))
+    assert.equal(lines.length, STATS_LOG_FILE_LINES)
+    const line = lines[0]
+    assert.equal(typeof line.ts, "string")
+    assert.ok(Number.isNaN(new Date(line.ts as string).getTime()) === false)
+    assert.equal(line.session, SESSION_ID)
+    assert.equal(line.estimatedTokens, tokensForChars(STANDARD_BUNDLE_CHARS))
+    assert.equal(line.watermarkTokens, tokensForChars(STANDARD_BUNDLE_CHARS) - OVER_BY_ONE_TOKENS)
+    assert.equal(line.deficitTokens, OVER_BY_ONE_TOKENS)
+    assert.deepEqual(line.evictedThisRun, [
+      { tool: READ_TOOL, subject: STATS_LOGGED_SUBJECT, bytes: MIN_EVICTABLE_BYTES, messagesAgo: 5 },
+    ])
+    assert.equal(line.dedupedThisRun, 0)
+    assert.equal(line.postEvictionTouchesThisRun, 0)
+    assert.equal(line.stashReadsSinceLastLine, 0)
+    assert.deepEqual(line.totals, { ...STATS_ZEROED_COUNTERS, evictions: 1, bytesReclaimed: MIN_EVICTABLE_BYTES })
+
+    await runTransform(hooks, bundle)
+    assert.equal(metricsLinesIn(metricsLogPathIn(metricsDir)).length, STATS_LOG_FILE_LINES)
+  } finally {
+    cleanupMetricsDir(metricsDir)
+  }
+})
+
+test("metrics log records stash reads since the last line on the next transform after a reload", async () => {
+  const metricsDir = makeMetricsDir()
+  try {
+    const hooks = await loadPluginHooksWithMetricsLog(metricsLogPathIn(metricsDir))
+    await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+    const bundle = buildStandardBundle(SESSION_ID, STATS_RELOADED_SUBJECT)
+    await runTransform(hooks, bundle)
+    assert.equal(await readEvicted(hooks, STATS_RELOADED_SUBJECT, SESSION_ID), outputOfBytes(MIN_EVICTABLE_BYTES))
+
+    await runTransform(hooks, bundle)
+    const lines = metricsLinesIn(metricsLogPathIn(metricsDir))
+    assert.equal(lines.length, METRICS_LINES_AFTER_RELOAD)
+    assert.deepEqual(lines[1].evictedThisRun, [])
+    assert.equal(lines[1].stashReadsSinceLastLine, 1)
+    assert.deepEqual(lines[1].totals, {
+      ...STATS_ZEROED_COUNTERS,
+      evictions: 1,
+      bytesReclaimed: MIN_EVICTABLE_BYTES,
+      stashHits: 1,
+    })
+
+    await runTransform(hooks, bundle)
+    assert.equal(metricsLinesIn(metricsLogPathIn(metricsDir)).length, METRICS_LINES_AFTER_RELOAD)
+  } finally {
+    cleanupMetricsDir(metricsDir)
+  }
+})
+
+test("metrics log writes nothing when metricsLog is false while counters still update", async () => {
+  const metricsDir = makeMetricsDir()
+  try {
+    const hooks = await loadPluginHooksWith(metricsLogPathIn(metricsDir))
+    await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+    const bundle = buildStandardBundle(SESSION_ID, STATS_UNLOGGED_SUBJECT)
+    await runTransform(hooks, bundle)
+
+    assert.equal(existsSync(metricsLogPathIn(metricsDir)), false)
+    assert.equal(countersOf(await lruStats(hooks, SESSION_ID)).evictions, 1)
+  } finally {
+    cleanupMetricsDir(metricsDir)
+  }
+})
+
+test("metrics log records an unwritable path in logWriteError surfaced through lru_stats without throwing", async () => {
+  const metricsDir = makeMetricsDir()
+  try {
+    const hooks = await loadPluginHooksWithMetricsLog(blockedMetricsPathIn(metricsDir))
+    await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+    const bundle = buildStandardBundle(SESSION_ID, STATS_BLOCKED_SUBJECT)
+    await runTransform(hooks, bundle)
+
+    const stats = await lruStats(hooks, SESSION_ID)
+    assert.equal(typeof stats.logWriteError, "string")
+    assert.ok((stats.logWriteError as string).length > 0)
+    assert.equal(countersOf(stats).evictions, 1)
+  } finally {
+    cleanupMetricsDir(metricsDir)
+  }
+})
+
+test("lru_stats keeps metrics isolated between two sessions", async () => {
+  const hooks = await loadPluginHooks()
+  await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+  await setContextLimit(hooks, SESSION_ID_B, contextForDeficit(THREE_ENTRY_BUNDLE_CHARS, TWO_ENTRY_DEFICIT_TOKENS))
+
+  const sessionA = buildStandardBundle(SESSION_ID, STATS_SINGLE_EVICTION_SUBJECT)
+  const sessionB = buildBundle(
+    [
+      STATS_ISOLATION_B_SUBJECTS.map((subject) => pathToolPart(subject, THREE_ENTRY_OUTPUT_BYTES)),
+      ...fillerMessages(),
+    ],
+    SESSION_ID_B,
+  )
+  await runTransform(hooks, sessionB)
+  await runTransform(hooks, sessionA)
+
+  const statsA = await lruStats(hooks, SESSION_ID)
+  assert.equal(statsA.session, SESSION_ID)
+  assert.deepEqual(countersOf(statsA), { ...STATS_ZEROED_COUNTERS, evictions: 1, bytesReclaimed: MIN_EVICTABLE_BYTES })
+  const statsB = await lruStats(hooks, SESSION_ID_B)
+  assert.equal(statsB.session, SESSION_ID_B)
+  assert.deepEqual(countersOf(statsB), {
+    ...STATS_ZEROED_COUNTERS,
+    evictions: STATS_ISOLATION_B_EVICTED_COUNT,
+    bytesReclaimed: STATS_ISOLATION_B_EVICTED_COUNT * THREE_ENTRY_OUTPUT_BYTES,
+  })
+})
+
+test("lru_stats drops the least recently active session metrics when a ninth session transforms", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < METRICS_SESSION_BOUND; index += 1) await storeMetricsSession(hooks, index)
+
+  await storeMetricsSession(hooks, METRICS_SESSION_OVERFLOW_COUNT - 1)
+
+  assert.deepEqual(countersOf(await lruStats(hooks, metricsSessionId(0))), STATS_ZEROED_COUNTERS)
+  assert.equal(countersOf(await lruStats(hooks, metricsSessionId(1))).evictions, 1)
+  assert.equal(countersOf(await lruStats(hooks, metricsSessionId(METRICS_SESSION_BOUND - 1))).evictions, 1)
+  assert.equal(countersOf(await lruStats(hooks, metricsSessionId(METRICS_SESSION_OVERFLOW_COUNT - 1))).evictions, 1)
+})
+
+test("read_evicted leaves live session metrics untouched when a never-transformed session probes a stash miss at the session bound", async () => {
+  const hooks = await loadPluginHooks()
+  for (let index = 0; index < METRICS_SESSION_BOUND; index += 1) await storeMetricsSession(hooks, index)
+
+  assert.equal(
+    await readEvicted(hooks, METRICS_PROBE_MISS_SUBJECT, METRICS_PROBE_SESSION_ID),
+    stashMissFor(METRICS_PROBE_MISS_SUBJECT),
+  )
+
+  assert.equal(countersOf(await lruStats(hooks, metricsSessionId(0))).evictions, 1)
+  assert.equal(countersOf(await lruStats(hooks, metricsSessionId(METRICS_SESSION_BOUND - 1))).evictions, 1)
+  assert.deepEqual(countersOf(await lruStats(hooks, METRICS_PROBE_SESSION_ID)), STATS_ZEROED_COUNTERS)
+})
+
+test("metrics log clears a recorded write failure once a later write succeeds", async () => {
+  const metricsDir = makeMetricsDir()
+  try {
+    const blockedPath = blockedMetricsPathIn(metricsDir)
+    const hooks = await loadPluginHooksWithMetricsLog(blockedPath)
+    await setContextLimit(hooks, SESSION_ID, contextForDeficit(STANDARD_BUNDLE_CHARS, OVER_BY_ONE_TOKENS))
+
+    const bundle = buildStandardBundle(SESSION_ID, STATS_BLOCKED_SUBJECT)
+    await runTransform(hooks, bundle)
+    assert.equal(typeof (await lruStats(hooks, SESSION_ID)).logWriteError, "string")
+
+    mkdirSync(join(metricsDir, METRICS_BLOCKED_DIR_NAME), { recursive: true })
+    bundle.messages.push(
+      syntheticMessageFor(SESSION_ID, [pathToolPart(STATS_BLOCKED_SUBJECT, APPEARANCE_ONLY_OUTPUT_BYTES)]),
+    )
+    await runTransform(hooks, bundle)
+
+    const stats = await lruStats(hooks, SESSION_ID)
+    assert.equal(Object.hasOwn(stats, "logWriteError"), false)
+    assert.equal(countersOf(stats).evictions, 1)
+    assert.equal(countersOf(stats).postEvictionTouches, 1)
+    assert.equal(metricsLinesIn(blockedPath).length, METRICS_LINES_AFTER_RECOVERY)
+  } finally {
+    cleanupMetricsDir(metricsDir)
+  }
 })

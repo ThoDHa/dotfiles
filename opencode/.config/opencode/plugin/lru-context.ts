@@ -1,3 +1,6 @@
+import { appendFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 
 const EVICTION_MARKER = "[lru-evicted]"
@@ -51,6 +54,19 @@ const FALLBACK_SESSION_KEY = "no-session"
 const DEDUP_MARKER = "[lru-deduped]"
 const DEDUP_SUPERSEDED_LEAD = "identical call superseded by the newer output at message"
 const PURGED_INPUT_MARKER = "[lru-purged-input]"
+const MAX_METRICS_SESSIONS = 8
+const MAX_REMEMBERED_EVICTED_SUBJECTS = 100
+const TOUCH_SCAN_INITIAL_WATERMARK = -1
+const DEFAULT_METRICS_LOG_ENABLED = true
+const METRICS_DIR_SEGMENTS = [".local", "share", "opencode"]
+const METRICS_FILE_BASENAME = "lru-metrics.jsonl"
+const DEFAULT_METRICS_PATH = join(homedir(), ...METRICS_DIR_SEGMENTS, METRICS_FILE_BASENAME)
+const STATS_TOOL_NAME = "lru_stats"
+const STATS_TOOL_DESCRIPTION =
+  "Return live metrics for the LRU context manager in this session: eviction counters, post-eviction touches, stash occupancy, the effective context budget, and the most recent transform run's token estimate."
+const JSON_INDENT_SPACES = 2
+const CONTEXT_TOKENS_SOURCE_MODEL = "model"
+const CONTEXT_TOKENS_SOURCE_DEFAULT = "default"
 
 type LruContextOptions = {
   watermark?: number
@@ -59,6 +75,8 @@ type LruContextOptions = {
   defaultContextTokens?: number
   hintSubjects?: number
   protectedTools?: string[]
+  metricsLog?: boolean
+  metricsPath?: string
 }
 
 type ResolvedOptions = Required<LruContextOptions>
@@ -88,7 +106,49 @@ type EvictableEntry = {
 
 type HotSubject = { subject: Subject; lastTouch: number }
 
-type EvictionResult = { hotSubjects: HotSubject[] }
+type EvictionResult = {
+  hotSubjects: HotSubject[]
+  appearances: ToolAppearance[]
+  estimatedTokens: number
+  watermarkTokens: number
+  deficitTokens: number
+  evicted: EvictedEntryInfo[]
+  stashDropped: number
+}
+
+type EvictedEntryInfo = {
+  tool: string
+  subject: string
+  subjects: Subject[]
+  bytes: number
+  messagesAgo: number
+}
+
+type LastRunMetrics = { estimatedTokens: number; watermarkTokens: number; deficitTokens: number }
+
+type SessionMetrics = {
+  evictions: number
+  bytesReclaimed: number
+  stashHits: number
+  stashMisses: number
+  stashDropped: number
+  deduped: number
+  postEvictionTouches: number
+  evictedSubjects: Subject[]
+  touchScanThrough: number
+  stashReadsLoggedThrough: number
+  lastRun?: LastRunMetrics
+  logWriteError?: string
+}
+
+type MetricsStore = Map<string, SessionMetrics>
+
+type StatsSource = {
+  options: ResolvedOptions
+  limits: Map<string, number>
+  stashes: StashStore
+  metrics: MetricsStore
+}
 
 type RetainedDuplicate = { msgIndex: number; tool: string; supersedes: boolean }
 
@@ -124,6 +184,8 @@ const resolveOptions = (raw: LruContextOptions = {}): ResolvedOptions => ({
     Array.isArray(raw.protectedTools) && raw.protectedTools.every((tool) => typeof tool === "string" && tool.length > 0)
       ? raw.protectedTools
       : DEFAULT_PROTECTED_TOOLS,
+  metricsLog: typeof raw.metricsLog === "boolean" ? raw.metricsLog : DEFAULT_METRICS_LOG_ENABLED,
+  metricsPath: typeof raw.metricsPath === "string" && raw.metricsPath.length > 0 ? raw.metricsPath : DEFAULT_METRICS_PATH,
 })
 
 const isProtectedTool = (tool: string, options: ResolvedOptions): boolean => options.protectedTools.includes(tool)
@@ -208,8 +270,9 @@ const dedupTargetOf = (part: Record<string, unknown>): DedupTarget | undefined =
   return { stateRef: outputRef, tool, input }
 }
 
-const deduplicateToolOutputs = (messages: MessageBundle[], options: ResolvedOptions): void => {
+const deduplicateToolOutputs = (messages: MessageBundle[], options: ResolvedOptions): number => {
   const retainedByKey = new Map<string, RetainedDuplicate>()
+  let tombstones = 0
   for (let msgIndex = messages.length - 1; msgIndex >= 0; msgIndex -= 1) {
     for (const part of messages[msgIndex].parts) {
       const target = dedupTargetOf(part)
@@ -224,9 +287,13 @@ const deduplicateToolOutputs = (messages: MessageBundle[], options: ResolvedOpti
         })
         continue
       }
-      if (retained.supersedes) target.stateRef.output = buildDedupTombstone(retained.tool, retained.msgIndex)
+      if (retained.supersedes) {
+        target.stateRef.output = buildDedupTombstone(retained.tool, retained.msgIndex)
+        tombstones += 1
+      }
     }
   }
+  return tombstones
 }
 
 const estimateTokens = (messages: MessageBundle[]): number => {
@@ -311,17 +378,20 @@ const stashForSession = (stashes: StashStore, sessionKey: string): SessionStash 
   return created
 }
 
-const trimStash = (stash: SessionStash): void => {
+const trimStash = (stash: SessionStash): number => {
+  let dropped = 0
   while (stash.size > DEFAULT_STASH_LIMIT) {
     const oldest = stash.keys().next()
     if (oldest.done === true) break
     stash.delete(oldest.value)
+    dropped += 1
   }
+  return dropped
 }
 
-const stashEvictedOutput = (stash: SessionStash, entry: StashEntry): void => {
+const stashEvictedOutput = (stash: SessionStash, entry: StashEntry): number => {
   stash.set(stashKeyOf(entry.tool, entry.subject, entry.msgIndex, entry.partIndex), entry)
-  trimStash(stash)
+  return trimStash(stash)
 }
 
 const stashMissTextFor = (subject: string): string =>
@@ -343,23 +413,162 @@ const stashedMatchesFor = (stash: SessionStash, subject: string): StashEntry[] =
   return matches
 }
 
-const sessionKeyFromContext = (source: unknown): string => {
+const sessionIDFromContext = (source: unknown): string | undefined => {
   const sessionID =
     typeof source === "object" && source !== null ? (source as { sessionID?: unknown }).sessionID : undefined
-  return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : FALLBACK_SESSION_KEY
+  return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : undefined
 }
 
-const executeReadEvicted = (stashes: StashStore, args: unknown, toolContext: unknown): string => {
+const sessionKeyFromContext = (source: unknown): string => sessionIDFromContext(source) ?? FALLBACK_SESSION_KEY
+
+const executeReadEvicted = (stashes: StashStore, metrics: MetricsStore, args: unknown, toolContext: unknown): string => {
   const subject = typeof args === "object" && args !== null ? (args as { subject?: unknown }).subject : undefined
   if (typeof subject !== "string" || subject.length === 0) return invalidSubjectTextFor(typeof subject)
   const sessionKey = sessionKeyFromContext(toolContext)
   const stash = stashes.get(sessionKey)
   const matches = stash === undefined ? [] : stashedMatchesFor(stash, subject)
-  if (matches.length === 0) return stashMissTextFor(subject)
+  if (matches.length === 0) {
+    const existing = metrics.get(sessionKey)
+    if (existing !== undefined) existing.stashMisses += 1
+    return stashMissTextFor(subject)
+  }
+  const sessionMetrics = metricsForSession(metrics, sessionKey)
+  sessionMetrics.stashHits += 1
   touchMapEntry(stashes, sessionKey)
   const newest = matches[matches.length - 1]
   const older = matches.slice(0, -1)
   return older.length === 0 ? newest.output : `${newest.output}\n${olderMatchesLineFor(subject, older)}`
+}
+
+const createSessionMetrics = (): SessionMetrics => ({
+  evictions: 0,
+  bytesReclaimed: 0,
+  stashHits: 0,
+  stashMisses: 0,
+  stashDropped: 0,
+  deduped: 0,
+  postEvictionTouches: 0,
+  evictedSubjects: [],
+  touchScanThrough: TOUCH_SCAN_INITIAL_WATERMARK,
+  stashReadsLoggedThrough: 0,
+})
+
+const metricsForSession = (metrics: MetricsStore, sessionKey: string): SessionMetrics => {
+  const touched = touchMapEntry(metrics, sessionKey)
+  if (touched !== undefined) return touched
+  trimMapToBound(metrics, MAX_METRICS_SESSIONS)
+  const created = createSessionMetrics()
+  metrics.set(sessionKey, created)
+  return created
+}
+
+const countPostEvictionTouches = (metrics: SessionMetrics, appearances: ToolAppearance[]): number => {
+  let touches = 0
+  let latestIndex = metrics.touchScanThrough
+  for (const appearance of appearances) {
+    if (appearance.msgIndex <= metrics.touchScanThrough) continue
+    if (appearanceTouches(metrics.evictedSubjects, appearance)) touches += 1
+    latestIndex = appearance.msgIndex
+  }
+  metrics.touchScanThrough = latestIndex
+  return touches
+}
+
+const recordRunOutcome = (metrics: SessionMetrics, eviction: EvictionResult, dedupedThisRun: number, touchesThisRun: number): void => {
+  metrics.lastRun = {
+    estimatedTokens: eviction.estimatedTokens,
+    watermarkTokens: eviction.watermarkTokens,
+    deficitTokens: eviction.deficitTokens,
+  }
+  metrics.evictions += eviction.evicted.length
+  metrics.stashDropped += eviction.stashDropped
+  for (const entry of eviction.evicted) {
+    metrics.bytesReclaimed += entry.bytes
+    metrics.evictedSubjects.push(...entry.subjects)
+  }
+  while (metrics.evictedSubjects.length > MAX_REMEMBERED_EVICTED_SUBJECTS) metrics.evictedSubjects.shift()
+  metrics.deduped += dedupedThisRun
+  metrics.postEvictionTouches += touchesThisRun
+}
+
+const recordMetricsLine = async (
+  options: ResolvedOptions,
+  metrics: SessionMetrics,
+  sessionKey: string,
+  eviction: EvictionResult,
+  dedupedThisRun: number,
+  touchesThisRun: number,
+): Promise<void> => {
+  const stashReadsSinceLastLine = metrics.stashHits + metrics.stashMisses - metrics.stashReadsLoggedThrough
+  const isEventful = eviction.evicted.length > 0 || dedupedThisRun > 0 || touchesThisRun > 0 || stashReadsSinceLastLine > 0
+  if (options.metricsLog === false || isEventful === false) return
+  const line = {
+    ts: new Date().toISOString(),
+    session: sessionKey,
+    estimatedTokens: eviction.estimatedTokens,
+    watermarkTokens: eviction.watermarkTokens,
+    deficitTokens: eviction.deficitTokens,
+    evictedThisRun: eviction.evicted.map((entry) => ({
+      tool: entry.tool,
+      subject: entry.subject,
+      bytes: entry.bytes,
+      messagesAgo: entry.messagesAgo,
+    })),
+    dedupedThisRun,
+    postEvictionTouchesThisRun: touchesThisRun,
+    stashReadsSinceLastLine,
+    totals: {
+      evictions: metrics.evictions,
+      bytesReclaimed: metrics.bytesReclaimed,
+      stashHits: metrics.stashHits,
+      stashMisses: metrics.stashMisses,
+      stashDropped: metrics.stashDropped,
+      deduped: metrics.deduped,
+      postEvictionTouches: metrics.postEvictionTouches,
+    },
+  }
+  try {
+    await appendFile(options.metricsPath, `${JSON.stringify(line)}\n`)
+    metrics.stashReadsLoggedThrough = metrics.stashHits + metrics.stashMisses
+    delete metrics.logWriteError
+  } catch (error) {
+    metrics.logWriteError = error instanceof Error ? error.message : String(error)
+  }
+}
+
+const executeLruStats = (source: StatsSource, toolContext: unknown): string => {
+  const sessionID = sessionIDFromContext(toolContext)
+  const sessionKey = sessionID ?? FALLBACK_SESSION_KEY
+  const sessionLimit = sessionID === undefined ? undefined : touchMapEntry(source.limits, sessionID)
+  const metrics = touchMapEntry(source.metrics, sessionKey) ?? createSessionMetrics()
+  const stash = source.stashes.get(sessionKey)
+  const report = {
+    session: sessionKey,
+    options: {
+      watermark: source.options.watermark,
+      recentWindow: source.options.recentWindow,
+      minEvictableBytes: source.options.minEvictableBytes,
+      defaultContextTokens: source.options.defaultContextTokens,
+      metricsLog: source.options.metricsLog,
+      metricsPath: source.options.metricsPath,
+    },
+    modelContextTokens: sessionLimit ?? source.options.defaultContextTokens,
+    modelContextTokensSource:
+      sessionLimit === undefined ? CONTEXT_TOKENS_SOURCE_DEFAULT : CONTEXT_TOKENS_SOURCE_MODEL,
+    stash: { entries: stash === undefined ? 0 : stash.size, capacity: DEFAULT_STASH_LIMIT },
+    counters: {
+      evictions: metrics.evictions,
+      bytesReclaimed: metrics.bytesReclaimed,
+      stashHits: metrics.stashHits,
+      stashMisses: metrics.stashMisses,
+      stashDropped: metrics.stashDropped,
+      deduped: metrics.deduped,
+      postEvictionTouches: metrics.postEvictionTouches,
+    },
+    lastRun: metrics.lastRun ?? null,
+    ...(metrics.logWriteError === undefined ? {} : { logWriteError: metrics.logWriteError }),
+  }
+  return JSON.stringify(report, null, JSON_INDENT_SPACES)
 }
 
 const liveSubjectsOf = (entries: EvictableEntry[]): HotSubject[] =>
@@ -420,13 +629,17 @@ const evictLeastRecentlyUsed = (
     .filter((entry) => entry.lastTouch < hotFromIndex)
     .sort((a, b) => a.lastTouch - b.lastTouch || b.bytes - a.bytes)
 
-  const deficitTokens = estimateTokens(messages) - watermarkTokens
+  const estimatedTokens = estimateTokens(messages)
+  const deficitTokens = estimatedTokens - watermarkTokens
+  const evicted: EvictedEntryInfo[] = []
+  let stashDropped = 0
   if (deficitTokens > 0 && evictable.length > 0) {
     let reclaimedTokens = 0
     for (const entry of evictable) {
       if (reclaimedTokens >= deficitTokens) break
       const subject = entry.subjects.length > 0 ? renderSubject(entry.subjects[0]) : UNKNOWN_TARGET_LABEL
-      const tombstone = buildTombstone(entry.tool, subject, entry.bytes, messages.length - entry.lastTouch)
+      const messagesAgo = messages.length - entry.lastTouch
+      const tombstone = buildTombstone(entry.tool, subject, entry.bytes, messagesAgo)
       const stashed: StashEntry = {
         output: entry.stateRef.output,
         tool: entry.tool,
@@ -434,12 +647,21 @@ const evictLeastRecentlyUsed = (
         msgIndex: entry.msgIndex,
         partIndex: entry.partIndex,
       }
-      stashEvictedOutput(stash, stashed)
+      stashDropped += stashEvictedOutput(stash, stashed)
       entry.stateRef.output = `${tombstone}${buildReloadPointer(subject)}`
       reclaimedTokens += entry.bytes / CHARS_PER_TOKEN
+      evicted.push({ tool: entry.tool, subject, subjects: entry.subjects, bytes: entry.bytes, messagesAgo })
     }
   }
-  return { hotSubjects: liveSubjectsOf(entries) }
+  return {
+    hotSubjects: liveSubjectsOf(entries),
+    appearances,
+    estimatedTokens,
+    watermarkTokens,
+    deficitTokens,
+    evicted,
+    stashDropped,
+  }
 }
 
 const buildHintLine = (hotSubjects: HotSubject[], limit: number): string | undefined => {
@@ -478,19 +700,24 @@ export default (async (_input, rawOptions) => {
   const contextTokensBySession = new Map<string, number>()
   const stashBySession = new Map<string, SessionStash>()
   const hintBySession = new Map<string, string>()
+  const metricsBySession: MetricsStore = new Map()
 
-  // Workaround: read_evicted is registered as a plain { description, args, execute }
-  // definition instead of calling tool() from @opencode-ai/plugin. The package only
-  // resolves inside the opencode runtime (Bun follows the stow symlink to this repo's
-  // real path, where no node_modules exists up-tree; the runtime's own copy at
-  // ~/.config/opencode/node_modules is off that resolution path), so importing it
-  // throws here. The runtime's tool registry (packages/opencode/src/tool/registry.ts,
-  // fromPlugin) consumes definition objects directly and derives the JSON schema
-  // itself: args values that are not zod schemas take its legacyJsonSchema path, so
-  // the plain { type: "string" } schema below is sufficient. If this file ever ships
+  // Workaround: read_evicted and lru_stats are registered as plain
+  // { description, args, execute } definitions instead of calling tool() from
+  // @opencode-ai/plugin. The package only resolves inside the opencode runtime
+  // (Bun follows the stow symlink to this repo's real path, where no node_modules
+  // exists up-tree; the runtime's own copy at ~/.config/opencode/node_modules is
+  // off that resolution path), so importing it throws here. The runtime's tool
+  // registry (packages/opencode/src/tool/registry.ts, fromPlugin) consumes
+  // definition objects directly and derives the JSON schema itself: args values
+  // that are not zod schemas take its legacyJsonSchema path, so the plain
+  // { type: "string" } schema below is sufficient. If this file ever ships
   // somewhere @opencode-ai/plugin resolves, switch back to tool().
   const readEvicted = async (args: unknown, toolContext: unknown): Promise<string> =>
-    executeReadEvicted(stashBySession, args, toolContext)
+    executeReadEvicted(stashBySession, metricsBySession, args, toolContext)
+
+  const lruStats = async (_args: unknown, toolContext: unknown): Promise<string> =>
+    executeLruStats({ options, limits: contextTokensBySession, stashes: stashBySession, metrics: metricsBySession }, toolContext)
 
   return {
     "chat.params": async (input: { sessionID: string; model?: { limit?: { context?: number } } }) => {
@@ -507,11 +734,15 @@ export default (async (_input, rawOptions) => {
       const contextTokens =
         (sessionID !== undefined ? touchMapEntry(contextTokensBySession, sessionID) : undefined) ?? options.defaultContextTokens
       const sessionStash = stashForSession(stashBySession, sessionKey)
+      const sessionMetrics = metricsForSession(metricsBySession, sessionKey)
       stripLegacyHintParts(messages)
-      deduplicateToolOutputs(messages, options)
+      const dedupedThisRun = deduplicateToolOutputs(messages, options)
       purgeErroredToolInputs(messages, options)
-      const { hotSubjects } = evictLeastRecentlyUsed(messages, options, contextTokens * options.watermark, sessionStash)
-      storeHint(hintBySession, sessionKey, hotSubjects, options.hintSubjects)
+      const eviction = evictLeastRecentlyUsed(messages, options, contextTokens * options.watermark, sessionStash)
+      const touchesThisRun = countPostEvictionTouches(sessionMetrics, eviction.appearances)
+      recordRunOutcome(sessionMetrics, eviction, dedupedThisRun, touchesThisRun)
+      storeHint(hintBySession, sessionKey, eviction.hotSubjects, options.hintSubjects)
+      await recordMetricsLine(options, sessionMetrics, sessionKey, eviction, dedupedThisRun, touchesThisRun)
     },
     "experimental.chat.system.transform": async (input: { sessionID?: string }, output: { system: string[] }) => {
       deliverHint(hintBySession, input, output)
@@ -521,6 +752,11 @@ export default (async (_input, rawOptions) => {
         description: RELOAD_TOOL_DESCRIPTION,
         args: { [RELOAD_ARG_NAME]: RELOAD_ARG_SCHEMA },
         execute: readEvicted,
+      },
+      [STATS_TOOL_NAME]: {
+        description: STATS_TOOL_DESCRIPTION,
+        args: {},
+        execute: lruStats,
       },
     },
   }
