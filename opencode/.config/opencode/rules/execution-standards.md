@@ -4,19 +4,19 @@
 
 ## Scope
 
-This specification defines requirements for task execution, priority handling, and parallel operations. These standards govern how implementations approach and complete work.
+This specification governs how implementations approach and complete work: task execution, priority handling, and parallel operations.
 
 **Task Management Context:** When users refer to "tasks," this encompasses BOTH:
-- **TodoWrite todos**: Lightweight tracking via the TodoWrite tool for standard work
-- **Task files**: Comprehensive documentation files (see the `task-files` skill) for complex operations
+- **TodoWrite todos**: lightweight TodoWrite tracking for standard work
+- **Task files**: comprehensive documentation files (see the `task-files` skill) for complex operations
 
-**Completion Requirement:** When any task completes with modifications to files (a todo, a task-file task, or a standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete.
+**Completion Requirement:** When any task completes with modifications to files (a todo, task-file task, or standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete.
 
 ### Related Specifications
 
 - [`core.md`](core.md): Core behavioral requirements
 - [`coding-standards.md`](coding-standards.md): Technical implementation requirements
-- The Simplify and Review Loop lives in the `simplify-review` skill; Manager Mode and task-file protocols live in the `delegation` and `task-files` skills, loaded on demand
+- The `simplify-review`, `delegation`, and `task-files` skills are loaded on demand
 
 ---
 
@@ -37,7 +37,7 @@ When user requirements conflict with this hierarchy, user requirements take prec
 
 ## Required Behaviors
 
-Broader behavioral standards are defined authoritatively in [`core.md`](core.md): clarification follows its ["Clarification Protocol"](core.md#clarification-protocol), and honesty, persistence, transparency, and help-seeking follow its corresponding requirements. These standards govern task execution unchanged; execution-specific priority and authority rules are defined in [Priority Hierarchy](#priority-hierarchy) below.
+Broader behavioral standards in [`core.md`](core.md) govern task execution unchanged: clarification follows its ["Clarification Protocol"](core.md#clarification-protocol), and honesty, persistence, transparency, and help-seeking follow its corresponding requirements. Execution-specific priority and authority rules are defined in [Priority Hierarchy](#priority-hierarchy).
 
 ---
 
@@ -63,7 +63,7 @@ This task has [N] components. How would you like me to proceed?
 Which approach do you prefer?
 ```
 
-The **Parallel with worktrees** option SHOULD be listed only when worktree isolation would unlock parallelism that plain parallel delegation could not, that is, when independent tasks would otherwise be serialized by a shared-file or working-tree conflict (worktree isolation is defined in the `delegation` skill). When no such conflict applies, implementations MAY omit this option to avoid presenting a choice with no benefit.
+The **Parallel with worktrees** option SHOULD be listed only when worktree isolation would unlock parallelism plain parallel delegation could not (independent tasks otherwise serialized by a shared-file or working-tree conflict; worktree isolation is defined in the `delegation` skill). When no such conflict applies, implementations MAY omit this option to avoid presenting a choice with no benefit.
 
 ### User Response Handling
 
@@ -75,9 +75,9 @@ Implementations MUST wait for user response before proceeding.
 | "parallel", "delegate", "manager", or similar | Load the `delegation` skill and activate Manager Mode |
 | "worktrees", "isolated", "parallel with worktrees", or similar | Load the `delegation` skill and activate Manager Mode with worktree isolation |
 
-The keywords in each row are accepted synonyms for the options presented in the [Required Prompt](#required-prompt) prompt. The "Parallel with worktrees" row applies only when that option was listed per the [Required Prompt](#required-prompt) conditions.
+Row keywords are accepted synonyms for the [Required Prompt](#required-prompt) options; the "Parallel with worktrees" row applies only when that option was listed there.
 
-Task file tracking is NOT part of this prompt. Choosing Sequential, Parallel delegation, or Parallel with worktrees decides execution approach only and does NOT authorize task file creation. Task files require a separate explicit confirmation per the `task-files` skill [Large Task Offer](#large-task-offer).
+Task file tracking is NOT part of this prompt. Choosing Sequential, Parallel delegation, or Parallel with worktrees decides execution approach only and does NOT authorize task file creation; task files require a separate explicit confirmation per the `task-files` skill's Large Task Offer.
 
 Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
 
@@ -95,11 +95,7 @@ Even outside Manager Mode, implementations MUST spawn parallel agents when ALL o
 
 ### Execution Protocol
 
-For small parallelization (2-3 agents), implementations MUST proceed directly without:
-
-- Requesting permission
-- Entering Manager Mode
-- Asking "should I parallelize?"
+For small parallelization (2-3 agents), implementations MUST proceed directly without requesting permission, entering Manager Mode, or asking "should I parallelize?".
 
 ### Mode Distinction
 
@@ -112,17 +108,22 @@ For small parallelization (2-3 agents), implementations MUST proceed directly wi
 
 ## Dispatch Economy
 
-These requirements bind every dispatch prompt written for a delegated agent or subagent, in standard parallel operations and Manager Mode alike:
+These requirements bind every dispatch prompt for a delegated agent or subagent, in standard parallel operations and Manager Mode alike:
 
-- **Pointers, not prose**: name the files, entry points, and an existing pattern to follow instead of narrating the mechanism. Narrative is reserved for what a pointer cannot carry: the objective and its success criteria. The dispatched agent explores the territory itself.
-- **No standards restatement**: dispatch prompts MUST NOT restate global standards (the core, coding, and execution rules, the comment policy, and the like); every agent already receives them in its system prompt. A brief reminder of one specific rule the task is likely to violate is acceptable; wholesale restatement wastes tokens.
-- **Verification by reference**: when a dispatch must convey how to verify work, it SHOULD reference the project's AGENTS.md when it documents the commands, instead of restating them.
+- **Pointers, not prose**: name the files, entry points, and an existing pattern to follow; narrative is reserved for the objective and its success criteria, and the dispatched agent explores the territory itself.
+- **No standards restatement**: dispatch prompts MUST NOT restate global standards (the core, coding, and execution rules, the comment policy, and the like); every agent already receives them in its system prompt. A brief reminder of one specific rule the task is likely to violate is acceptable.
+- **Verification by reference**: when a dispatch must convey how to verify work, it SHOULD reference the project's AGENTS.md where it documents the commands.
+
+The dispatched agent receiving the prompt is bound by two conduct requirements of its own:
+
+- **Territory**: dispatched agents MUST stay within the territory the dispatch assigns (files, modules, and concerns) and MUST NOT wander outside it; a needed change beyond the territory MUST NOT be made, and the need MUST be flagged in the agent's report instead.
+- **Clarification routing**: dispatched agents MUST return clarification questions in their reply to the dispatcher and MUST NOT interrupt the user directly with the question tool.
 
 ---
 
 ## Parallel Safety Requirements
 
-These requirements apply to ALL parallel operations, including standard parallel operations performed outside Manager Mode:
+These requirements apply to ALL parallel operations, including standard operations outside Manager Mode:
 
 - **File conflict prevention**: never spawn parallel agents that modify the same file
 - **Dependency sequencing**: if Task B depends on Task A's output, run them sequentially

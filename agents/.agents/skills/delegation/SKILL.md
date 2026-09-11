@@ -67,22 +67,17 @@ Planning labor (exploration, analysis, drafting task documentation, proposing a 
 
 Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally.
 
+### Dispatched Agent Conduct
+
+Conduct requirements for dispatched agents (stay in the assigned territory, return clarification questions to the dispatcher) are canonical in the Dispatch Economy section of the `execution-standards` rule, which every dispatched agent receives in its system prompt.
+
 ### Context Continuity
 
 When a unit of work depends on the output of an earlier unit the same agent produced, implementations SHOULD resume that agent's session with the new objective instead of dispatching a fresh one: the context already lives there, and retelling it through the dispatcher wastes tokens. A fresh dispatch is REQUIRED when the dependency crosses agents or when the earlier session's context is poisoned; in that case the dispatch prompt MUST include the earlier unit's report as background the receiving agent MUST verify for itself, never as predetermined outcomes.
 
 ## Safety Requirements
 
-Canonical parallel-safety rules, applying to ALL parallel operations including standard operations outside Manager Mode:
-
-- **File conflict prevention**: never spawn parallel agents that modify the same file
-- **Dependency sequencing**: if Task B depends on Task A's output, run them sequentially
-- **Boundary isolation**: assign agents separate modules, directories, or concerns
-- **Shared state coordination**: sequence modifications to shared configuration or state
-- **Pre-dispatch verification**: before dispatching, verify each agent has distinct territory, no two agents write the same file, and dependencies are respected
-- **Runtime footprint disjointness**: parallel units MUST NOT share ports, databases, package installs, caches, build outputs, or git write operations, since verification reading a sibling's half-written state produces false results; units whose verification steps contend MUST run sequentially, and when disjointness cannot be determined, uncertainty is resolved as sequencing
-
-If conflicts are unavoidable, run the conflicting tasks sequentially, unless worktree isolation removes the conflict and preserves parallelism.
+The parallel-safety rules are canonical in the Parallel Safety Requirements section of the `execution-standards` rule and apply to ALL parallel operations, including standard operations outside Manager Mode. When runtime-footprint disjointness cannot be determined, uncertainty is resolved as sequencing. When conflicts are unavoidable, the fallback defined in that section governs. The worktree protocol lives in the Worktree Isolation and Worktree Teardown sections below.
 
 ### Worktree Isolation
 
