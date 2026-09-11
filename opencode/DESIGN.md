@@ -59,6 +59,20 @@ but never modify planning content; a wrong plan is flagged, not edited.
 Small tasks use the lite profile defined in the task-files skill. Without
 task files, worker reports go to `/tmp/opencode/reports/` as artifacts.
 
+## Dispatch economy
+
+Dispatch prompts carry pointers, not prose: file paths, entry points,
+and an existing pattern to follow, with the objective and its success
+criteria as the only narrative. Global standards are never restated;
+every agent already receives them through the global instructions
+config. Verification commands are referenced via the project's
+AGENTS.md when it documents them. When a unit depends on an earlier
+unit by the same worker, the manager resumes that worker's session
+with the new objective instead of dispatching fresh, so context stays
+in the worker and reports are not retold through the manager; fresh
+dispatches with the report as background remain for cross-worker
+dependencies and poisoned contexts.
+
 ## Verification chain
 
 Four independent sources are reconciled: worker claims from the reports,
@@ -66,7 +80,12 @@ the verifier's raw command results, the reviewer's findings, and git
 ground truth (`git diff --stat` and `git log` against the base commit,
 covering committed and uncommitted work). The verifier and reviewer are
 dispatched in parallel after all units complete: neither edits files,
-and only the verifier runs non-git commands, so they cannot contend. The
+and only the verifier runs non-git commands, so they cannot contend.
+The verifier always runs; the reviewer is skipped only when every unit
+was mechanical (dependency bump, rename, formatting,
+documentation-only). The reviewer does not re-report simplifications
+the worker's own simplify-review run already records as addressed,
+only findings that remain. The
 verifier runs the test suite, linter, and typechecker once each and
 reports exit statuses, the runners' own counts, and verbatim failure
 output, gating on exit status rather than text matches. The reviewer
