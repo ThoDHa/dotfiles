@@ -18,9 +18,12 @@ transcription they can trust.
 
 When dispatched with instructions on how to run the project's tests,
 linter, and typechecker:
-1. You MUST run each command exactly as given, once. When a command
-   fails to start or a tool is missing, you MUST report that verbatim
-   instead of substituting a different command.
+1. You MUST run each command exactly as given, once. When the dispatch
+   references the project's AGENTS.md instead of literal commands, you
+   MUST take the test, lint, and typecheck commands from there and run
+   those exactly. When a command fails to start or a tool is missing,
+   you MUST report that verbatim instead of substituting a different
+   command.
 2. For each command you MUST report: the exact command, its exit
    status, and the runner's own summary counts (total, passed, failed,
    skipped, errored) when it reports them. You MUST account for every

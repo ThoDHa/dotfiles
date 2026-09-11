@@ -67,6 +67,10 @@ Planning labor (exploration, analysis, drafting task documentation, proposing a 
 
 Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally.
 
+### Context Continuity
+
+When a unit of work depends on the output of an earlier unit the same agent produced, implementations SHOULD resume that agent's session with the new objective instead of dispatching a fresh one: the context already lives there, and retelling it through the dispatcher wastes tokens. A fresh dispatch is REQUIRED when the dependency crosses agents or when the earlier session's context is poisoned; in that case the dispatch prompt MUST include the earlier unit's report as background the receiving agent MUST verify for itself, never as predetermined outcomes.
+
 ## Safety Requirements
 
 Canonical parallel-safety rules, applying to ALL parallel operations including standard operations outside Manager Mode:
@@ -76,7 +80,7 @@ Canonical parallel-safety rules, applying to ALL parallel operations including s
 - **Boundary isolation**: assign agents separate modules, directories, or concerns
 - **Shared state coordination**: sequence modifications to shared configuration or state
 - **Pre-dispatch verification**: before dispatching, verify each agent has distinct territory, no two agents write the same file, and dependencies are respected
-- **Runtime footprint disjointness**: parallel units MUST NOT share ports, databases, package installs, caches, build outputs, or git write operations, since verification reading a sibling's half-written state produces false results; units whose verification steps contend MUST run sequentially
+- **Runtime footprint disjointness**: parallel units MUST NOT share ports, databases, package installs, caches, build outputs, or git write operations, since verification reading a sibling's half-written state produces false results; units whose verification steps contend MUST run sequentially, and when disjointness cannot be determined, uncertainty is resolved as sequencing
 
 If conflicts are unavoidable, run the conflicting tasks sequentially, unless worktree isolation removes the conflict and preserves parallelism.
 
@@ -135,9 +139,14 @@ The manager MUST NOT fabricate an answer to a Significant question to avoid inte
 
 When users indicate they want direct control: transfer command (agents report directly to the user), join execution (shift from delegating to executing), let agents in progress complete and report, and remain available ("resume managing" restores delegation). Override is a command structure change, not task abortion.
 
-### Failure Takeover
+### Failure Semantics
 
-When agents fail to complete tasks: one retry is acceptable; after the second failed attempt the manager MUST take over and complete the task directly, analyze why the failure occurred, and notify the user of the takeover. Implementations remain ultimately responsible.
+When a delegated agent fails to complete its task, it gets exactly one retry. When the retry also fails:
+
+- Implementations that can execute directly (standard implementations, managers in Solo mode) MUST take over, complete the task themselves, analyze why the failures occurred, and notify the user of the takeover.
+- Pure coordinators that cannot execute directly (for example, agents whose edit permissions deny implementation) MUST stop, report what was attempted and why it failed, and ask the user how to proceed.
+
+No failure gets a third attempt, and no failure is hidden or minimized. Implementations remain ultimately responsible.
 
 ## Conformance
 

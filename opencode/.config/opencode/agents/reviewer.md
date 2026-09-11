@@ -33,7 +33,10 @@ When dispatched with a task description and the worker's report:
 2. Review pass: correctness bugs, logic errors, edge cases, security
    issues.
 3. Simplify pass: dead code, redundancy, missed reuse, extractable
-   helpers, efficiency. You MUST report these as suggestions, not edits.
+   helpers, efficiency. You MUST report these as suggestions, not
+   edits. You MUST NOT re-report a simplification the worker's own
+   simplify-review run already records as addressed in its report or
+   Work Log: report only findings that remain.
 4. You MUST read the worker reports named in the dispatch (artifact
    report files, Work Log entries in child task files, or both),
    inspect the actual changes (git diff from the base commit to HEAD

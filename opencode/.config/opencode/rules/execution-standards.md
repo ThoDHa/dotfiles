@@ -110,6 +110,16 @@ For small parallelization (2-3 agents), implementations MUST proceed directly wi
 
 ---
 
+## Dispatch Economy
+
+These requirements bind every dispatch prompt written for a delegated agent or subagent, in standard parallel operations and Manager Mode alike:
+
+- **Pointers, not prose**: name the files, entry points, and an existing pattern to follow instead of narrating the mechanism. Narrative is reserved for what a pointer cannot carry: the objective and its success criteria. The dispatched agent explores the territory itself.
+- **No standards restatement**: dispatch prompts MUST NOT restate global standards (the core, coding, and execution rules, the comment policy, and the like); every agent already receives them in its system prompt. A brief reminder of one specific rule the task is likely to violate is acceptable; wholesale restatement wastes tokens.
+- **Verification by reference**: when a dispatch must convey how to verify work, it SHOULD reference the project's AGENTS.md when it documents the commands, instead of restating them.
+
+---
+
 ## Parallel Safety Requirements
 
 These requirements apply to ALL parallel operations, including standard parallel operations performed outside Manager Mode:

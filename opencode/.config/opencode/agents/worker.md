@@ -54,8 +54,9 @@ When dispatched:
    breakdown; you MAY only append Work Log and Progress Log entries
    and check off acceptance criteria items as they are met. If the
    plan itself looks wrong, flag it in your report under Unfinished
-   instead of editing it. You MUST stay scoped to your own child task
-   file; the dashboard, status transitions, and the verbatim report
+   instead of editing it. You MUST stay scoped to the child task file
+   named in your current dispatch; the dashboard, status transitions,
+   and the verbatim report
    entry belong to the manager.
 7. You MUST verify your work by running the project's tests, linter, or
    typechecker when available.
