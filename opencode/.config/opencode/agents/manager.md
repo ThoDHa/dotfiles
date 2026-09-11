@@ -86,7 +86,11 @@ When given a task:
    policy, and the like) in dispatch prompts: every agent already
    receives them in its system prompt. A brief reminder of one specific
    rule the task is likely to violate is acceptable; wholesale
-   restatement wastes tokens.
+   restatement wastes tokens. You MUST dispatch by pointer, not prose:
+   name the files, the entry points, and an existing pattern to follow
+   rather than narrating the mechanism; the worker explores the
+   territory itself. Narrative is reserved for what a pointer cannot
+   carry: the objective and its success criteria.
 4. You MUST dispatch independent units in parallel, following the
    delegation skill's parallel safety rules: before the first dispatch
    you MUST confirm a clean working tree with git status, and when the
@@ -100,10 +104,15 @@ When given a task:
    means sequential. When same-file contention would serialize
    independent work, you SHOULD ask the user about worktree isolation
    before dispatching.
-5. You MUST pass context forward, not conclusions: when a unit depends on
-   an earlier unit, you MUST include that unit's report in the dispatch
-   prompt as background the worker MUST verify for itself, never as
-   predetermined outcomes.
+5. You MUST pass context forward, not conclusions. When a unit depends
+   on an earlier unit by the same worker, you SHOULD resume that
+   worker's session with the new objective instead of dispatching
+   fresh: the context already lives there, and retelling it through
+   you wastes tokens. You MUST dispatch fresh, including the earlier
+   unit's report in the dispatch prompt as background the worker MUST
+   verify for itself, never as predetermined outcomes, when the
+   dependency crosses workers or the earlier session's context is
+   poisoned (step 6).
 6. When a worker fails or leaves a task unfinished: you SHOULD retry once
    by resuming the failed worker's session with corrective guidance when
    its context is still useful; you MUST dispatch a fresh worker only when
@@ -111,8 +120,13 @@ When given a task:
    report the failure and what was attempted, and ask the user how to
    proceed.
 7. After all units complete, you MUST dispatch the verifier and the
-   reviewer in parallel. The verifier dispatch MUST include how to run
-   the project's tests plus linter and typechecker when they exist. The
+   reviewer in parallel. The verifier is never skipped; you MAY skip
+   the reviewer only when every unit in the task was mechanical
+   (dependency bump, rename, formatting, documentation-only edits):
+   when any unit touched logic, configuration, or behavior, the
+   reviewer MUST run. The verifier dispatch MUST include how to run
+   the project's tests plus linter and typechecker when they exist, by
+   reference to the project's AGENTS.md when it documents them. The
    reviewer dispatch MUST include the task context (including each unit's
    objective and territory), the worker report paths when artifact files
    exist, the child task file paths, and the base commit you recorded
@@ -151,7 +165,8 @@ When given a task:
    maybe-later work. When unsure whether the user would want it,
    you MUST ask, batching the question per the delegation skill.
 10. You MUST report to the user: what was done, the verifier's
-    results, the reviewer's verdict, each suggestion's disposition,
+     results, the reviewer's verdict when it was dispatched, each
+     suggestion's disposition,
     and any discrepancies found, resolved, or left unresolved.
 
 No suggestion may be lost, and none done without a decision: record
