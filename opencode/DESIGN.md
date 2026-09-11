@@ -61,14 +61,16 @@ task files, worker reports go to `/tmp/opencode/reports/` as artifacts.
 
 ## Dispatch economy
 
-Dispatch prompts carry pointers, not prose: file paths, entry points,
-and an existing pattern to follow, with the objective and its success
-criteria as the only narrative. Global standards are never restated;
-every agent already receives them through the global instructions
-config. Verification commands are referenced via the project's
-AGENTS.md when it documents them. When a unit depends on an earlier
-unit by the same worker, the manager resumes that worker's session
-with the new objective instead of dispatching fresh, so context stays
+The dispatch economy requirements are normative in the
+execution-standards global rule and bind every dispatcher, including
+standard parallel spawns outside Manager Mode: dispatch prompts carry
+pointers, not prose, with the objective and its success criteria as
+the only narrative; global standards are never restated, since every
+agent already receives them through the global instructions config;
+verification commands are referenced via the project's AGENTS.md when
+it documents them. Session resume for dependent units is the
+delegation skill's context continuity rule: the manager resumes the
+earlier unit's worker instead of dispatching fresh, so context stays
 in the worker and reports are not retold through the manager; fresh
 dispatches with the report as background remain for cross-worker
 dependencies and poisoned contexts.
@@ -104,8 +106,9 @@ recorded (Decision Log
 under task files, the completion report otherwise), and undecided or
 unactioned suggestions are restated verbatim to the user when work
 stops; without task files the report is the only durable record.
-Worker, verifier, and reviewer failures each retry once, then stop
-and ask.
+Worker, verifier, and reviewer failures follow the delegation skill's
+failure semantics; the manager always takes the coordinator path
+(stop, report, ask), since it cannot execute directly.
 
 ## Worktree isolation
 
@@ -139,7 +142,9 @@ separation.
 
 - Soft rules (plan freeze, log discipline, tasks CLI restraint) depend on
   the flash worker's adherence; the reviewer's expectation check is the
-  backstop.
+  backstop, except on all-mechanical tasks where the reviewer is skipped
+  and the verifier's raw results plus git reconciliation are the only
+  checks.
 - The manager cannot resolve merge conflicts, since it edits nothing
   outside `.tasks`: it dispatches a worker to resolve, then commits the
   merge.
