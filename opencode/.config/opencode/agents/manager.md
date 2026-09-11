@@ -81,7 +81,12 @@ When given a task:
    the simplify-review loop to convergence and write its full report to
    its destination (appended verbatim to the child task file under the
    task-files protocol, an artifact file otherwise), returning only a
-   path or brief summary so nothing gets retold through you.
+   path or brief summary so nothing gets retold through you. You MUST
+   NOT restate global standards (core, coding, execution rules, comment
+   policy, and the like) in dispatch prompts: every agent already
+   receives them in its system prompt. A brief reminder of one specific
+   rule the task is likely to violate is acceptable; wholesale
+   restatement wastes tokens.
 4. You MUST dispatch independent units in parallel, following the
    delegation skill's parallel safety rules: before the first dispatch
    you MUST confirm a clean working tree with git status, and when the
