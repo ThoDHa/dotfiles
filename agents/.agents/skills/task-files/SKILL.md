@@ -101,7 +101,7 @@ Verbatim agent reports live as files under `.tasks/reports/`, not inline in task
 - **Never move on archive.** Reports are keyed by task filename, not by file location: when a task file moves from `current/` to `archive/`, its reports stay in place. Because `current/`, `archive/`, and `reports/` are siblings, the relative link `../reports/<taskfile-basename>/<NN>-<slug>.md` written in a task file resolves identically from both directories.
 - **Exempt from task-file rules.** Report files are not task files: they carry no canonical header fields, are never registered in the dashboard, follow the layout above rather than the [File Naming Convention](#file-naming-convention), and have no lifecycle states. The rules that bind them are the layout, the [Report File Template](#report-file-template), and permanence.
 - **Referenced, never inlined.** Task files reference reports only by that relative link plus a digest, per [Agent Report Entries](#agent-report-entries) and [Cross-Reference Convention](#cross-reference-convention).
-- **Recon reports.** Exploration agents deposit their findings as a `01-recon` report (slug `recon`) under the parent task's directory via the same command; child tasks then reference that report from their **Files to Review** lists, keeping reconnaissance a shared artifact instead of per-child duplication.
+- **Recon reports.** Exploration agents deposit their findings as a `01-recon` report (slug `recon`) under the parent task's directory via the same command; child tasks then reference that report from their **Files to Review** lists, keeping reconnaissance a shared artifact instead of per-child duplication. When planning fans the breakdown out into parallel children with overlapping territory, depositing this artifact is the default, with the exceptions defined in [Triage to Ready Planning Phase](#triage-to-ready-planning-phase).
 
 Each report file follows the [Report File Template](#report-file-template).
 
@@ -263,7 +263,7 @@ Each task file MUST contain: Objective, Success Criteria, Technical Approach (wi
 
 Documentation MUST scale with the task. For a small task, defined as a single unit of work inside a single territory with no dependencies on other units, the planning sections MAY collapse to their substance: Technical Approach, Risk Assessment, Testing Strategy, and TDD Workflow each reduce to a single line carrying the actual decision or finding (for example `Risks: none beyond ordinary regression risk`), and a section with nothing beyond template scaffolding MAY be omitted entirely.
 
-The following remain mandatory for every task under either profile: Objective, Success Criteria in specific and measurable form, Task Breakdown, Work Log, Execution Log, Simplify and Review Loop convergence before completion, the Completion Protocol, and Deferred Work Capture at Closure. The profile is chosen during Triage → Ready planning; no separate registration exists, since the file's own depth is the record.
+The following remain mandatory for every task under either profile: Objective, Success Criteria in specific and measurable form, Task Breakdown, Work Log, Execution Log, Simplify and Review Loop convergence before completion, the Completion Protocol, the Closure Digest, and Deferred Work Capture at Closure. The profile is chosen during Triage → Ready planning; no separate registration exists, since the file's own depth is the record.
 
 ### Cross-Reference Convention
 
@@ -576,6 +576,8 @@ When operating in Manager Mode (Solo), "Manager" appears as a row tracking perso
 
 ### Final Summary
 
+**Closure Digest:** [At most five lines: what was done, the key decision(s), and links into the details (report deposit paths, Decision Log anchor)]
+
 **Outcome:** [Success/Partial Success/Failed]
 
 **What Was Accomplished:**
@@ -654,6 +656,7 @@ During the transition, implementations MUST:
 3. **Populate All Task File Sections:** Objective, Success Criteria, Technical Approach, Risk Assessment, Task Breakdown, Decision Log
 4. **Assess and Document Risks:** identify blockers, evaluate complexity, document external dependencies, plan mitigations
 5. **Decide Checkpoint Slicing** ([Checkpoint Slicing (MVP Waystations)](#checkpoint-slicing-mvp-waystations)): determine whether the task warrants slicing; if so, structure the breakdown contract-first with mock-bounded slices and an integration checkpoint; raise the gating mode with the user (default: autonomous)
+6. **Share Reconnaissance Across Parallel Fan-Out:** when the planned breakdown will fan out into parallel children with overlapping territory, planning MUST either deposit the shared reconnaissance artifact (a `01-recon` report under the parent task via `tasks report --slug recon`, referenced from each child's **Files to Review** and from the dispatches; see [Reports Namespace](#reports-namespace)) or record in the Decision Log why not, naming one of: a single child; territory already mapped; the unknown-contract case where a walking skeleton replaces fan-out per [Checkpoint Slicing (MVP Waystations)](#checkpoint-slicing-mvp-waystations)
 
 A task moves to Ready ONLY when: all clarifying questions are answered; exploration findings are documented; all required sections are populated; the technical approach is defined and validated; risks are identified with mitigations; success criteria are clear and measurable; the breakdown is complete with acceptance criteria; and, if sliced, the slice structure and gating mode are defined.
 
@@ -699,7 +702,7 @@ Each checkpoint-sliced task MUST record a **gating mode** in the **Checkpoint Ga
 - **autonomous** (default): the manager self-verifies the checkpoint (tests pass, loop converged), records a milestone in the parent's Execution Log timeline, and proceeds without interrupting the user, escalating only on failure or a Significant question (per the `delegation` skill's Question Batching Discipline)
 - **sign-off**: reaching a checkpoint is a hard stop; the manager presents the slice overview plus test and review results and waits for user confirmation before the next checkpoint
 
-The mode is chosen during Triage → Ready planning; the manager MUST raise the choice with the user, defaulting to autonomous when there is no preference. Gating never suppresses failure reporting: under either mode, a checkpoint whose tests fail or whose loop cannot converge MUST halt progression and be handled per [Completion Validation](#completion-validation).
+The mode is chosen during Triage → Ready planning; the manager MUST raise the choice with the user, defaulting to autonomous when there is no preference. Gating never suppresses failure reporting: under either mode, a checkpoint whose tests fail or whose loop cannot converge MUST halt progression and be handled per [Completion Protocol](#completion-protocol).
 
 ### Milestone Recording
 
@@ -766,7 +769,12 @@ When a task completes, implementations MUST:
 5. Check all acceptance criteria boxes
 6. Add final progress log entry with summary
 7. Complete the Final Summary section
-8. Update the master index: move to the Completed table, populate "Completed" and "Duration", refresh "Last updated"
+8. Write the Closure Digest at the top of the Final Summary per [Closure Digest](#closure-digest)
+9. Update the master index: move to the Completed table, populate "Completed" and "Duration", refresh "Last updated"
+
+### Closure Digest
+
+Every completed task's Final Summary MUST open with a **Closure Digest**: at most five lines stating what was done, the key decision(s), and links into the details (report deposit paths, the Decision Log anchor). The digest is mandatory under both documentation profiles and is sized proportionally to the task; a Lite task MAY close with one or two lines. It caps the skim cost of archived, ever-growing task files: a reader opening a closed task gets the outcome, the key decisions, and pointers into the full record without scrolling the logs.
 
 ### Content Preservation
 
@@ -824,4 +832,4 @@ Question Queue (Significant):
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures, notably: failing to keep dashboard and task files synchronized ([Index Maintenance](#index-maintenance)); creating task files without user request ([Creation Prohibition](#creation-prohibition)); summarizing agent report content instead of recording it verbatim in the report file ([Verbatim Recording Requirement](#verbatim-recording-requirement)); a dispatched agent writing any `.tasks/` artifact outside its sanctioned writes, the two CLI channels plus the planning-mode exception ([Agent Write Path](#agent-write-path)); marking a task Completed before the Simplify and Review Loop has converged or without documenting each iteration; failing to immediately update the task file for related work; deleting or overwriting previously written content ([Content Preservation](#content-preservation)); fabricating an answer to a Significant question or silently dropping a queued question; closing a task while deferred work remains uncaptured as task files; applying checkpoint slicing without a contract-first step or an integration checkpoint declaring Dependencies; omitting the Checkpoint Gating field or failing to raise the gating choice with the user; editing `dashboard.md` in place, holding an agent-held lock across tool calls, or beginning work without an atomic claim when sessions may share the directory ([Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety)).
+Violations of MUST requirements constitute conformance failures, notably: failing to keep dashboard and task files synchronized ([Index Maintenance](#index-maintenance)); creating task files without user request ([Creation Prohibition](#creation-prohibition)); summarizing agent report content instead of recording it verbatim in the report file ([Verbatim Recording Requirement](#verbatim-recording-requirement)); a dispatched agent writing any `.tasks/` artifact outside its sanctioned writes, the two CLI channels plus the planning-mode exception ([Agent Write Path](#agent-write-path)); marking a task Completed before the Simplify and Review Loop has converged or without documenting each iteration; failing to immediately update the task file for related work; deleting or overwriting previously written content ([Content Preservation](#content-preservation)); fabricating an answer to a Significant question or silently dropping a queued question; closing a task while deferred work remains uncaptured as task files; applying checkpoint slicing without a contract-first step or an integration checkpoint declaring Dependencies; omitting the Checkpoint Gating field or failing to raise the gating choice with the user; editing `dashboard.md` in place, holding an agent-held lock across tool calls, or beginning work without an atomic claim when sessions may share the directory ([Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety)); omitting the Closure Digest from a completed task's Final Summary ([Closure Digest](#closure-digest)) or planning a parallel fan-out into children with overlapping territory without the shared reconnaissance artifact or its Decision Log exception ([Triage to Ready Planning Phase](#triage-to-ready-planning-phase)).
