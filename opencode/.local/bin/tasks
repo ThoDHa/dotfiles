@@ -6,7 +6,10 @@
 # files under a process-held flock on .tasks/.lock, so concurrent sessions
 # serialize harmlessly and never lose an update. Task ownership is claimed
 # atomically via an O_EXCL sidecar (<taskfile>.claim), never by editing a
-# text field. See ~/.agents/skills/task-files/SKILL.md, section
+# text field. Bulky agent reports are deposited under
+# .tasks/reports/<taskfile>/NN-<slug>.md by `tasks report` under the same
+# lock and linked from the Work Log with a one-line digest. See
+# ~/.agents/skills/task-files/SKILL.md, section
 # "Concurrency and Multi-Session Safety".
 
 set -euo pipefail
@@ -15,6 +18,7 @@ readonly LOCK_NAME=".lock"
 readonly DASHBOARD_NAME="dashboard.md"
 readonly CURRENT_DIR="current"
 readonly ARCHIVE_DIR="archive"
+readonly REPORTS_DIR="reports"
 readonly CLAIM_SUFFIX=".claim"
 
 readonly STATUS_TRIAGE="Triage"
@@ -26,6 +30,8 @@ readonly STATUS_COMPLETED="Completed"
 
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
+readonly DEFAULT_FROM="Manager"
+readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
 
@@ -48,6 +54,10 @@ valid_task_id() {
 	[[ "$1" =~ ^[A-Za-z]+(-[0-9]+)+$ ]]
 }
 
+# Report slugs become filename segments under reports/; strict kebab-case
+# keeps that namespace path-safe (no dots, slashes, or case drift).
+valid_slug() { [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
+
 # A stable per-session identifier for claims. Callers may override with
 # --owner or TASKS_SESSION; the pid fallback keeps distinct shells distinct.
 session_id() { printf '%s' "${TASKS_SESSION:-$(hostname -s 2>/dev/null || hostname)-$$}"; }
@@ -62,6 +72,15 @@ Commands:
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
                                        opts: --status S --priority P --dir DIR
   set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
+  report [--dir DIR] <taskfile> --slug SLUG [--from WORKER] --digest TEXT [<file>|-]
+                                       Deposit a report file under reports/ and
+                                       link it from the Work Log (locked).
+  log [--dir DIR] <taskfile> [--from WORKER] MSG
+                                       Append a Work Log entry attributed to
+                                       WORKER (default Manager), render.
+  show [--dir DIR] <taskfile> [--tail N]
+                                       Print header fields, Latest Update, and
+                                       the last N Work Log entries (default 10).
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render.
   help                                 Show this help.
@@ -93,8 +112,9 @@ resolve_task_file() {
 	die "task file not found: $arg"
 }
 
-# Print the header region of a task file: everything before the first "## " heading.
-header_of() { awk '/^## /{exit} {print}' "$1"; }
+# Print the header region of a task file from stdin: everything before the
+# first "## " heading.
+header_of() { awk '/^## /{exit} {print}'; }
 
 # Extract a "**Key:** value" field from a header block supplied on stdin.
 header_field() {
@@ -172,7 +192,7 @@ render_unlocked() {
 		[[ -d "$tasks_dir/$subdir" ]] || continue
 		for file in "$tasks_dir/$subdir"/*.md; do
 			[[ -e "$file" ]] || continue
-			hdr="$(header_of "$file")"
+			hdr="$(header_of <"$file")"
 			name="$(printf '%s\n' "$hdr" | header_name)"
 			[[ -z "$name" ]] && { name="${file##*/}"; name="${name%.md}"; }
 			status="$(printf '%s\n' "$hdr" | header_field "Status")"
@@ -286,6 +306,58 @@ set_header_field() {
 		END { if (!done) print "**" key ":** " value }
 	' "$file" >"$tmp"
 	mv -f "$tmp" "$file"
+}
+
+# Append a Work Log entry at the end of the "## Work Log" section and
+# refresh the Updated/Latest Update header fields in one atomic rewrite:
+# output is staged into a temp file and a single mv commits it, so a
+# failure mid-pass leaves the original file untouched. Entry and field
+# values travel via ENVIRON (not awk -v) so backslashes in user text
+# survive verbatim. Empty updated/latest skips that refresh rather than
+# blanking the field. Returns non-zero without touching the file if any
+# stage fails.
+append_work_log_entry() {
+	local file="$1" entry="$2" updated="$3" latest="${4:-}"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	ENTRY="$entry" UPDATED="$updated" LATEST="$latest" awk '
+		BEGIN {
+			inhdr = 1; inwork = 0; done_u = 0; done_l = 0; prevblank = 1
+			entry = ENVIRON["ENTRY"]; updated = ENVIRON["UPDATED"]; latest = ENVIRON["LATEST"]
+		}
+		inhdr && /^## / {
+			if (updated != "" && !done_u) { print "**Updated:** " updated; done_u = 1 }
+			if (latest != "" && !done_l) { print "**Latest Update:** " latest; done_l = 1 }
+			inhdr = 0
+		}
+		{
+			if (inhdr && updated != "" && !done_u && $0 ~ /^\*\*Updated:\*\*/) {
+				print "**Updated:** " updated; done_u = 1; next
+			}
+			if (inhdr && latest != "" && !done_l && $0 ~ /^\*\*Latest Update:\*\*/) {
+				print "**Latest Update:** " latest; done_l = 1; next
+			}
+			if ($0 ~ /^## Work Log/) { inwork = 1; print; next }
+			if (inwork && /^## /) {
+				if (entry != "") {
+					if (!prevblank) print ""
+					printf "%s", entry
+					entry = ""
+				}
+				inwork = 0
+			}
+			print
+			prevblank = ($0 == "")
+		}
+		END {
+			if (entry != "") {
+				if (!prevblank) print ""
+				printf "%s", entry
+			}
+			if (updated != "" && !done_u) print "**Updated:** " updated
+			if (latest != "" && !done_l) print "**Latest Update:** " latest
+		}
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
 # --- commands --------------------------------------------------------------
@@ -486,6 +558,198 @@ cmd_release() {
 	printf 'released %s\n' "$(basename "$file")"
 }
 
+# Next report sequence number for a task's reports directory: one past the
+# highest NN prefix on disk (base-10 parse strips the zero padding), so
+# numbering never reuses a number even when gaps exist.
+next_report_seq() {
+	local report_dir="$1" max=0 base seq f
+	for f in "$report_dir"/*.md; do
+		[[ -e "$f" ]] || continue
+		base="${f##*/}"
+		[[ "$base" =~ ^([0-9]+)- ]] || continue
+		seq=$((10#${BASH_REMATCH[1]}))
+		((seq > max)) && max="$seq"
+	done
+	printf '%d' "$((max + 1))"
+}
+
+cmd_report() {
+	local dir="" slug="" from="" digest=""
+	local args=()
+	while (($#)); do
+		case "$1" in
+			--dir) (($# >= 2)) || die "report: --dir requires a value"; dir="$2"; shift 2 ;;
+			--slug) (($# >= 2)) || die "report: --slug requires a value"; slug="$2"; shift 2 ;;
+			--from) (($# >= 2)) || die "report: --from requires a value"; from="$2"; shift 2 ;;
+			--digest) (($# >= 2)) || die "report: --digest requires a value"; digest="$2"; shift 2 ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} >= 1 && ${#args[@]} <= 2)) \
+		|| die 'report: usage: tasks report <taskfile> --slug <kebab-slug> [--from <worker>] --digest "<one line>" [<file>|-]'
+	local target_arg="${args[0]}"
+	local content_file="${args[1]:-}"
+
+	# Validate every argument before touching the board, so a bad one can
+	# never leave a half-applied deposit behind.
+	[[ -n "$slug" ]] || die "report: --slug is required"
+	[[ -n "$digest" ]] || die "report: --digest is required"
+	valid_slug "$slug" || die "report: invalid slug: $slug (expected kebab-case: lowercase letters, digits, hyphens)"
+	[[ "$digest" != *$'\n'* && "$digest" != *$'\r'* ]] || die "report: --digest must be a single line"
+	[[ -n "$from" ]] || from="$DEFAULT_FROM"
+	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "report: --from must be a single line"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+
+	# Read the report content before taking the board lock: content is not
+	# board state, an unreadable or empty source must fail before anything
+	# changes, and a slow pipe must never stretch the lock hold.
+	local content
+	if [[ -z "$content_file" || "$content_file" == "-" ]]; then
+		content="$(cat)" || die "report: cannot read report content from stdin"
+	else
+		[[ -f "$content_file" ]] || die "report: report file not found: $content_file"
+		content="$(cat "$content_file")" || die "report: cannot read report file: $content_file"
+	fi
+	[[ -n "$content" ]] || die "report: report content is empty"
+
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
+
+	local base; base="${file##*/}"
+	local report_dir="$tasks_dir/$REPORTS_DIR/$base"
+	mkdir -p "$report_dir" || die "report: cannot create $report_dir (check permissions)"
+	local seq; seq="$(next_report_seq "$report_dir")"
+	local name; name="$(printf '%02d-%s.md' "$seq" "$slug")"
+	local deposit="$report_dir/$name"
+
+	# Stage the deposit and commit with a single mv: a write failure leaves
+	# no file behind, and the existence check under the board lock refuses
+	# to overwrite an existing report.
+	[[ -e "$deposit" ]] && die "report: refusing to overwrite existing report: $REPORTS_DIR/$base/$name"
+	local staged; staged="$(mktemp "$report_dir/.reportXXXXXX")" \
+		|| die "report: cannot create report in $report_dir (check permissions)"
+	printf '%s\n' "$content" >"$staged" || { rm -f "$staged"; die "report: cannot write $deposit"; }
+	mv -f "$staged" "$deposit" || { rm -f "$staged"; die "report: cannot create $deposit"; }
+
+	local ts; ts="$(now)"
+	local rel="$REPORTS_DIR/$base/$name"
+	local entry latest
+	printf -v entry '### %s: %s: Report\n\n**Report:** [%s](../%s)\n**Digest:** %s\n\n' \
+		"$ts" "$from" "$name" "$rel" "$digest"
+	printf -v latest '[%s] %s ([report](../%s))' "$ts" "$digest" "$rel"
+
+	# Commit the task-file side; on failure roll the deposit back, so a
+	# report file never exists without its Work Log entry.
+	if ! append_work_log_entry "$file" "$entry" "$ts" "$latest"; then
+		rm -f "$deposit"
+		die "report: failed to update $base (deposit removed)"
+	fi
+	render_unlocked "$tasks_dir"
+	printf '%s\n' "$deposit"
+}
+
+cmd_log() {
+	local dir="" from="$DEFAULT_FROM" args=()
+	while (($#)); do
+		case "$1" in
+			--dir) (($# >= 2)) || die "log: --dir requires a value"; dir="$2"; shift 2 ;;
+			--from) (($# >= 2)) || die "log: --from requires a value"; from="$2"; shift 2 ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 2)) || die 'log: usage: tasks log <taskfile> [--from <worker>] "<message>"'
+	local target_arg="${args[0]}" message="${args[1]}"
+
+	# Validate every argument before touching the board, so a rejected
+	# message can never leave a half-applied entry behind.
+	[[ -n "${message//[[:space:]]/}" ]] || die "log: message must not be empty"
+	local first="${message%%$'\n'*}"
+	[[ -n "${first//[[:space:]]/}" ]] || die "log: message's first line must not be blank (it becomes the entry heading)"
+	[[ -n "$from" ]] || from="$DEFAULT_FROM"
+	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "log: --from must be a single line"
+	[[ "$message" != *$'\r'* ]] || die "log: message must not contain carriage return characters"
+	# Entry bodies ride verbatim into the Work Log section, whose structure
+	# is heading-delimited; a message line shaped like a markdown heading
+	# would inject fake sections (or forge entries), so it is refused.
+	local heading_re='^#{1,6} ' line
+	while IFS= read -r line; do
+		[[ "$line" =~ $heading_re ]] && die "log: message lines must not begin with a markdown heading"
+	done <<<"$message"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
+
+	# The first message line becomes the heading title (Jira-style scan
+	# value); any remaining lines ride along as the entry body.
+	local ts rest entry
+	ts="$(now)"
+	if [[ "$message" == *$'\n'* ]]; then
+		rest="${message#*$'\n'}"
+		printf -v entry '### %s: %s: %s\n\n%s\n\n' "$ts" "$from" "$first" "$rest"
+	else
+		printf -v entry '### %s: %s: %s\n\n' "$ts" "$from" "$first"
+	fi
+	append_work_log_entry "$file" "$entry" "$ts" "" || die "log: failed to update $(basename "$file")"
+	render_unlocked "$tasks_dir"
+	printf 'logged %s\n' "$(basename "$file")"
+}
+
+# Print the final N entries of a task's Work Log section, verbatim, from a
+# snapshot supplied on stdin. Entries start at each "### " heading; the tail
+# begins at the Nth-from-last heading and runs to the end of the section
+# with trailing blank lines trimmed.
+work_log_tail() {
+	local n="$1"
+	awk -v n="$n" '
+		/^## Work Log/ { inwork = 1; next }
+		inwork && /^## / { inwork = 0 }
+		inwork {
+			lines[NR] = $0
+			if ($0 ~ /^### /) starts[++count] = NR
+			lastline = NR
+		}
+		END {
+			if (count == 0) exit 0
+			first = (count > n) ? starts[count - n + 1] : starts[1]
+			while (lastline > first && lines[lastline] == "") lastline--
+			for (i = first; i <= lastline; i++) print lines[i]
+		}
+	'
+}
+
+cmd_show() {
+	local dir="" tail="$DEFAULT_TAIL" args=()
+	while (($#)); do
+		case "$1" in
+			--dir) (($# >= 2)) || die "show: --dir requires a value"; dir="$2"; shift 2 ;;
+			--tail) (($# >= 2)) || die "show: --tail requires a value"; tail="$2"; shift 2 ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 1)) || die "show: usage: tasks show <taskfile> [--tail N]"
+	[[ "$tail" =~ ^[1-9][0-9]*$ ]] || die "show: --tail expects a positive integer, got: $tail"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	# Strictly read-only: no board lock, no render, no header bump. Task
+	# mutations publish via atomic mv, so a lock-free reader sees complete
+	# old-or-new content either way. The file is read ONCE into a snapshot
+	# and both the header and the tail are extracted from that single
+	# image, so a concurrent mutation can never yield a torn composite of
+	# an old header with a new tail.
+	local snapshot
+	snapshot="$(cat "$file")"
+	header_of <<<"$snapshot"
+	printf '\n## Work Log (last %s entries)\n\n' "$tail"
+	work_log_tail "$tail" <<<"$snapshot"
+}
+
 main() {
 	(($#)) || { usage; exit 2; }
 	local cmd="$1"; shift
@@ -496,6 +760,9 @@ main() {
 		set) cmd_set "$@" ;;
 		claim) cmd_claim "$@" ;;
 		release) cmd_release "$@" ;;
+		report) cmd_report "$@" ;;
+		log) cmd_log "$@" ;;
+		show) cmd_show "$@" ;;
 		help | -h | --help) usage ;;
 		*) err "unknown command: $cmd"; usage; exit 2 ;;
 	esac

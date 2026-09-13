@@ -27,6 +27,11 @@ assert_not_contains() { # label haystack needle
 	if grep -qF -- "$3" <<<"$2"; then bad "$1 (unexpected [$3])"; else ok "$1"; fi
 }
 
+refuse() { # label; rest is the command to attempt
+	local label="$1"; shift
+	if t "$@" </dev/null >/dev/null 2>&1; then bad "$label"; else ok "$label"; fi
+}
+
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 export TASKS_DIR="$ROOT/.tasks"
@@ -136,7 +141,7 @@ assert_contains "Owner field set to the winning session" "$claimed_owner" "sess-
 rm -rf "$outdir"
 
 echo "== double claim rejected =="
-t claim "$f_tr" --owner "intruder" >/dev/null 2>&1 && bad "second claim should fail" || ok "second claim rejected"
+refuse "second claim rejected" claim "$f_tr" --owner "intruder"
 
 echo "== release clears claim and owner =="
 t release "$f_tr" >/dev/null
@@ -294,6 +299,306 @@ t render >/dev/null
 after="$(cat "$DASH")"
 assert_eq "repeated renders are byte-identical" "$before" "$after"
 assert_eq "render output is stable between runs" "$mid" "$after"
+
+echo "== report: deposit path, numbering, Work Log entry =="
+f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"
+rpbase="$(basename "$f_rp")"
+rpdir="$TASKS_DIR/reports/$rpbase"
+t set "$f_rp" Updated="2020-01-01 00:00" >/dev/null
+contentfile="$ROOT/report-content.md"
+cat >"$contentfile" <<'EOF'
+## Findings
+
+- Recon found the CLI patterns
+
+## Decisions
+
+- None needed
+
+## Blocks
+
+- None
+
+## Next
+
+- Implement
+EOF
+rep1="$(t report "$f_rp" --slug recon --from Worker-A --digest "Recon findings recorded" "$contentfile")"
+assert_eq "report prints the deposit path" "$TASKS_DIR/reports/$rpbase/01-recon.md" "$rep1"
+[[ -f "$rep1" ]] && ok "report deposits the file at the spec path" || bad "report deposits the file at the spec path"
+assert_contains "report content is deposited verbatim" "$(cat "$rep1")" "Recon found the CLI patterns"
+entry_line="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Worker-A: Report$' "$f_rp" || true)"
+[[ -n "$entry_line" ]] && ok "report appends the pinned entry heading" || bad "report appends the pinned entry heading"
+assert_contains "entry links the deposit via ../reports/" "$(cat "$f_rp")" \
+	"**Report:** [01-recon.md](../reports/$rpbase/01-recon.md)"
+assert_contains "entry carries the digest" "$(cat "$f_rp")" "**Digest:** Recon findings recorded"
+rp_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
+[[ "$rp_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "report bumps Updated to today" || bad "report bumps Updated to today (got [$rp_updated])"
+latest_line="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rp")"
+assert_contains "Latest Update carries the digest" "$latest_line" "Recon findings recorded"
+assert_contains "Latest Update links the report" "$latest_line" "([report](../reports/$rpbase/01-recon.md))"
+assert_contains "dashboard reflects the report bump" "$(grep -F 'Report Deposit Target' "$DASH")" "$rp_updated"
+
+echo "== report: stdin modes and sequence numbering =="
+printf 'Second report body\n' | t report "$f_rp" --slug next-steps --digest "Second deposit" >/dev/null
+[[ -f "$rpdir/02-next-steps.md" ]] && ok "piped stdin report lands as 02" || bad "piped stdin report lands as 02"
+assert_eq "second deposit content is verbatim" "Second report body" "$(cat "$rpdir/02-next-steps.md")"
+printf 'Dash body\n' | t report "$f_rp" --slug dash-input --digest "Dash input" - >/dev/null
+[[ -f "$rpdir/03-dash-input.md" ]] && ok "explicit - reads stdin" || bad "explicit - reads stdin"
+printf 'seeded gap marker\n' >"$rpdir/04-gap.md"
+printf 'Gap body\n' | t report "$f_rp" --slug gap-check --digest "Gap check" >/dev/null
+[[ -f "$rpdir/05-gap-check.md" ]] \
+	&& ok "sequence is max NN + 1 across gaps (05 after seeded 04)" \
+	|| bad "sequence is max NN + 1 across gaps (05 after seeded 04)"
+
+echo "== report: validation refusals leave no trace =="
+rp_entries_before="$(grep -c -E '^### .*: Report$' "$f_rp" || true)"
+rp_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
+refuse "report rejects a non-kebab slug" report "$f_rp" --slug "Bad Slug" --digest d
+refuse "report rejects a traversal slug" report "$f_rp" --slug "../escape" --digest d
+refuse "report rejects an empty slug" report "$f_rp" --slug "" --digest d
+refuse "report rejects a trailing-hyphen slug" report "$f_rp" --slug "trailing-" --digest d
+refuse "report rejects a missing slug" report "$f_rp" --digest d
+refuse "report rejects a missing digest" report "$f_rp" --slug fine
+refuse "report rejects a multi-line digest" report "$f_rp" --slug fine --digest "$(printf 'line1\nline2')"
+refuse "report rejects an unknown option" report "$f_rp" --bogus x --slug fine --digest d
+refuse "report rejects a missing task file" report NOPE-9.md --slug fine --digest d
+refuse "report rejects a missing taskfile argument" report --slug fine --digest d
+refuse "report rejects a valueless trailing --slug" report "$f_rp" --slug
+refuse "report rejects a valueless trailing --digest" report "$f_rp" --digest
+refuse "report rejects empty stdin content" report "$f_rp" --slug empty-case --digest "empty"
+refuse "report rejects an unreadable content file" report "$f_rp" --slug unreadable --digest d "$ROOT/no-such-report.md"
+assert_eq "refusals append no Work Log entry" "$rp_entries_before" "$(grep -c -E '^### .*: Report$' "$f_rp" || true)"
+assert_eq "refusals leave Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
+assert_eq "refusals deposit no report files" "5" "$(ls "$rpdir" 2>/dev/null | wc -l)"
+
+echo "== report: create failure is all-or-nothing =="
+if ((EUID == 0)); then
+	skip_test "failed deposit removes nothing and mutates nothing (skipped under root)"
+	skip_test "failed deposit reports the create failure (skipped under root)"
+else
+	perm_mode="$(stat -c %a "$rpdir")"
+	chmod 500 "$rpdir"
+	perm_err="$(printf 'denied body\n' | t report "$f_rp" --slug denied --digest "should fail" 2>&1 >/dev/null || true)"
+	chmod "$perm_mode" "$rpdir"
+	assert_contains "failed deposit reports the create failure" "$perm_err" "cannot create"
+	assert_eq "failed deposit leaves no report file" "" "$(ls "$rpdir" | grep -F denied || true)"
+	assert_eq "failed deposit appends no Work Log entry" "$rp_entries_before" "$(grep -c -E '^### .*: Report$' "$f_rp" || true)"
+	assert_eq "failed deposit leaves Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
+fi
+
+echo "== report: links resolve from current/ and archive/ =="
+f_res="$(t new --id RPT-2 --name "Link Resolution Target")"
+resbase="$(basename "$f_res")"
+printf 'resolution body\n' | t report "$f_res" --slug recon --from Worker-B --digest "resolution check" >/dev/null
+[[ -f "$TASKS_DIR/current/../reports/$resbase/01-recon.md" ]] \
+	&& ok "../reports/ link resolves from current/" || bad "../reports/ link resolves from current/"
+assert_contains "task file carries the relative report link" "$(cat "$f_res")" \
+	"(../reports/$resbase/01-recon.md)"
+cp "$f_res" "$TASKS_DIR/archive/$resbase"
+[[ -f "$TASKS_DIR/archive/../reports/$resbase/01-recon.md" ]] \
+	&& ok "../reports/ link resolves from archive/" || bad "../reports/ link resolves from archive/"
+printf 'archived body\n' | t report "$TASKS_DIR/archive/$resbase" --slug post-archive --digest "after archive" >/dev/null
+[[ -f "$TASKS_DIR/reports/$resbase/02-post-archive.md" ]] \
+	&& ok "reporting an archived task deposits under the same reports dir" \
+	|| bad "reporting an archived task deposits under the same reports dir"
+rm -f "$TASKS_DIR/archive/$resbase"
+
+echo "== report: concurrent deposits serialize =="
+f_cc="$(t new --id RPT-3 --name "Concurrent Report Target")"
+ccbase="$(basename "$f_cc")"
+ccdir="$(mktemp -d)"
+for i in 1 2 3 4 5; do
+	(
+		printf 'report %s\n' "$i" | t report "$f_cc" --slug "worker-$i" --from "w-$i" --digest "report $i" \
+			>"$ccdir/$i.out" 2>&1
+		echo $? >"$ccdir/$i.code"
+	) &
+done
+wait
+cc_ok=0
+for i in 1 2 3 4 5; do
+	[[ "$(cat "$ccdir/$i.code")" == 0 ]] && cc_ok=$((cc_ok + 1))
+done
+assert_eq "all five concurrent reports succeed" "5" "$cc_ok"
+# Which worker claims which number is scheduling-dependent; the guarantees
+# are unique numbers 01..05 and all five slugs deposited exactly once.
+cc_numbers="$(ls "$TASKS_DIR/reports/$ccbase" | grep -oE '^[0-9]+' | LC_ALL=C sort | tr '\n' ' ')"
+assert_eq "concurrent deposits occupy 01..05 with no collision" "01 02 03 04 05 " "$cc_numbers"
+cc_slugs="$(ls "$TASKS_DIR/reports/$ccbase" | sed -E 's/^[0-9]+-//; s/\.md$//' | LC_ALL=C sort | tr '\n' ' ')"
+assert_eq "concurrent deposits carry all five slugs" "worker-1 worker-2 worker-3 worker-4 worker-5 " "$cc_slugs"
+assert_eq "concurrent deposits append five Work Log entries" "5" \
+	"$(grep -c -E '^### .*: Report$' "$f_cc" || true)"
+assert_eq "concurrent deposits record all five digests" "5" \
+	"$(grep -c -F '**Digest:** report ' "$f_cc" || true)"
+rm -rf "$ccdir"
+
+echo "== log: manager entry, Updated bump, render =="
+f_lg="$(t new --id LOG-1 --name "Log Entry Target")"
+t set "$f_lg" Updated="2020-01-01 00:00" >/dev/null
+lg_latest_before="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_lg")"
+t log "$f_lg" "Dispatches held pending decision" >/dev/null
+lg_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Dispatches held pending decision$' "$f_lg" || true)"
+[[ -n "$lg_entry" ]] && ok "log appends the timestamped manager heading" || bad "log appends the timestamped manager heading"
+lg_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
+[[ "$lg_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "log bumps Updated to today" || bad "log bumps Updated to today (got [$lg_updated])"
+assert_eq "log leaves Latest Update untouched" "$lg_latest_before" \
+	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_lg")"
+assert_contains "dashboard reflects the log bump" "$(grep -F 'Log Entry Target' "$DASH")" "$lg_updated"
+lg_order="$(awk '/^## Work Log/{w=NR} /Manager: Dispatches held pending decision/{e=NR} /^## Execution Log/{x=NR} END{print (w<e && e<x) ? "ok" : "bad"}' "$f_lg")"
+assert_eq "log entry lands at the end of the Work Log section" "ok" "$lg_order"
+t log "$f_lg" "$(printf 'Multi heading line\nbody detail here')" >/dev/null
+assert_contains "multiline log headings the first line" "$(cat "$f_lg")" "Manager: Multi heading line"
+assert_contains "multiline log keeps the remaining body" \
+	"$(grep -A2 'Manager: Multi heading line' "$f_lg")" "body detail here"
+
+echo "== log: validation refusals =="
+lg_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
+refuse "log rejects an empty message" log "$f_lg" ""
+refuse "log rejects a missing message" log "$f_lg"
+refuse "log rejects extra arguments" log "$f_lg" "one" "two"
+refuse "log rejects a missing task file" log NOPE-9.md "msg"
+assert_eq "rejected logs leave Updated untouched" "$lg_updated_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
+
+echo "== log: --from attribution =="
+f_lf="$(t new --id LOG-2 --name "Log From Target")"
+t set "$f_lf" Updated="2020-01-01 00:00" >/dev/null
+t log "$f_lf" --from Worker-C "Checkpoint reached, suite green" >/dev/null
+lf_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Worker-C: Checkpoint reached, suite green$' "$f_lf" || true)"
+[[ -n "$lf_entry" ]] && ok "log --from headings the worker name" || bad "log --from headings the worker name"
+t log "$f_lf" --from "" "Empty from falls back to Manager" >/dev/null
+ef_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Empty from falls back to Manager$' "$f_lf" || true)"
+[[ -n "$ef_entry" ]] && ok "log re-defaults an empty --from to Manager" || bad "log re-defaults an empty --from to Manager"
+# The Manager default stays covered by the log tests above (f_lg), which
+# exercise the same from="$DEFAULT_FROM" path without the flag.
+
+echo "== log: heading-line and CR rejection =="
+# The seven-hash line is not a markdown heading and is accepted (its entry
+# lands first); the no-trace baseline is captured after it so the rejection
+# assertions below prove the refused calls append nothing.
+if t log "$f_lf" "$(printf 'text\n####### seven hashes is not a heading')" >/dev/null 2>&1; then ok "log accepts seven-hash lines (not markdown headings)"; else bad "log accepts seven-hash lines (not markdown headings)"; fi
+lf_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
+lf_entries_before="$(grep -c '^### ' "$f_lf")"
+head_err="$(t log "$f_lf" "$(printf 'fine first line\n## Injected Section')" 2>&1 >/dev/null || true)"
+assert_contains "log rejects a body line beginning with a heading" "$head_err" "heading"
+refuse "log rejects a heading first line" log "$f_lf" "## Heading first line"
+cr_err="$(t log "$f_lf" "$(printf 'crlf first\rsecond line')" 2>&1 >/dev/null || true)"
+assert_contains "log rejects CR characters in the message" "$cr_err" "carriage return"
+refuse "log rejects a multi-line --from" log "$f_lf" --from "$(printf 'a\nb')" "msg"
+refuse "log rejects a valueless trailing --from" log "$f_lf" --from
+assert_eq "rejected heading and CR logs leave Updated untouched" "$lf_updated_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
+assert_eq "rejected heading and CR logs append no entry" "$lf_entries_before" \
+	"$(grep -c '^### ' "$f_lf")"
+
+echo "== log: blank first line rejection =="
+lf_blank_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
+lf_blank_entries_before="$(grep -c '^### ' "$f_lf")"
+blank_err="$(t log "$f_lf" "$(printf '   \nbody under a blank first line')" 2>&1 >/dev/null || true)"
+assert_contains "log rejects a whitespace-only first line" "$blank_err" "first line"
+refuse "log rejects an empty first line" log "$f_lf" "$(printf '\nbody under an empty first line')"
+refuse "log rejects a tab-only first line" log "$f_lf" "$(printf '\t\nbody under a tab-only first line')"
+assert_eq "rejected blank-first-line logs leave Updated untouched" "$lf_blank_updated_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
+assert_eq "rejected blank-first-line logs append no entry" "$lf_blank_entries_before" \
+	"$(grep -c '^### ' "$f_lf")"
+
+echo "== log: append failure is explicit and leaves no partial state =="
+# Root is immune to mode bits, so the chmod cannot provoke the append's
+# mktemp failure and the assertions are skipped rather than run as no-ops.
+if ((EUID == 0)); then
+	skip_test "log reports an append failure explicitly (skipped under root)"
+	skip_test "a failed log append leaves the file untouched (skipped under root)"
+else
+	lg_fail_entries_before="$(grep -c '^### ' "$f_lg")"
+	lg_fail_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
+	lg_perm_mode="$(stat -c %a "$TASKS_DIR/current")"
+	chmod 500 "$TASKS_DIR/current"
+	lg_fail_err="$(t log "$f_lg" "must never land" 2>&1 >/dev/null || true)"
+	chmod "$lg_perm_mode" "$TASKS_DIR/current"
+	assert_contains "log reports an append failure explicitly" "$lg_fail_err" "log: failed to update"
+	assert_contains "append failure names the task file" "$lg_fail_err" "$(basename "$f_lg")"
+	assert_eq "failed log append appends no entry" "$lg_fail_entries_before" "$(grep -c '^### ' "$f_lg")"
+	assert_eq "failed log append leaves Updated untouched" "$lg_fail_updated_before" \
+		"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
+	assert_eq "failed log append leaves no temp file behind" "" \
+		"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_lg")." || true)"
+fi
+
+echo "== log: headingless file still gets its Updated refresh =="
+hless="$TASKS_DIR/current/20240101-1200-headingless-task.md"
+cat >"$hless" <<'EOF'
+# Task: Headingless Append Target
+
+**Status:** Triage
+EOF
+t log "$hless" "Entry on a headingless file" >/dev/null
+grep -q '^\*\*Updated:\*\*' "$hless" \
+	&& ok "log refreshes Updated on a headingless file" || bad "log refreshes Updated on a headingless file"
+assert_eq "headingless append writes exactly one Updated line" "1" \
+	"$(grep -c '^\*\*Updated:\*\*' "$hless")"
+hless_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Entry on a headingless file$' "$hless" || true)"
+[[ -n "$hless_entry" ]] && ok "headingless append still appends the entry" || bad "headingless append still appends the entry"
+rm -f "$hless"
+t render >/dev/null
+
+echo "== show: header fields and last N entries =="
+f_sh="$(t new --id SHW-1 --name "Show Target")"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do t log "$f_sh" "Entry number $i" >/dev/null; done
+sh_md5_before="$(md5sum "$f_sh" | cut -d' ' -f1)"
+dash_md5_before="$(md5sum "$DASH" | cut -d' ' -f1)"
+out="$(t show "$f_sh")"
+assert_contains "show prints the title" "$out" "# Task: Show Target"
+assert_contains "show prints header fields" "$out" "**Status:**"
+assert_contains "show prints Latest Update" "$out" "**Latest Update:**"
+assert_eq "show defaults to the last 10 entries" "10" "$(grep -c '^### ' <<<"$out")"
+assert_contains "show tail includes the newest entry" "$out" "Entry number 12"
+assert_contains "show tail starts at the cutoff entry" "$out" "Entry number 3"
+assert_not_contains "show tail omits older entries" "$out" "Entry number 2"
+out3="$(t show "$f_sh" --tail 3)"
+assert_eq "show --tail 3 prints three entries" "3" "$(grep -c '^### ' <<<"$out3")"
+assert_contains "show --tail 3 includes the newest entry" "$out3" "Entry number 12"
+assert_contains "show --tail 3 starts at its cutoff entry" "$out3" "Entry number 10"
+assert_not_contains "show --tail 3 omits older entries" "$out3" "Entry number 9"
+assert_eq "show is read-only on the task file" "$sh_md5_before" "$(md5sum "$f_sh" | cut -d' ' -f1)"
+assert_eq "show leaves the dashboard untouched" "$dash_md5_before" "$(md5sum "$DASH" | cut -d' ' -f1)"
+refuse "show rejects --tail 0" show "$f_sh" --tail 0
+refuse "show rejects a non-numeric tail" show "$f_sh" --tail abc
+refuse "show rejects a negative tail" show "$f_sh" --tail -1
+refuse "show rejects a valueless trailing --tail" show "$f_sh" --tail
+refuse "show rejects a missing task file" show NOPE-9.md
+f_nolog="$(t new --id SHW-2 --name "Show No Log Target")"
+out_empty="$(t show "$f_nolog")"
+assert_contains "show works on a task without entries" "$out_empty" "# Task: Show No Log Target"
+assert_eq "show without entries prints none" "0" "$(grep -c '^### ' <<<"$out_empty")"
+
+echo "== show: work_log_tail reads its snapshot from stdin =="
+# The tail must come from the piped snapshot, never from a re-read of a
+# file operand. The function is eval-extracted and $file is pointed at
+# /dev/null, so only a stdin-reading implementation can produce the
+# expected tail.
+eval "$(awk '/^work_log_tail\(\)/{f=1} f{print} f&&/^}/{exit}' "$TASKS_BIN")"
+wlt_sample="$(printf '## Objective\n\nbody\n\n## Work Log\n\n### 2026-01-01 09:00: Manager: first\n\nfirst body\n\n### 2026-01-01 09:05: Manager: second\n\nsecond body\n')"
+wlt_out="$(printf '%s\n' "$wlt_sample" | file=/dev/null work_log_tail 1)"
+assert_eq "work_log_tail reads its tail from piped stdin" \
+	"### 2026-01-01 09:05: Manager: second
+
+second body" "$wlt_out"
+wlt_two="$(printf '%s\n' "$wlt_sample" | file=/dev/null work_log_tail 2)"
+assert_contains "work_log_tail with n=2 reaches the first entry" "$wlt_two" \
+	"### 2026-01-01 09:00: Manager: first"
+wlt_none="$(printf '## Objective\n\nno Work Log section here\n' | file=/dev/null work_log_tail 5)"
+assert_eq "work_log_tail without a Work Log section prints nothing" "" "$wlt_none"
+
+echo "== usage: canonical option order =="
+usage_out="$(t help)"
+assert_contains "usage places --from between --slug and --digest" "$usage_out" \
+	"--slug SLUG [--from WORKER] --digest TEXT"
+assert_not_contains "usage does not place --from after --digest" "$usage_out" \
+	"--digest TEXT [--from"
 
 echo
 printf 'Result: \033[0;32m%d passed\033[0m, ' "$pass"
