@@ -69,11 +69,22 @@ Outside this table, "agent" is used generically for any delegated worker unless 
 
 ### Dispatched Agent Conduct
 
-Conduct requirements for dispatched agents (stay in the assigned territory, return clarification questions to the dispatcher) are canonical in the Dispatch Economy section of the `execution-standards` rule, which every dispatched agent receives in its system prompt.
+Conduct requirements for dispatched agents are canonical in the Dispatch Economy section of the `execution-standards` rule, which every dispatched agent receives in its system prompt.
+
+### Dispatch by Reference
+
+When the work is tracked in task files, the dispatch prompt MAY be a pointer instead of a duplicated payload; the pointer form is sanctioned:
+
+1. **Instructions Given first.** The manager writes the full dispatch instructions verbatim into the target task file's Work Log (the **Instructions Given** field of the dispatch entry, per the `task-files` skill) BEFORE making the Task call. That entry is the authoritative instruction record.
+2. **Minimal bootstrap frame.** The Task call carries only a bootstrap frame: the agent's role, the task file to read (naming the exact path and the **Instructions Given** entry that is the contract), and the report-back expectation (including the report mechanism when task files are active, per the `task-files` skill).
+3. **Mid-flight steering stays in the call.** Any instruction issued while the agent runs goes through the dispatch channel, never only in the file: the agent cannot be assumed to re-read the file mid-flight.
+4. **Write once.** The manager MUST NOT restate the entry's instructions in the Task call; the prompt is written once, in the file.
+
+Without task-file tracking, dispatches carry the full prompt as usual.
 
 ### Context Continuity
 
-When a unit of work depends on the output of an earlier unit the same agent produced, implementations SHOULD resume that agent's session with the new objective instead of dispatching a fresh one: the context already lives there, and retelling it through the dispatcher wastes tokens. A fresh dispatch is REQUIRED when the dependency crosses agents or when the earlier session's context is poisoned; in that case the dispatch prompt MUST include the earlier unit's report as background the receiving agent MUST verify for itself, never as predetermined outcomes.
+When a unit of work depends on the output of an earlier unit the same agent produced, implementations SHOULD resume that agent's session with the new objective instead of dispatching a fresh one: the context already lives there, and retelling it through the dispatcher wastes tokens. A fresh dispatch is REQUIRED when the dependency crosses agents or when the earlier session's context is poisoned; in that case the dispatch prompt MUST include the earlier unit's report as background the receiving agent MUST verify for itself, never as predetermined outcomes (when task files are active, the report's path under `.tasks/reports/` may serve in place of an inline copy, per the `task-files` skill).
 
 ## Safety Requirements
 
@@ -103,6 +114,8 @@ When `git worktree remove` refuses because the worktree holds uncommitted or unr
 Implementations MUST report when: agents are dispatched (summary of work assigned), major phases complete, unexpected obstacles are encountered, decision points are reached (questions needing user input are governed by Question Batching Discipline), and all work is completed.
 
 Users MUST be able to follow work progress in both modes. When dispatching: show what work is assigned. When receiving reports: summarize what agents found or accomplished. When executing directly (Solo): report progress factually and objectively. When making decisions (both modes): explain reasoning before acting, and consult the user before significant decisions. Reporting style MUST be factual and objective, similar to agent reports; users MUST NOT be left wondering what is happening.
+
+When work is tracked in task files, agent reports are recorded per the `task-files` skill's report mechanism: the verbatim report lives in a file under `.tasks/reports/` and the Work Log entry carries the link and the agent's digest. The user-facing summary required above draws on the digest and the manager's analysis rather than re-reading the full report.
 
 Update frequency: short tasks get a summary at completion; long tasks get periodic updates at logical checkpoints.
 
