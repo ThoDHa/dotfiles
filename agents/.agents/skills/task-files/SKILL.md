@@ -1,6 +1,6 @@
 ---
 name: task-files
-description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode, or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
+description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode, or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
 ---
 
 > Manager Mode mechanics are defined in the `delegation` skill. Load it when Manager Mode activates.
@@ -14,7 +14,7 @@ This specification defines requirements for creating and managing task files dur
 ### Tone and Voice Policy
 
 - All sections MUST use professional, formal tone with no character voice, per the `core` rule's Formal Output Standards.
-- Exception: the Agent Report entry in the Work Log template ([Task File Template](#task-file-template)) records agent output verbatim, regardless of tone.
+- Exception: agent-authored content in the report flow records agent output verbatim, regardless of tone: the agent's digest line in its Work Log entry ([Agent Report Entries](#agent-report-entries)) and the linked report file under `reports/` ([Reports Namespace](#reports-namespace)).
 - Every other section MUST remain formal.
 
 ---
@@ -58,11 +58,14 @@ Project Root/
     ├── dashboard.md                              # Jira-style dashboard board
     ├── current/
     │   └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Active and recently completed task files
+    ├── reports/
+    │   └── PREFIX-N-YYYYMMDD-HHMM-task-description.md/ # One directory per task file, keyed by the full filename
+    │       └── NN-<slug>.md                      # Verbatim agent reports
     └── archive/
         └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Archived task files
 ```
 
-Only `dashboard.md` sits at the top of `.tasks/`; every individual task file lives in `current/` or `archive/`. When a task is moved to the dashboard's Archive table, its file MUST be moved from `current/` into `archive/`. The directory is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
+Only `dashboard.md` and `reports/` sit at the top of `.tasks/`; every individual task file lives in `current/` or `archive/`, and verbatim agent reports live under `reports/` (see [Reports Namespace](#reports-namespace)). When a task is moved to the dashboard's Archive table, its file MUST be moved from `current/` into `archive/`; its reports never move. The directory is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
 
 ### Gitignore Recommendation
 
@@ -79,6 +82,58 @@ Users SHOULD add `.tasks/` to their global gitignore, or MAY commit it selective
 | Example | `AUTH-1-20241222-0710-api-auth-refactor.md` |
 
 The kebab-case rule governs the **description component of the filename** only; the Task ID component keeps its canonical uppercase form. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title, the dashboard link text, and prose references) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles, coordinating conjunctions, and prepositions of three letters or fewer when mid-title. Example: filename `AUTH-1-20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`.
+
+### Reports Namespace
+
+Verbatim agent reports live as files under `.tasks/reports/`, not inline in task files:
+
+```
+.tasks/reports/<taskfile-basename>/<NN>-<slug>.md
+```
+
+| Component | Requirement |
+|-----------|-------------|
+| `<taskfile-basename>` | The task file's full filename INCLUDING the `.md` extension (e.g. `AUTH-1-20241222-0710-api-auth-refactor.md`); keying by the full filename is collision-proof across tasks sharing a description |
+| `NN` | Report sequence number within the task, zero-padded to two digits (`01`, `02`), assigned in deposit order |
+| `<slug>` | Kebab-case slug naming the report's content (e.g. `recon`, `final-report`) |
+
+- **Permanent.** Report files are cumulative records that only grow; [Content Preservation](#content-preservation) applies in full, and the ONLY permissible deletion is a user's explicit and specific command.
+- **Never move on archive.** Reports are keyed by task filename, not by file location: when a task file moves from `current/` to `archive/`, its reports stay in place. Because `current/`, `archive/`, and `reports/` are siblings, the relative link `../reports/<taskfile-basename>/<NN>-<slug>.md` written in a task file resolves identically from both directories.
+- **Exempt from task-file rules.** Report files are not task files: they carry no canonical header fields, are never registered in the dashboard, follow the layout above rather than the [File Naming Convention](#file-naming-convention), and have no lifecycle states. The rules that bind them are the layout, the [Report File Template](#report-file-template), and permanence.
+- **Referenced, never inlined.** Task files reference reports only by that relative link plus a digest, per [Agent Report Entries](#agent-report-entries) and [Cross-Reference Convention](#cross-reference-convention).
+- **Recon reports.** Exploration agents deposit their findings as a `01-recon` report (slug `recon`) under the parent task's directory via the same command; child tasks then reference that report from their **Files to Review** lists, keeping reconnaissance a shared artifact instead of per-child duplication.
+
+Each report file follows the [Report File Template](#report-file-template).
+
+#### Report File Template
+
+Report files MUST carry the following fixed sections, in this order; additional sections MAY follow them:
+
+```markdown
+# Report: [Task ID or task file basename]: [slug]
+
+**From:** [Agent/ally name]
+**Date:** YYYY-MM-DD HH:MM
+**Task:** [Basename of the task file this report belongs to]
+
+## Findings
+
+[Objective findings: what was examined, observed, measured]
+
+## Decisions
+
+[Choices made during the work and the reasoning; "none" when empty]
+
+## Blocks
+
+[Obstacles, open questions, needs beyond assigned territory; "none" when empty]
+
+## Next
+
+[Recommended or taken next steps; "none" when empty]
+```
+
+`Findings` MUST carry substantive content; the other three sections MUST be present even when their content is only "none".
 
 ---
 
@@ -190,6 +245,9 @@ In this environment the tool is the `tasks` command (on `PATH` at `~/.local/bin/
 - `tasks claim <taskfile>` / `tasks release <taskfile>` perform the `O_EXCL` claim (writing **Owner**) and its reverse, then render
 - `tasks set <taskfile> Key=Value...` updates canonical header fields (refreshing **Updated**) and renders
 - `tasks new --id <ID> --name <Name>` creates a task file with canonical header fields, then renders
+- `tasks log <taskfile> [--from <worker>] "<message>"` appends a Work Log entry whose heading is `### <timestamp>: <from>: <first line>`, refreshing **Updated** and rendering, all as one serialized operation under the same lock; dispatched agents pass `--from` with their agent identifier to record interim progress (see [Agent Write Path](#agent-write-path))
+- `tasks report <taskfile> --slug <slug> [--from <worker>] --digest "<line>" [<file>|-]` deposits a report file under `.tasks/reports/` and appends its link+digest Work Log entry, refreshing header fields and rendering, all as one serialized operation under the same lock; dispatched agents pass `--from` with their agent identifier to deposit their final report (see [Agent Write Path](#agent-write-path))
+- `tasks show <taskfile> [--tail N]` prints header fields, Latest Update, and the last N Work Log entries (default 10); strictly read-only: no lock, no render, no header refresh
 
 Sessions MUST route every dashboard change through `tasks` rather than editing `dashboard.md` directly. Serialization does not weaken [Real-Time Updates](#real-time-updates): write the owning task file as work occurs, then trigger a regeneration at once.
 
@@ -213,13 +271,17 @@ References to sections, other task files, or these specifications MUST cite the 
 
 A reference from one task to *another task* MUST exist only when a real structural relationship justifies it, exhaustively: a declared **Dependencies** field, a parent ↔ child task-file link ([Child Task Files](#child-task-files)), or a deferred-work link from a closing task's Final Summary ([Deferred Work Capture at Closure](#deferred-work-capture-at-closure)). Implementations MUST NOT reference another task outside these cases: no "see also" links, no restating another task's content, no cross-links between tasks that merely touch the same area. When in doubt, omit.
 
+Links to report files under `.tasks/reports/` are sanctioned without further justification: a task's links to its own reports, and a child task's reference to the parent's `01-recon` report, are links to artifacts keyed to the owning task file, in the `../reports/...` relative form required by [Reports Namespace](#reports-namespace); they are not task-to-task references. Links to another task's *file* remain restricted exactly as above.
+
 ### Latest Update Field
 
 Every task file MUST carry a **Latest Update** field in its header, directly below the status block and above the Table of Contents. It holds a single entry (the most recent notable change), NOT a running list, and MUST contain all three of:
 
 - A timestamp (`YYYY-MM-DD HH:MM`)
 - A terse one-line summary of what changed
-- A markdown link by heading title to the detailed record (the relevant Work Log entry, Decision Log decision, Progress Log, Failed Approach, or Execution Log milestone)
+- A markdown link to the detailed record: by heading title for in-file records (the relevant Work Log entry, Decision Log decision, Progress Log, Failed Approach, or Execution Log milestone), or the `../reports/...` relative link for a deposited report file (see [Reports Namespace](#reports-namespace))
+
+When the detailed record is a deposited report file, the canonical format is the form `tasks report` writes: `[YYYY-MM-DD HH:MM] <digest> ([report](../reports/<taskfile-basename>/<NN>-<slug>.md))`.
 
 It is a live pointer, refreshed in place whenever a more recent notable change occurs. Refreshing it does NOT violate [Content Preservation](#content-preservation): the full cumulative history remains in the log section it links to; only the pointer moves.
 
@@ -434,27 +496,23 @@ A task CANNOT be marked Completed unless:
 
 ## Work Log
 
-This section tracks all work performed during the task, whether by agents/allies or by the manager. Tone note: Manager entries remain factual and objective; Agent Report entries are recorded verbatim per [Tone and Voice Policy](#tone-and-voice-policy).
+This section is the task's Jira-style narrative: a chronological comment stream of all work performed, whether by agents/allies or by the manager. Verbatim agent report content lives in linked files under `reports/` ([Reports Namespace](#reports-namespace)); entries reference it by digest and link per [Agent Report Entries](#agent-report-entries). Tone note: Manager entries remain factual and objective; agent-authored content (digest lines and report files) is recorded verbatim per [Tone and Voice Policy](#tone-and-voice-policy).
 
 ### [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
 
 **Purpose:** [Brief description of what this agent was asked to do]
 
-**Instructions Given:**
+**Instructions Given:** [The authoritative record of dispatch instructions; written verbatim BEFORE the agent is dispatched, per Dispatch by Reference in the `delegation` skill]
 
 ```
-[Verbatim prompt/instructions sent to the agent]
+[Verbatim dispatch instructions]
 ```
 
-**Agent Report:**
-
-```
-[Verbatim output returned by the agent: full findings, not summarized]
-```
+**Agent Report:** [Agent-supplied digest: one factual line] ([full report](../reports/<taskfile-basename>/<NN>-<slug>.md))
 
 **Manager Analysis:**
 
-[How the manager interpreted these findings and what actions were taken]
+[The manager's independent interpretation of the report and the actions taken; a check on the agent's digest, never a restatement of the report body]
 
 **Follow-up Actions:**
 
@@ -655,7 +713,7 @@ Under both modes, each reached checkpoint MUST be recorded as a milestone in the
 
 For any work done related to a task file, the task file MUST be updated immediately and thoroughly, in real time, as the work occurs: actions, discoveries, decisions, status changes, and progress, with no exceptions. It is strictly prohibited to defer, batch, or omit updates. Task files are living documents updated DURING execution, not historical records written afterward; failure to update the task file for related work is a critical conformance failure.
 
-- Work Log updated AS work happens: progress during agent execution (not only at completion), findings/decisions/actions as the manager works, full verbatim agent output immediately after reports
+- Work Log updated AS work happens: progress during agent execution (not only at completion), findings/decisions/actions as the manager works, and report deposits with their Work Log entries appended immediately when a report arrives (see [Agent Report Entries](#agent-report-entries))
 - Decision Log updated AT THE MOMENT significant choices are made
 - [Latest Update field](#latest-update-field) refreshed whenever a more recent notable change occurs
 - Failed Approaches documented IMMEDIATELY when attempts fail
@@ -663,9 +721,35 @@ For any work done related to a task file, the task file MUST be updated immediat
 
 **Dashboard Synchronization:** the dashboard MUST reflect task file changes immediately, through the serialized path of [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety) when sessions may share the directory. Users should be able to open a task file at ANY moment and see current status, not outdated information.
 
+### Agent Report Entries
+
+Dispatched agent reports follow the reports-as-files mechanism:
+
+- The agent deposits its full report as a file under `.tasks/reports/`, following the [Reports Namespace](#reports-namespace) layout and the [Report File Template](#report-file-template).
+- When the deposit is made via `tasks report`, the command appends the Work Log entry itself: a heading of the form `### [Timestamp]: [Agent Name]: Report` carrying exactly the agent-supplied digest and the `../reports/...` link, then refreshes the header fields and renders the dashboard.
+- When the report is recorded in a manager-written dispatch entry ([Task File Template](#task-file-template)), the **Agent Report** field carries the same two things: the digest line and the relative link.
+- The manager MUST NOT copy or paraphrase the report body into the Work Log. **Manager Analysis** is the manager's independent reading of the report and the check on the agent's digest, not a restatement.
+
+### Agent Write Path
+
+A dispatched agent's `.tasks/` writes are exactly two CLI channels; anything else is forbidden:
+
+- Interim progress: `tasks log <taskfile> --from <agent-identifier> "<message>"` appends a Work Log entry as one serialized operation under the lock.
+- Final report: `tasks report <taskfile> --slug <slug> --from <agent-identifier> --digest "<line>" [<file>|-]` performs the report-file write, the Work Log entry, the header refresh, and the dashboard render as one serialized operation under the lock.
+- Agents MUST pass `--from` with their agent identifier on both commands, so every entry attributes itself to its author.
+- Agents MUST NOT edit task files, header fields, the dashboard, or any other `.tasks/` artifact: task-file writes belong to the manager, and dashboard mutations belong to the `tasks` command.
+- **Planning-mode exception.** A worker dispatched to plan a Triage task file MAY edit exactly the planning sections of that named task file: Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown, and Decision Log. The exception covers nothing else: header fields, acceptance-criteria checkboxes, Progress, and the dashboard stay manager-owned, no status transition (including Triage → Ready) belongs to the planning worker, and execution-phase writes return to the two CLI channels above.
+- The manager MAY also call both commands for its own structured deposits; the agent calling `tasks report` for its own report is the normal path.
+
+### Manual Fallback
+
+The agent write path requires the `tasks log` and `tasks report` subcommands. Until they exist, implementations MUST fall back to the manual path: the dispatched agent writes its report file at the canonical path exactly as `tasks report` would create it (next `NN`, template-compliant, never overwriting an existing file), returns the path, the digest, and interim progress updates to the manager in its dispatch response, and the manager then appends the link+digest Work Log entry and refreshes the header fields. The fallback changes only who performs the mechanical writes; the layout, the [Report File Template](#report-file-template), and the entry format are identical, and the agent's write scope is still limited to the report file itself.
+
+**Heading-delimiter hazard.** The `tasks` CLI's section parsing is heading-delimited, not fence-aware: a line beginning with `#` inside a code fence or quoted block still matches the `^## ` and `^### ` section delimiters. Verbatim content embedded in a task file (quoted dispatch instructions, pasted excerpts) MUST indent every line that begins with `#` so it cannot match a delimiter. An unindented `## ` line inside the Work Log section ends that section early in the parser's eyes: `tasks show` tails stop there, hiding every later entry, and appended entries are inserted above that line instead of at the section's end, dropping any hand-written entries below it out of the tail.
+
 ### Verbatim Recording Requirement
 
-Agent output MUST be recorded verbatim in Work Log agent entries. Implementations MUST NOT summarize or paraphrase agent reports; full context is valuable for debugging, accountability, and traceability. Manager entries MUST accurately document actions, findings, and outcomes.
+Agent report content MUST be recorded verbatim in the agent's report file under `.tasks/reports/` ([Reports Namespace](#reports-namespace)); the Work Log agent entry carries the link and the agent's digest, never a summary of the body. Implementations MUST NOT summarize or paraphrase agent report content into Work Log entries or elsewhere; full context remains one link away for debugging, accountability, and traceability. **Instructions Given** entries stay inline verbatim in the Work Log: they are the authoritative record of dispatch instructions and MUST be written before the agent is dispatched (see Dispatch by Reference in the `delegation` skill). Manager entries MUST accurately document actions, findings, and outcomes.
 
 ### Decision Documentation Requirement
 
@@ -740,4 +824,4 @@ Question Queue (Significant):
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures, notably: failing to keep dashboard and task files synchronized ([Index Maintenance](#index-maintenance)); creating task files without user request ([Creation Prohibition](#creation-prohibition)); summarizing agent output instead of recording verbatim ([Verbatim Recording Requirement](#verbatim-recording-requirement)); marking a task Completed before the Simplify and Review Loop has converged or without documenting each iteration; failing to immediately update the task file for related work; deleting or overwriting previously written content ([Content Preservation](#content-preservation)); fabricating an answer to a Significant question or silently dropping a queued question; closing a task while deferred work remains uncaptured as task files; applying checkpoint slicing without a contract-first step or an integration checkpoint declaring Dependencies; omitting the Checkpoint Gating field or failing to raise the gating choice with the user; editing `dashboard.md` in place, holding an agent-held lock across tool calls, or beginning work without an atomic claim when sessions may share the directory ([Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety)).
+Violations of MUST requirements constitute conformance failures, notably: failing to keep dashboard and task files synchronized ([Index Maintenance](#index-maintenance)); creating task files without user request ([Creation Prohibition](#creation-prohibition)); summarizing agent report content instead of recording it verbatim in the report file ([Verbatim Recording Requirement](#verbatim-recording-requirement)); a dispatched agent writing any `.tasks/` artifact outside its sanctioned writes, the two CLI channels plus the planning-mode exception ([Agent Write Path](#agent-write-path)); marking a task Completed before the Simplify and Review Loop has converged or without documenting each iteration; failing to immediately update the task file for related work; deleting or overwriting previously written content ([Content Preservation](#content-preservation)); fabricating an answer to a Significant question or silently dropping a queued question; closing a task while deferred work remains uncaptured as task files; applying checkpoint slicing without a contract-first step or an integration checkpoint declaring Dependencies; omitting the Checkpoint Gating field or failing to raise the gating choice with the user; editing `dashboard.md` in place, holding an agent-held lock across tool calls, or beginning work without an atomic claim when sessions may share the directory ([Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety)).
