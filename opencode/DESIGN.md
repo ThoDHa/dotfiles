@@ -48,16 +48,67 @@ when the user forbade it.
 
 ## Task-file integration
 
-When the task-files protocol is active, each unit is a child task file.
-Workers append Work Log and Progress Log entries in real time and their
-final report verbatim; the manager wraps that entry with the instructions
-given and its analysis, performs status transitions, and renders the
-dashboard through the `tasks` CLI. Planning may be delegated to a worker,
-but the Triage → Ready approval is always the manager's alone. During
-execution the plan is frozen: workers may check off acceptance criteria
-but never modify planning content; a wrong plan is flagged, not edited.
-Small tasks use the lite profile defined in the task-files skill. Without
-task files, worker reports go to `/tmp/opencode/reports/` as artifacts.
+When the task-files protocol is active, each unit is a child task file,
+and every `.tasks/` write has exactly one owner. The manager owns the
+task files themselves: header fields, acceptance-criteria checkboxes,
+status transitions, and the dashboard, rendered through the `tasks`
+CLI. Dispatched workers own exactly two channels, both inside that CLI
+and both attributed to them via `--from`, per the task-files skill's
+Agent Write Path: interim progress as appended Work Log entries, and
+the final report as a verbatim deposit under `.tasks/reports/` whose
+Work Log entry carries the agent-supplied digest and a relative link.
+The manager never restates
+report bodies: its dispatch entry records the instructions given,
+written before the call, and its analysis is an independent check on
+the digest, not a retelling. A worker that finds the plan wrong flags
+that in its report instead of editing the file. The single carve-out is
+the planning-mode exception: a worker dispatched to plan a Triage task
+may edit exactly the planning sections of that named file (Objective,
+Success Criteria, Technical Approach, Risk Assessment, Testing
+Strategy, Task Breakdown, Decision Log), while header fields,
+checkboxes, Progress, status, and the dashboard stay manager-owned, and
+no status transition, Triage → Ready included, belongs to the planning
+worker.
+
+The reports mechanism keeps bulky output out of the task files, per the
+task-files skill's Reports Namespace: one directory per task file under
+`.tasks/reports/`, keyed by the file's full basename including `.md`,
+holding deposits named `NN-<slug>.md`. `NN` is a zero-padded sequence
+number assigned in deposit order, one past the highest already on disk,
+so numbers are never reused even when gaps appear. Because `current/`,
+`archive/`, and `reports/` are siblings, the `../reports/...` relative
+link in a task file resolves identically from both directories, so
+archiving moves the task file alone and reports never move. `tasks
+log`, `tasks report`, and the dashboard render they trigger each hold
+the exclusive `flock` on `.tasks/.lock` for their read-modify-write
+span, a process-held lock released on exit, so concurrent sessions
+serialize instead of racing. `tasks show <taskfile> --tail N` prints
+the header fields, the Latest Update pointer, and the last N Work Log
+entries without taking the lock: the delta read for catching up on a
+task. Until the subcommands exist in an environment, the manual
+fallback preserves the same contract by hand: the worker writes the
+next report file at the canonical path without overwriting and returns
+path and digest to the manager, who makes the entry and header writes
+(the task-files skill's Manual Fallback). Without task files at all,
+worker reports go to `/tmp/opencode/reports/<unit-name>.md` as
+artifacts.
+
+Every completed task's Final Summary opens with a closure digest, at
+most five lines naming the outcome, the key decisions, and links into
+the details (report deposit paths, the Decision Log), sized
+proportionally to the task; the normative text is the task-files
+skill's Closure Digest section. When planning fans the work out into
+parallel children with overlapping territory, a shared reconnaissance
+artifact is the default: the parent deposits a `01-recon` report via
+`tasks report --slug recon`, and each child references it from its
+Files to Review, so exploration happens once instead of once per
+child; skipping it requires a Decision Log exception naming the reason
+(a single child, territory already mapped, or the unknown-contract
+case where a walking skeleton precedes fan-out). The normative text is
+the task-files skill's Triage to Ready Planning Phase, tied to the
+manager's approval review by the delegation skill's Planning Approval
+Authority. Small tasks use the lite profile defined in the task-files
+skill.
 
 ## Dispatch economy
 
@@ -74,6 +125,29 @@ earlier unit's worker instead of dispatching fresh, so context stays
 in the worker and reports are not retold through the manager; fresh
 dispatches with the report as background remain for cross-worker
 dependencies and poisoned contexts.
+
+When work is tracked in task files, the dispatch prompt itself may be
+a pointer instead of a duplicated payload, per the execution-standards
+rule's Dispatch Economy and the delegation skill's Dispatch by
+Reference: the manager writes the complete instructions verbatim into
+the task file's Work Log (the Instructions Given entry) before making
+the Task call, and that entry is the authoritative instruction record.
+The call carries only a minimal bootstrap frame: the agent's role, the
+task file to read, and the report-back expectation. Instructions are
+written once, never restated in the call, and steering issued while
+the agent runs goes through the dispatch channel, never only in the
+file, since the agent cannot be assumed to re-read it mid-flight.
+
+Dispatched agents also carry three conduct rules of their own,
+normative in the same rule. Territory: stay inside the assigned files,
+modules, and concerns, and flag a needed change outside them rather
+than making it. Clarification routing: questions return to the
+dispatcher in the reply, never to the user directly. Permission-denial
+relay: a denial carrying a user message is a user question, so the
+agent stops dependent work and returns the message verbatim to the
+dispatcher; a bare denial is a hard no, not retried, with the blockage
+routed to the dispatcher instead; the session-fatal case is covered
+under known limits.
 
 ## Verification chain
 
@@ -133,6 +207,16 @@ verifier's bash is intentionally open so it can run tests, gated only
 against push, and its edit tool and subagent spawning are denied; the
 reviewer holds read-only git only.
 
+Recurring benign commands are pre-allowed so unattended runs do not
+stall on permission prompts: worker, manager, and verifier allow `make
+test*`, the repo's `test` and `test-*` targets (the reviewer is
+deliberately excluded, since its charter bars running tests), and the
+worker additionally allows `mktemp` with templates under
+`/tmp/opencode/*`, the invocation forms observed in its workflow.
+Config and agent files load once at
+session start, so permission edits take effect in newly started
+sessions; running sessions keep the maps they already loaded.
+
 Prefix-based bash permissions are guardrails against uninstructed
 behavior, not security boundaries: a determined `sh -c` or `git -C` route
 slips past them. Hard enforcement would require hooks or credential
@@ -149,8 +233,23 @@ separation.
   outside `.tasks`: it dispatches a worker to resolve, then commits the
   merge.
 - A rejected push escalates to the user; the manager has no fetch or pull.
-- A retried worker overwrites its `/tmp` report; the task-file Work Log
-  preserves failure history when task files are active.
+- Without task files, a retried worker overwrites its
+  `/tmp/opencode/reports/` artifact, the unit name fixing the path;
+  under task files each deposit takes the next `NN` sequence number and
+  `tasks report` refuses to overwrite an existing file, so the reports
+  directory preserves failure history.
+- Subagent permission denials do not propagate to the parent or the
+  main thread: the denial and any user message attached to it surface
+  only inside the subagent's session. The relay rule covers the
+  survivable cases; a session-fatal denial cannot be relayed at all,
+  an upstream platform gap declined for now.
+- Worktree-isolated children reach the main board by default:
+  `.tasks/` is gitignored, so a checkout under `.worktrees/` contains
+  no board of its own, but worktrees live inside the repo, and the
+  `tasks` CLI's directory walk-up from the child's working directory
+  finds the main repo root's `.tasks/`, so logs and reports land on
+  the main board. `--dir` (or `TASKS_DIR`) are explicit overrides,
+  needed only for working directories outside the repo tree.
 - Subagent gating through the `permission.task` key depends on SDK
   support: on some SDK versions (for example 1.18.5) the key may be a
   no-op, so the agents' task permission blocks may not be enforced; the
