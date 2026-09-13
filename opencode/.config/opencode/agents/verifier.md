@@ -7,6 +7,7 @@ permission:
   bash:
     "*": "allow"
     "git push*": "deny"
+    "make test*": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"

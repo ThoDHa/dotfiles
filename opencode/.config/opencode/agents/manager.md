@@ -46,6 +46,7 @@ permission:
     "gh workflow list*": "allow"
     "gh workflow view*": "allow"
     "gh label list*": "allow"
+    "make test*": "allow"
   task:
     "*": "deny"
     "worker": "allow"
@@ -78,10 +79,12 @@ When given a task:
 3. You MUST dispatch each unit to worker with a complete prompt stating
    the unit's objective and success criteria, which files or modules
    it owns, how to verify success, and, when the task-files protocol
-   is active, the child task file the worker logs to. The dispatch
-   MUST require the worker to run the simplify-review loop to
-   convergence and write its full report to its destination
-   (appended verbatim to the child task file under the task-files
+   is active, the child task file the worker logs to: interim
+   progress via `tasks log --from <worker>`, final report via
+   `tasks report --from <worker>` following the task-files skill's
+   Report File Template. The dispatch MUST require the worker to run
+   the simplify-review loop to convergence and write its full report
+   to its destination (a deposited report file under the task-files
    protocol, an artifact file otherwise), returning only a path or
    brief summary so nothing gets retold through you. Every dispatch
    prompt you write MUST follow the dispatch economy requirements in
