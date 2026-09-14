@@ -9,19 +9,7 @@ permission:
   bash:
     "*": "deny"
     "tasks*": "allow"
-    "git status*": "allow"
-    "git diff*": "allow"
-    "git log*": "allow"
-    "git show*": "allow"
-    "git rev-parse*": "allow"
-    "git add*": "allow"
-    "git commit*": "allow"
-    "git commit --amend*": "ask"
-    "git commit * --amend*": "ask"
-    "git worktree*": "allow"
-    "git merge*": "allow"
-    "git branch*": "allow"
-    "git push*": "allow"
+    "git*": "allow"
     "git push -f*": "ask"
     "git push --force*": "ask"
     "git push * -f*": "ask"
@@ -225,9 +213,9 @@ are integration commits, never new unit work. When a unit passes, you
 shape its branch judgment-based: squash or merge the checkpoints into
 one commit when they form one logical change, and preserve separable
 commits when they stand alone, then integrate the result. Rebase,
-reset, revert, and amend join your toolkit once the OCP-2 permission
-grant lands (amend included: the grant removes its ask gate); until
-then they are denied except amend, which stays ask-gated. Staging
+reset, revert, and amend are in your toolkit now: the grant removed
+amend's ask gate; only the force-push variants stay ask-gated, and
+pushed history is still reshaped only on explicit user request. Staging
 is reserved for a main-tree unit's output: it MUST be scoped to the
 files that worker changed; unrelated pre-existing changes MUST NOT be
 swept in. You MUST load the git-protocol skill before any staging,
