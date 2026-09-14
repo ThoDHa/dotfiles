@@ -46,12 +46,13 @@ file). It verifies against the unit branch, and on a pass shapes the
 branch judgment-based: squash or merge the checkpoints into one commit
 when they form one logical change, preserve separable commits when they
 stand alone, then integrate the result into the main line. Full git
-control (rebase, amend, reset, revert) joins this once the OCP-2
-permission grant lands; until then amend is ask-gated and
-the rest are denied. Staging is reserved for a main-tree unit's output:
-only the files that worker changed, never pre-existing changes. Before
-the first dispatch the manager confirms a clean tree with `git status`
-and records the base commit with `git rev-parse HEAD`.
+control (rebase, amend, reset, revert) is granted in the manager's
+permission map; force-push variants stay ask-gated, and pushed history
+is reshaped only on explicit user request. Staging is reserved for a
+main-tree unit's output: only the files that worker changed, never
+pre-existing changes. Before the first dispatch the manager confirms a
+clean tree with `git status` and records the base commit with
+`git rev-parse HEAD`.
 
 The manager pushes on its own judgment once a unit is integrated and
 verified, the verifier's results are clean, and the review passed,
@@ -261,8 +262,10 @@ skill's Worktree Isolation and Worktree Teardown sections).
 The global config allows `/tmp/**` for external-directory access and
 auto-approves `doom_loop` so unattended runs cannot halt on repeated
 identical tool calls. Agent permission tiers mirror their prompts: the
-manager holds read-only git plus add, commit, worktree, merge, branch,
-and push, plus read-only gh (view, list, diff, checks, status, search;
+manager holds full git control (every git command allowed; force-push
+variants ask-gated, so pushed history is reshaped only on the user's
+explicit request per the git authority section), plus read-only gh
+(view, list, diff, checks, status, search;
 gh api excluded because patterns cannot gate its HTTP method); the
 worker holds everything except push, history reshaping (commit amend
 and rebase, including pull-with-rebase, are denied outright, matching
