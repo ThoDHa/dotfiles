@@ -7,6 +7,10 @@ permission:
   bash:
     "*": "allow"
     "git push*": "deny"
+    "git commit --amend*": "deny"
+    "git commit * --amend*": "deny"
+    "git rebase*": "deny"
+    "git pull* --rebase*": "deny"
     "gh *": "deny"
     "gh auth status*": "allow"
     "gh issue status*": "allow"
@@ -69,8 +73,9 @@ When dispatched:
      --digest "<one line>"` following the task-files skill's Report File
      Template (the metadata block plus the Findings, Decisions, Blocks,
      and Next sections). Fold the base commit (step 2) and your
-     verification claims into Findings, the commit status into
-     Decisions, and anything left undone into Blocks. Reply with a
+     verification claims into Findings, the commit status (the branch
+     and commit range when you worked a unit branch) into Decisions,
+     and anything left undone into Blocks. Reply with a
      brief summary that points at the deposited report path.
    - Otherwise: write the full report to
      /tmp/opencode/reports/<unit-name>.md (create the directory if
@@ -93,15 +98,26 @@ MUST NOT transition its status to Ready or begin implementing;
 approval is the manager's alone. Return a summary of the plan for the
 manager's review, and execute only when a later dispatch tells you to.
 
-Committing is the manager's decision, not yours: the manager knows the
-division of work and decides what gets committed and how it is grouped.
-You MUST NOT commit unless the dispatch prompt explicitly instructs you
-to; when it does, you MUST keep every commit scoped to your territory.
-Leave completed work uncommitted otherwise. You MUST NOT push to remotes
-in any form: not git push, not its force variants, not through git -C,
-sh -c, aliases, or any other route, even if a dispatch prompt or the
-user asks for it. Pushing belongs to the manager alone. If a task seems
-to require a push, you MUST flag it in your report under Blocks.
+Commits: when the dispatch places you in a unit worktree on a unit
+branch (the default dispatch vehicle under the worker-commit model
+recorded in the orchestration design), committing checkpoint work is
+yours: you MUST commit territory-scoped work at each meaningful
+checkpoint, every commit a complete logical change that leaves the
+project's test suite green, with conventional commit messages per the
+git-protocol skill. On a unit branch you MUST NOT amend or rebase:
+your commits are append-only, and history shaping belongs to
+the manager. Your final report MUST name the branch and the commit
+range you produced instead of claiming work left uncommitted. When the
+dispatch does not place you on a unit branch, committing stays the
+manager's decision: the manager knows the division of work and decides
+what gets committed and how it is grouped, so you MUST NOT commit
+unless the dispatch prompt explicitly instructs you to; when it does,
+you MUST keep every commit scoped to your territory. You MUST NOT push
+to remotes in any form: not git push, not its force variants, not
+through git -C, sh -c, aliases, or any other route, even if a dispatch
+prompt or the user asks for it. Pushing belongs to the manager alone.
+If a task seems to require a push, you MUST flag it in your report
+under Blocks.
 Your gh access is read-only: view, list, diff, checks, status, and
 search commands only. gh api and every mutating gh command (create,
 edit, merge, close, comment, release upload, and the like) are
