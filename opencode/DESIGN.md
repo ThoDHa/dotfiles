@@ -10,12 +10,13 @@ behind them.
 
 | Agent | Mode | Model | Duties |
 |-------|------|-------|--------|
-| manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, integration and history shaping, pushes, reconciliation |
+| manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, architecture duties (codebase exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, checkpoint commits on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | session | simplify-review in analysis-only mode, expectation checks, no command execution beyond read-only git |
 
-The manager is a pure coordinator: it holds no implementation duty, and its
+The manager is a coordinator, not an implementer: it holds no
+implementation duty (it never authors implementation content), and its
 file edits are limited to `.tasks/**`. Integration commits and pushing
 are coordination duties, not implementation work; unit workers commit
 their own checkpoint work on the branches the manager assigned them.
@@ -46,7 +47,8 @@ file). It verifies against the unit branch, and on a pass shapes the
 branch judgment-based: squash or merge the checkpoints into one commit
 when they form one logical change, preserve separable commits when they
 stand alone, then integrate the result into the main line. Full git
-control (rebase, amend, reset, revert) is granted in the manager's
+control (rebase, amend, reset, revert; fetch and pull denied per known
+limits) is granted in the manager's
 permission map; force-push variants stay ask-gated, and pushed history
 is reshaped only on explicit user request. Staging is reserved for a
 main-tree unit's output: only the files that worker changed, never
@@ -222,17 +224,16 @@ pass can catch cross-unit regressions.
 
 Failure handling parks instead of blocking (normative in the manager
 agent file, with the standing-restart grant for pure coordinators in
-the delegation skill's Failure Semantics): one immediate retry; on
-retry failure the task is parked with a Blocked status whose reason
-carries the failure summary and the attempt count, reported to the
-user without blocking the queue. At every backfill or checkpoint
-event, the oldest parked task whose blocking condition may have
-cleared is restarted before fresh Ready work is pulled, never into an
-unchanged condition; hard escalation follows 4 total dispatch attempts
-on a task or 2 identical recurrences of the same failure. Restart
-eligibility is backoff-gated: a parked task may restart only after 5
-minutes have elapsed since its last dispatch attempt, doubling with
-each restart (5, 10, 20 minutes), measured on wall-clock time taken
+the delegation skill's Failure Semantics): on the failure of its
+single mandated retry, the task is parked with a Blocked status
+whose reason carries the failure summary and the attempt count,
+reported to the user without blocking the queue. At every backfill or
+checkpoint event, the oldest parked task whose blocking condition may
+have cleared is restarted before fresh Ready work is pulled, never
+into an unchanged condition. The retry count and the escalation
+bounds (the total attempt bound, the identical-recurrence bound, and
+the doubling restart-backoff schedule) are normative in manager.md and
+not restated here; the backoff is measured on wall-clock time taken
 from the board's own timestamps, since the tasks CLI stamps task file
 headers (Updated) and Work Log entries with real times and the manager
 reads the current time by refreshing a header through the CLI and
@@ -262,22 +263,29 @@ skill's Worktree Isolation and Worktree Teardown sections).
 The global config allows `/tmp/**` for external-directory access and
 auto-approves `doom_loop` so unattended runs cannot halt on repeated
 identical tool calls. Agent permission tiers mirror their prompts: the
-manager holds full git control (every git command allowed; force-push
-variants ask-gated, so pushed history is reshaped only on the user's
-explicit request per the git authority section), plus read-only gh
-(view, list, diff, checks, status, search;
-gh api excluded because patterns cannot gate its HTTP method); the
-worker holds everything except push, history reshaping (commit amend
-and rebase, including pull-with-rebase, are denied outright, matching
-the prompt prohibition), gh writes (same read-only gh set), and
-subagent spawning; the verifier's bash is intentionally open so it can
-run tests, gated only against push, and its edit tool and subagent
-spawning are denied; the reviewer holds read-only git only.
+manager runs an allow-all bash map whose only carve-outs are the four
+force-push ask entries (pushed history is reshaped only on the user's
+explicit request per the git authority section) and the `git fetch*` /
+`git pull*` denies behind the known limit that the manager has no
+fetch or pull; gh carries no manager entries at all, so it holds full
+gh access, writes and gh api included, for CI/CD coordination (the
+read-only gh set, gh api excluded because patterns cannot gate its
+HTTP method, now applies below the manager only: the worker's map;
+the reviewer holds no gh at all); its edit denial is the single
+architectural line, confining file edits to `.tasks/**` while bash
+stays open; the worker holds everything except push, history
+reshaping (commit amend and rebase, including pull-with-rebase, are
+denied outright, matching the prompt prohibition), gh writes (the
+read-only gh set), and subagent spawning; the verifier's bash is
+intentionally open so it can run tests, gated only against push, and
+its edit tool and subagent spawning are denied; the reviewer holds
+read-only git only.
 
 Recurring benign commands are pre-allowed so unattended runs do not
-stall on permission prompts: worker, manager, and verifier allow `make
-test*`, the repo's `test` and `test-*` targets (the reviewer is
-deliberately excluded, since its charter bars running tests), and the
+stall on permission prompts: worker and verifier allow `make
+test*`, the repo's `test` and `test-*` targets (the manager's
+allow-all map subsumes them, and the reviewer is deliberately
+excluded, since its charter bars running tests), and the
 worker additionally allows `mktemp` with templates under
 `/tmp/opencode/*`, the invocation forms observed in its workflow.
 Config and agent files load once at
