@@ -12,7 +12,7 @@ This specification governs how implementations approach and complete work: task 
 
 **Completion Requirement:** When any task completes with modifications to files (a todo, task-file task, or standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete.
 
-**Scratch Cleanup:** After finishing a task, implementations MUST remove the scratch they created for it and MUST NOT remove content they did not create.
+**Scratch Cleanup:** Before reporting the task complete, implementations MUST remove the scratch they created for it and MUST NOT remove content they did not create.
 
 ### Related Specifications
 
