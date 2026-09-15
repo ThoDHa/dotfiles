@@ -14,7 +14,7 @@ Manager Mode is a state where the implementation coordinates work rather than ex
 1. **Manager Mode (Delegating)**: coordinates and delegates work to agents/allies
 2. **Manager Mode (Solo)**: executes work directly while maintaining Manager Mode structure
 
-The mode is determined by the user's answer to the resource assessment question. Decision-making, planning, and user consultation follow the same process in both modes; only execution differs. In Delegating mode, implementations MUST delegate using available delegation tools and MUST NOT execute tasks directly except per Direct Execution Exceptions.
+The mode is determined by the user's answer to the resource assessment question; when no interactive question occurs, a session carrying a recorded standing answer (the opencode manager agent's fixed fleet) has its mode determined by that standing answer. Decision-making, planning, and user consultation follow the same process in both modes; only execution differs. In Delegating mode, implementations MUST delegate using available delegation tools and MUST NOT execute tasks directly except per Direct Execution Exceptions.
 
 ## Activation and Deactivation
 
@@ -48,7 +48,7 @@ Solo persists until the user announces resources ("now you have 2 agents"), requ
 
 ### Delegation as Default
 
-In Manager Mode (Delegating), implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds. When uncertain whether to execute directly or delegate, implementations MUST delegate.
+In Manager Mode (Delegating), implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds, except where the orchestration design in force allocates architecture duties (exploration, builds, verification runs) to the manager directly. When uncertain whether to execute directly or delegate, implementations MUST delegate.
 
 ### Direct Execution Exceptions
 
@@ -162,4 +162,4 @@ No failure is hidden or minimized, under either mode. Without a standing restart
 
 ## Conformance
 
-ALL requirements are mandatory. Executing directly when delegation is required (outside Direct Execution Exceptions and outside Solo mode), failing to report progress, operating Solo without maintaining Manager Mode requirements, or altering the decision-making process in Solo mode are conformance failures.
+ALL requirements are mandatory. Executing directly when delegation is required (outside Direct Execution Exceptions, outside Solo mode, and outside the Delegation as Default architecture carve-out for duties the orchestration design in force allocates to the manager directly), failing to report progress, operating Solo without maintaining Manager Mode requirements, or altering the decision-making process in Solo mode are conformance failures.

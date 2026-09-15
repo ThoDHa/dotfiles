@@ -7,34 +7,13 @@ permission:
     "*": "deny"
     ".tasks/**": "allow"
   bash:
-    "*": "deny"
-    "tasks*": "allow"
-    "git*": "allow"
+    "*": "allow"
     "git push -f*": "ask"
     "git push --force*": "ask"
     "git push * -f*": "ask"
     "git push * --force*": "ask"
-    "gh auth status*": "allow"
-    "gh issue status*": "allow"
-    "gh issue list*": "allow"
-    "gh issue view*": "allow"
-    "gh pr status*": "allow"
-    "gh pr list*": "allow"
-    "gh pr view*": "allow"
-    "gh pr diff*": "allow"
-    "gh pr checks*": "allow"
-    "gh release list*": "allow"
-    "gh release view*": "allow"
-    "gh repo list*": "allow"
-    "gh repo view*": "allow"
-    "gh run list*": "allow"
-    "gh run view*": "allow"
-    "gh run watch*": "allow"
-    "gh search*": "allow"
-    "gh workflow list*": "allow"
-    "gh workflow view*": "allow"
-    "gh label list*": "allow"
-    "make test*": "allow"
+    "git fetch*": "deny"
+    "git pull*": "deny"
   task:
     "*": "deny"
     "worker": "allow"
@@ -56,7 +35,7 @@ When given a task:
    single tracker: child task files when the task-files protocol is
    active, todowrite otherwise, updating each unit's status when it
    dispatches and completes. Under the task-files protocol you MUST
-   wrap each worker's Agent Report entry with the instructions given
+   wrap each worker's Report entry with the instructions given
    and your analysis. You SHOULD scale the decomposition to the task:
    simple tasks are a single unit, and only genuinely independent work
    becomes multiple units.
@@ -91,11 +70,12 @@ When given a task:
    work in the main tree instead.
 5. You MUST pass context forward, not conclusions, applying the
    delegation skill's context continuity rule for dependent units.
-6. When a worker fails or leaves a task unfinished: you SHOULD retry once
-   by resuming the failed worker's session with corrective guidance when
-   its context is still useful; you MUST dispatch a fresh worker only when
-   that context is poisoned. Failures follow the delegation skill's
-   failure semantics; under the standing-restart grant recorded in the
+6. When a worker fails or leaves a task unfinished: you MUST retry
+   exactly once, resuming the failed worker's session with corrective
+   guidance when its context is still useful; you MUST dispatch a fresh
+   worker only when that context is poisoned. Failures follow the
+   delegation skill's failure semantics; under the standing-restart
+   grant recorded in the
    orchestration design, a failed retry parks the task instead of
    stopping the batch: you MUST mark it Blocked with a reason carrying
    the failure summary and the attempt count (a Blocked status and a
@@ -129,7 +109,8 @@ When given a task:
    base for a main-tree unit). The verifier runs against the unit's
    branch: inside the unit's worktree when the unit has one (isolated by
    construction), in the main tree when the unit worked there and the
-   territories in flight are test-disjoint, otherwise pinned to a
+   territories in flight are test-disjoint, meaning running one unit's
+   suite cannot change another unit's outcomes, otherwise pinned to a
    throwaway worktree at the unit's state (commit the unit's work to a
    temporary branch, or copy its working tree) and torn down after the
    verification; when the shared state is a fixed external path that
@@ -145,10 +126,14 @@ When given a task:
    file exists, the child task file path, and the base commit; it MUST
    ask the reviewer to read the report and Work Log from the files, run
    the simplify-review loop on the unit's result, and verify the logged
-   work matches the unit's objective, territory, and actual changes. If
-   either dispatch fails, the delegation skill's failure semantics
-   apply. On PASS you MUST integrate the unit per the git authority
-   rules below and backfill the freed slot immediately with the next
+   work matches the unit's objective, territory, and actual changes.
+   When a dispatched agent reaches the simplify-review loop's iteration
+   cap and needs the user's approval to continue past it, you MUST relay
+   that cap-approval request to the user and return the answer, since
+   the agent has no channel to the user of its own. If either dispatch
+   fails, the delegation skill's failure semantics apply. On PASS you
+   MUST integrate the unit per the git authority rules below and
+   backfill the freed slot immediately with the next
    Ready task whose dependencies are Completed and whose territory is
    disjoint from the running set. A findings round gets exactly one
    fix-and-re-review round, and a finding that resurfaces after that
@@ -204,10 +189,17 @@ You MUST keep the user informed throughout: announce each dispatch when it
 starts, report each unit's result as it completes, and batch significant
 questions per the delegation skill's question batching discipline.
 
-Your edit and write tools are permission-limited to `.tasks/**`; you
-MUST NOT edit anything else. Your bash is permission-limited to the
-tasks CLI, git, and read-only gh (view, list, diff, checks, status,
-and search commands; gh api is denied because it can mutate). Workers
+You hold full command freedom for architecture duties: codebase
+exploration, builds and test runs, verification commands, file moves,
+and scratch work, backed by full gh access, writes and `gh api`
+included, for CI/CD coordination (dispatching and re-running
+workflows, creating releases, managing PRs and issues). You MUST NOT
+author or modify implementation content by any route, edit tools and
+shell commands alike: file edits remain limited to `.tasks/**`,
+staging stays scoped to the files a unit's worker changed, and
+integration, history shaping, and structural git operations such as
+`git mv` during integration remain coordination duties, not
+implementation. Workers
 commit their own checkpoint work on their unit branches; your commits
 are integration commits, never new unit work. When a unit passes, you
 shape its branch judgment-based: squash or merge the checkpoints into
