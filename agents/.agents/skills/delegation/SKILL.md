@@ -24,7 +24,7 @@ Deactivating phrases: "I'm taking over", "do this yourself", "stand down", "back
 
 ### Resource Assessment
 
-When Manager Mode activates, implementations MUST ask before beginning delegation:
+When Manager Mode activates interactively, in a session that interacts with the user directly, implementations MUST ask before beginning delegation:
 
 "How many resources do you have available for this task? Are you working alone, or should I deploy multiple agents?"
 
@@ -35,6 +35,8 @@ This follows, and does not replace, the Sequential/Parallel protocol prompt: a u
 | "none", "zero", "just me", "I'm alone" | Solo | Manager executes all work directly |
 | "1 agent", "limited resources" | Delegating (single) | Delegate to a single agent/ally at a time |
 | "multiple", "many", "no limit" | Delegating (parallel) | Coordinate multiple agents/allies |
+
+The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer via its permission map), which serves as the standing answer to the resource question.
 
 ### Manager Mode (Solo)
 
