@@ -236,7 +236,7 @@ A session MUST claim a task before beginning work on it, atomically:
 
 ### External Tooling Dependency
 
-Concurrent operation requires a mutation tool performing the lock-rebuild-release cycle and the atomic claim. Until such a tool exists, concurrent multi-session operation against one `.tasks/` directory is UNSAFE and implementations MUST fall back to single-session operation.
+Concurrent operation requires a mutation tool performing the lock-rebuild-release cycle and the atomic claim. Until such a tool exists, implementations MUST NOT run multiple sessions concurrently against one `.tasks/` directory and MUST fall back to single-session operation.
 
 In this environment the tool is the `tasks` command (on `PATH` at `~/.local/bin/tasks`):
 
@@ -508,7 +508,8 @@ This section is the task's Jira-style narrative: a chronological comment stream 
 [Verbatim dispatch instructions]
 ```
 
-**Agent Report:** [Agent-supplied digest: one factual line] ([full report](../reports/<taskfile-basename>/<NN>-<slug>.md))
+**Report:** [`<NN>-<slug>.md`](../reports/<taskfile-basename>/<NN>-<slug>.md)
+**Digest:** [Agent-supplied digest: one factual line]
 
 **Manager Analysis:**
 
@@ -722,7 +723,7 @@ For any work done related to a task file, the task file MUST be updated immediat
 - Failed Approaches documented IMMEDIATELY when attempts fail
 - Task status updates follow [Index Maintenance](#index-maintenance) synchronization rules
 
-**Dashboard Synchronization:** the dashboard MUST reflect task file changes immediately, through the serialized path of [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety) when sessions may share the directory. Users should be able to open a task file at ANY moment and see current status, not outdated information.
+**Dashboard Synchronization:** the dashboard MUST reflect task file changes immediately, through the serialized path of [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety) when sessions may share the directory. Users should be able to open a task file at any moment and see current status, not outdated information.
 
 ### Agent Report Entries
 
@@ -730,7 +731,7 @@ Dispatched agent reports follow the reports-as-files mechanism:
 
 - The agent deposits its full report as a file under `.tasks/reports/`, following the [Reports Namespace](#reports-namespace) layout and the [Report File Template](#report-file-template).
 - When the deposit is made via `tasks report`, the command appends the Work Log entry itself: a heading of the form `### [Timestamp]: [Agent Name]: Report` carrying exactly the agent-supplied digest and the `../reports/...` link, then refreshes the header fields and renders the dashboard.
-- When the report is recorded in a manager-written dispatch entry ([Task File Template](#task-file-template)), the **Agent Report** field carries the same two things: the digest line and the relative link.
+- When the report is recorded in a manager-written dispatch entry ([Task File Template](#task-file-template)), the **Report:** and **Digest:** fields carry the same two things: the relative link and the digest line, spelled exactly as the `tasks report` command writes them.
 - The manager MUST NOT copy or paraphrase the report body into the Work Log. **Manager Analysis** is the manager's independent reading of the report and the check on the agent's digest, not a restatement.
 
 ### Agent Write Path
