@@ -289,6 +289,70 @@ behavior, not security boundaries: a determined `sh -c` or `git -C` route
 slips past them. Hard enforcement would require hooks or credential
 separation.
 
+## LRU context plugin
+
+Every session loads the LRU context manager as a plugin: opencode.json's
+`plugin` array names `./plugin/lru-context.ts`, so the transforms below
+run for the manager and every subagent alike. The plugin hooks the
+message-list transform (`experimental.chat.messages.transform`) to
+reshape the conversation before each model call and the system-prompt
+transform (`experimental.chat.system.transform`) to deliver its hint.
+Token accounting is approximate: text and tool outputs are sized
+in characters and divided by four, the context budget comes from the
+model's declared limit when one exists and falls back to a 100000-token
+default otherwise, and eviction starts once the estimate crosses half
+the budget (the watermark ratio).
+
+Three transforms run in order on every turn, after stale copies of the
+hint line are stripped from the message list. Dedup replaces the output
+of an earlier identical tool call (same tool, same input) with a
+`[lru-deduped]` tombstone pointing at the newer copy, whenever the
+retained copy clears the same 2048-byte floor eviction applies. The
+errored-input purge replaces the recorded input of failed tool calls
+older than the recent window with `[lru-purged-input]`, so prompts,
+paths, and commands from failed attempts do not linger in context.
+Eviction, the main transform, ranks completed tool outputs by last
+touch (a later call against the same file, pattern, or command counts
+as a touch) and, once the estimate exceeds the watermark, replaces the
+least recently active outputs with `[lru-evicted]` tombstones; outputs
+last touched within the most recent four messages, the `task` and
+`todowrite` tools, and outputs under 2048 bytes are exempt. Eviction
+does not destroy: each evicted output is stashed for its session (50
+entries, oldest dropped), and the `read_evicted` tool returns a
+stashed output by subject, passed exactly as the eviction notice names
+it; stashes are per-session, so only output evicted during the current
+session is reloadable. The `lru_stats` tool reports the live counters,
+stash occupancy, the effective budget, and the last run's token
+estimate as JSON. After each run the plugin also delivers a
+`[lru-hot] recently active: ...` line into the system prompt naming up
+to ten most recently touched subjects, so the model sees which files
+and commands are warm without rereading them.
+
+The plugin keeps a persistent metrics log, on by default, appended to
+`~/.local/share/opencode/lru-metrics.jsonl`. Every eventful transform
+run appends one JSON line: eventful means at least one eviction, dedup
+tombstone, or post-eviction touch in the run, or any stash read since
+the previous line. Each line carries an ISO timestamp, the session id,
+the run's token estimate against the watermark, the evicted entries
+with tool, subject, byte size, and age in messages, the dedup and
+post-eviction-touch counts, stash reads since the previous line, and
+the session's running totals. Subjects are rendered to a single line
+capped at 160 characters (newlines flattened), the same cap that
+bounds every subject in the `[lru-hot]` hint line and the eviction
+notices; subjects cover file paths (with ranges), grep and glob
+patterns, and bash command strings, which makes the file a
+near-verbatim record of commands run, not only of context pressure.
+The opt-out is the plugin's `metricsLog` option, and `metricsPath`
+relocates the file, but the current config entry is the bare-string
+form and the runtime extracts an options object only from the
+`[path, options]` tuple form, so with a bare string every option
+resolves to its default, and disabling the log requires switching the
+entry to `["./plugin/lru-context.ts", { "metricsLog": false }]`. There is no
+rotation: lines are appended indefinitely across sessions and the file
+shrinks only when deleted by hand. A failed append never interrupts
+the session; the error is held in the session's metrics and surfaces
+through `lru_stats` as `logWriteError`.
+
 ## Known limits
 
 - Soft rules (plan freeze, log discipline, tasks CLI restraint) depend on
