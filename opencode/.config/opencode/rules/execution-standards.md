@@ -45,6 +45,8 @@ Broader behavioral standards in [`core.md`](core.md) govern task execution uncha
 
 ## Task Complexity Protocol
 
+This protocol binds sessions that interact with the user directly. Dispatched agents are exempt: they have no user channel and no subagent spawning, so they route execution-choice questions through their dispatcher per the Dispatch Economy conduct requirements instead of pausing for user input.
+
 ### Complexity Threshold
 
 When a task generates 4 or more todo items, implementations MUST pause and present execution options to the user.
@@ -86,6 +88,8 @@ Implementations MUST NOT proceed with complex tasks without user direction on ex
 ---
 
 ## Standard Parallel Operations
+
+These operations bind the same sessions as the Task Complexity Protocol: sessions that interact with the user directly. Dispatched agents are exempt (no user channel, no subagent spawning) and route execution-choice questions through their dispatcher per the Dispatch Economy conduct requirements.
 
 ### Parallelization Conditions
 
