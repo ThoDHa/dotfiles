@@ -545,6 +545,183 @@ hless_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manag
 rm -f "$hless"
 t render >/dev/null
 
+echo "== edit: replace section body =="
+f_ed="$(t new --id EDT-1 --name "Edit Section Target")"
+t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
+ed_body="$ROOT/edit-body.md"
+cat >"$ed_body" <<'EOF'
+New objective text from the edit channel.
+
+Second line of the body.
+EOF
+t edit "$f_ed" --section Objective "$ed_body" >/dev/null
+ed_region="$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ed")"
+assert_eq "edit replaces the section body verbatim" \
+	"$(printf '\nNew objective text from the edit channel.\n\nSecond line of the body.')" "$ed_region"
+ed_next_region="$(awk '/^## Success Criteria$/{f=1;next} /^## Work Log$/{f=0} f' "$f_ed")"
+assert_not_contains "edit leaves the following section untouched" "$ed_next_region" "New objective text"
+printf 'Piped replacement body\n' | t edit "$f_ed" --section Objective >/dev/null
+assert_contains "edit reads the body from piped stdin" "$(cat "$f_ed")" "Piped replacement body"
+printf 'Dash stdin body\n' | t edit "$f_ed" --section Objective - >/dev/null
+assert_contains "edit reads the body from explicit dash stdin" "$(cat "$f_ed")" "Dash stdin body"
+printf 'Tail section body\n' | t edit "$f_ed" --section "Execution Log" >/dev/null
+ed_tail="$(awk '/^## Execution Log$/{f=1} f' "$f_ed")"
+assert_contains "replace reaches a section at end of file" "$ed_tail" "Tail section body"
+
+echo "== edit: append under an existing section =="
+f_ea="$(t new --id EDT-2 --name "Edit Append Target")"
+t set "$f_ea" Updated="2020-01-01 00:00" >/dev/null
+printf 'Appended tail line\n' | t edit "$f_ea" --section Objective --append >/dev/null
+ea_region="$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ea")"
+assert_eq "append keeps the existing body and adds the tail" \
+	"$(printf '\n[EDT-2] Edit Append Target\n\nAppended tail line')" "$ea_region"
+printf 'First appended line\n' | t edit "$f_ea" --section "Work Log" --append >/dev/null
+ea_log="$(awk '/^## Work Log$/{f=1;next} /^## Execution Log$/{f=0} f' "$f_ea")"
+assert_eq "append onto an empty section writes the body" \
+	"$(printf '\nFirst appended line')" "$ea_log"
+ea_snapshot="$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ea")"
+if printf '' | t edit "$f_ea" --section Objective --append >/dev/null 2>&1; then
+	ok "append with empty input succeeds as a no-op"
+else
+	bad "append with empty input succeeds as a no-op"
+fi
+assert_eq "empty append leaves the section body untouched" "$ea_snapshot" \
+	"$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ea")"
+
+echo "== edit: refusals leave the task file untouched =="
+ed_before="$(cat "$f_ed")"
+refuse "edit rejects an unknown section" edit "$f_ed" --section "No Such Section" "$ed_body"
+refuse "edit rejects an empty replacement body (file)" edit "$f_ed" --section Objective /dev/null
+refuse "edit rejects an empty replacement body (stdin)" edit "$f_ed" --section Objective
+ed_bad="$ROOT/edit-heading-body.md"
+printf 'leading text\n## Injected Section\ntrailing text\n' >"$ed_bad"
+refuse "edit rejects a heading-shaped body line" edit "$f_ed" --section Objective "$ed_bad"
+refuse "edit --append rejects a heading-shaped body line" edit "$f_ea" --section "Work Log" --append "$ed_bad"
+refuse "edit rejects a missing --section" edit "$f_ed"
+refuse "edit rejects a valueless trailing --section" edit "$f_ed" --section
+refuse "edit rejects an unknown option" edit "$f_ed" --bogus x --section Objective "$ed_body"
+refuse "edit rejects a missing task file" edit NOPE-9.md --section Objective "$ed_body"
+refuse "edit rejects a missing body file" edit "$f_ed" --section Objective "$ROOT/no-such-body.md"
+refuse "edit rejects extra arguments" edit "$f_ed" --section Objective "$ed_body" extra
+ed_title="$(grep -m1 -oP '^# \K.*' "$f_ed")"
+refuse "edit refuses the level-1 document title as a section" edit "$f_ed" --section "$ed_title" "$ed_body"
+ea_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ea")"
+refuse "empty append still rejects an unknown section" edit "$f_ea" --section "No Such Section" --append
+assert_eq "edit refusals leave the file byte-identical" "$ed_before" "$(cat "$f_ed")"
+title_err="$(t edit "$f_ed" --section "$ed_title" "$ed_body" 2>&1 >/dev/null || true)"
+assert_contains "title refusal reports an unknown section" "$title_err" "unknown section"
+assert_eq "refused empty append leaves Updated untouched" "$ea_updated_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ea")"
+ed_err="$(t edit "$f_ed" --section "No Such Section" "$ed_body" 2>&1 >/dev/null || true)"
+assert_contains "unknown-section refusal names the section" "$ed_err" "unknown section"
+head_err="$(t edit "$f_ed" --section Objective "$ed_bad" 2>&1 >/dev/null || true)"
+assert_contains "heading-line refusal names the hazard" "$head_err" "heading"
+ed_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
+refuse "edit refuses an empty stdin replacement without a trace" edit "$f_ed" --section Objective
+assert_eq "refused edits leave Updated untouched" "$ed_updated_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
+
+echo "== edit: write failure is not misreported as unknown section =="
+# Root is immune to mode bits, so the chmod cannot provoke the mktemp
+# failure and the assertions are skipped rather than run as no-ops.
+if ((EUID == 0)); then
+	skip_test "edit reports a write failure explicitly (skipped under root)"
+	skip_test "write failure is not misreported as unknown section (skipped under root)"
+else
+	ed_fail_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
+	ed_perm_mode="$(stat -c %a "$TASKS_DIR/current")"
+	chmod 500 "$TASKS_DIR/current"
+	ed_perm_err="$(printf 'denied body\n' | t edit "$f_ed" --section Objective 2>&1 >/dev/null || true)"
+	chmod "$ed_perm_mode" "$TASKS_DIR/current"
+	assert_contains "edit reports a write failure explicitly" "$ed_perm_err" "failed to update"
+	assert_contains "write failure names the task file" "$ed_perm_err" "$(basename "$f_ed")"
+	assert_not_contains "write failure is not misreported as unknown section" "$ed_perm_err" "unknown section"
+	assert_eq "failed edit leaves Updated untouched" "$ed_fail_updated" \
+		"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
+	assert_eq "failed edit leaves no temp file behind" "" \
+		"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_ed")." || true)"
+fi
+
+echo "== edit: Updated refresh and dashboard render =="
+t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
+printf 'Render check body\n' | t edit "$f_ed" --section Objective >/dev/null
+ed_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
+[[ "$ed_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "edit bumps Updated to today" || bad "edit bumps Updated to today (got [$ed_updated])"
+assert_contains "dashboard reflects the edit bump" "$(grep -F 'Edit Section Target' "$DASH")" "$ed_updated"
+
+echo "== edit: --dir flag =="
+printf 'Dir flag edit body\n' | t edit --dir "$dirtasks" "$(basename "$f_dir")" --section Objective >/dev/null
+assert_contains "edit --dir applies to the requested board" \
+	"$(cat "$dirtasks/current/$(basename "$f_dir")")" "Dir flag edit body"
+
+echo "== edit: subsection boundary semantics =="
+subsec="$TASKS_DIR/current/20240101-1300-subsection-boundary.md"
+cat >"$subsec" <<'EOF'
+# Task: Subsection Boundary Target
+
+**Status:** Triage
+**Updated:** 2024-01-01 13:00
+
+## Parent Section
+
+parent intro line
+
+### Child Section
+
+child line
+
+## Next Section
+
+next body
+EOF
+printf 'replaced child body\n' | t edit "$subsec" --section "Child Section" >/dev/null
+sub_child="$(awk '/^### Child Section$/{f=1;next} /^## Next Section$/{f=0} f' "$subsec")"
+assert_eq "replace is bounded by the next same-or-higher heading" \
+	"$(printf '\nreplaced child body')" "$sub_child"
+printf 'appended at region end\n' | t edit "$subsec" --section "Parent Section" --append >/dev/null
+sub_parent="$(awk '/^## Parent Section$/{f=1;next} /^## Next Section$/{f=0} f' "$subsec")"
+assert_eq "append spans the section's whole region" \
+	"$(printf '\nparent intro line\n\n### Child Section\n\nreplaced child body\n\nappended at region end')" "$sub_parent"
+sub_next="$(awk '/^## Next Section$/{f=1} f' "$subsec")"
+assert_contains "edit leaves the following section intact" "$sub_next" "next body"
+rm -f "$subsec"
+t render >/dev/null
+
+echo "== concurrent edit and log serialize (no lost update) =="
+f_ce="$(t new --id EDT-3 --name "Concurrency Edit Target")"
+ce_body="$ROOT/conc-edit-body.md"
+ce_concdir="$(mktemp -d)"
+ce_fail=0
+ce_field() { grep -oP "^\\*\\*$1:\\*\\*\\s+\\K.*" "$f_ce"; }
+ce_cell() { grep -F 'Concurrency Edit Target' "$DASH" | cut -d'|' -f"$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+for round in 1 2 3 4 5 6 7 8 9 10 11 12; do
+	# One writer replaces the Objective body through `tasks edit`, the other
+	# appends a Work Log entry through `tasks log`. Both hold the board lock,
+	# so whichever order they land in, the section body and the new entry
+	# must both be present and the dashboard row must equal the file after
+	# the round; a stale read-modify-write from either side would drop the
+	# other's write while both exit 0, so any mismatch is a lost update.
+	printf 'round %s baseline body\n' "$round" >"$ce_body"
+	t edit "$f_ce" --section Objective "$ce_body" >/dev/null
+	entries_before="$(grep -c '^### ' "$f_ce" || true)"
+	printf 'race %s body\n' "$round" >"$ce_body"
+	t edit "$f_ce" --section Objective "$ce_body" >"$ce_concdir/e.out" 2>&1 &
+	e_pid=$!
+	t log "$f_ce" --from "conc-$round" "round $round edit race entry" >"$ce_concdir/l.out" 2>&1 &
+	l_pid=$!
+	wait "$e_pid"; e_code=$?
+	wait "$l_pid"; l_code=$?
+	[[ "$e_code" == 0 && "$l_code" == 0 ]] || ce_fail=$((ce_fail + 1))
+	ce_region="$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ce")"
+	[[ "$ce_region" == *"race $round body"* ]] || ce_fail=$((ce_fail + 1))
+	entries_after="$(grep -c '^### ' "$f_ce" || true)"
+	[[ "$entries_after" == "$((entries_before + 1))" ]] || ce_fail=$((ce_fail + 1))
+	[[ "$(ce_cell 5)" == "$(ce_field Updated)" ]] || ce_fail=$((ce_fail + 1))
+done
+assert_eq "concurrent edit and log lose no update across rounds" "0" "$ce_fail"
+rm -rf "$ce_concdir"
+
 echo "== show: header fields and last N entries =="
 f_sh="$(t new --id SHW-1 --name "Show Target")"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do t log "$f_sh" "Entry number $i" >/dev/null; done
@@ -599,6 +776,10 @@ assert_contains "usage places --from between --slug and --digest" "$usage_out" \
 	"--slug SLUG [--from WORKER] --digest TEXT"
 assert_not_contains "usage does not place --from after --digest" "$usage_out" \
 	"--digest TEXT [--from"
+assert_contains "usage places --append after --section" "$usage_out" \
+	"--section HEADING [--append] [<file>|-]"
+assert_not_contains "usage does not place --append before --section" "$usage_out" \
+	"--append] --section"
 
 echo
 printf 'Result: \033[0;32m%d passed\033[0m, ' "$pass"

@@ -78,6 +78,10 @@ Commands:
   log [--dir DIR] <taskfile> [--from WORKER] MSG
                                        Append a Work Log entry attributed to
                                        WORKER (default Manager), render.
+  edit [--dir DIR] <taskfile> --section HEADING [--append] [<file>|-]
+                                       Replace or append a section body from
+                                       <file> or stdin, refresh Updated, render
+                                       (locked).
   show [--dir DIR] <taskfile> [--tail N]
                                        Print header fields, Latest Update, and
                                        the last N Work Log entries (default 10).
@@ -355,6 +359,122 @@ append_work_log_entry() {
 			}
 			if (updated != "" && !done_u) print "**Updated:** " updated
 			if (latest != "" && !done_l) print "**Latest Update:** " latest
+		}
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+# Report whether the file carries a section heading matching the given name
+# at level 2 or deeper, reading the file without writing anything. Level-1
+# headings are the document title, not sections, and never match, so a
+# --section naming the title is refused instead of silently replacing
+# everything below it.
+section_exists() {
+	SECTION="$2" awk '
+		function heading_level(    h) {
+			HTEXT = ""
+			if (substr($0, 1, 1) != "#") return 0
+			h = 0
+			while (substr($0, h + 1, 1) == "#") h++
+			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
+			HTEXT = substr($0, h + 2)
+			sub(/[ \t\r]+$/, "", HTEXT)
+			return h
+		}
+		BEGIN { section = ENVIRON["SECTION"]; found = 0 }
+		{
+			level = heading_level()
+			if (level >= 2 && HTEXT == section) { found = 1; exit }
+		}
+		END { exit found ? 0 : 1 }
+	' "$1"
+}
+
+# Replace the body of a named section, or append to it, in one atomic
+# rewrite: output is staged into a temp file and a single mv commits it, so
+# a failure mid-pass leaves the original file untouched. The section spans
+# its heading through the line before the next heading of the same or
+# higher level; replace swaps that whole region for the new body, append
+# inserts the new body after the existing one (trailing blank lines
+# trimmed) with a blank line between. The blank separator line under the
+# section heading is always preserved (consumed from the original when
+# present), so both modes keep the canonical heading/body layout. Sections
+# match at level 2 and deeper only; the level-1 document title is not a
+# section. Section name, new body, and mode travel via ENVIRON (not
+# awk -v) so backslashes in user text survive verbatim. Returns non-zero
+# without touching the file when no section heading matches.
+replace_section_body() {
+	local file="$1" section="$2" body="$3" append="$4"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	SECTION="$section" EDIT_BODY="$body" EDIT_APPEND="$append" awk '
+		function heading_level(    h) {
+			HTEXT = ""
+			if (substr($0, 1, 1) != "#") return 0
+			h = 0
+			while (substr($0, h + 1, 1) == "#") h++
+			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
+			HTEXT = substr($0, h + 2)
+			sub(/[ \t\r]+$/, "", HTEXT)
+			return h
+		}
+		function flush_body(    i) {
+			while (nbuf > 0 && buf[nbuf] == "") nbuf--
+			for (i = 1; i <= nbuf; i++) print buf[i]
+		}
+		BEGIN {
+			section = ENVIRON["SECTION"]
+			body = ENVIRON["EDIT_BODY"]
+			appending = ENVIRON["EDIT_APPEND"] == "1"
+			state = 0; found = 0; nbuf = 0; fresh = 0
+		}
+		{
+			if (state == 2) { print; next }
+			level = heading_level()
+			if (state == 0) {
+				if (level >= 2 && HTEXT == section) {
+					found = 1; sec_level = level; state = 1; fresh = 1
+					print
+					print ""
+					next
+				}
+				print; next
+			}
+			if (fresh) {
+				fresh = 0
+				if ($0 == "") next
+			}
+			if (level && level <= sec_level) {
+				if (appending) {
+					flush_body()
+					if (body != "") {
+						if (nbuf > 0) print ""
+						print body
+						print ""
+					}
+				} else {
+					print body
+					print ""
+				}
+				print
+				state = 2
+				next
+			}
+			if (appending) buf[++nbuf] = $0
+			next
+		}
+		END {
+			if (!found) exit 1
+			if (state == 1) {
+				if (appending) {
+					flush_body()
+					if (body != "") {
+						if (nbuf > 0) print ""
+						print body
+					}
+				} else {
+					print body
+				}
+			}
 		}
 	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
@@ -698,6 +818,73 @@ cmd_log() {
 	printf 'logged %s\n' "$(basename "$file")"
 }
 
+cmd_edit() {
+	local dir="" section="" append=0
+	local args=()
+	while (($#)); do
+		case "$1" in
+			--dir) (($# >= 2)) || die "edit: --dir requires a value"; dir="$2"; shift 2 ;;
+			--section) (($# >= 2)) || die "edit: --section requires a value"; section="$2"; shift 2 ;;
+			--append) append=1; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} >= 1 && ${#args[@]} <= 2)) \
+		|| die 'edit: usage: tasks edit <taskfile> --section <heading> [--append] [<file>|-]'
+	local target_arg="${args[0]}"
+	local content_file="${args[1]:-}"
+
+	# Validate every argument before touching the board, so a rejected edit
+	# can never leave a half-applied body behind.
+	[[ -n "$section" ]] || die "edit: --section is required"
+
+	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	require_tasks_dir "$tasks_dir"
+
+	# Read the new body before taking the board lock: content is not board
+	# state, an unreadable or empty source must fail before anything changes,
+	# and a slow pipe must never stretch the lock hold.
+	local content
+	if [[ -z "$content_file" || "$content_file" == "-" ]]; then
+		content="$(cat)" || die "edit: cannot read section body from stdin"
+	else
+		[[ -f "$content_file" ]] || die "edit: section body file not found: $content_file"
+		content="$(cat "$content_file")" || die "edit: cannot read section body file: $content_file"
+	fi
+
+	# A replacement must never blank a section: an empty body is refused
+	# outright. Body lines shaped like markdown headings are refused too:
+	# sections are heading-delimited, so an unindented heading line would
+	# inject fake section boundaries into every later parser pass.
+	if ((append == 0)); then
+		[[ -n "$content" ]] \
+			|| die "edit: refusing to replace section '$section' with an empty body (supply content or use --append)"
+	fi
+	local heading_re='^#{1,6} ' line
+	while IFS= read -r line; do
+		[[ "$line" =~ $heading_re ]] && die "edit: body lines must not begin with a markdown heading"
+	done <<<"$content"
+
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
+
+	# Section existence is checked read-only under the lock, so every path
+	# (including the --append empty-input no-op) refuses an unknown section
+	# before anything is written, and a later mktemp or awk write failure
+	# reports as an update failure instead of a lookup miss.
+	section_exists "$file" "$section" || die "edit: unknown section: $section"
+
+	# --append with empty input is a no-op: skip the rewrite, keep the
+	# uniform success bookkeeping (Updated refresh plus render).
+	if ((append == 0)) || [[ -n "$content" ]]; then
+		replace_section_body "$file" "$section" "$content" "$append" \
+			|| die "edit: failed to update $(basename "$file")"
+	fi
+	set_header_field "$file" "Updated" "$(now)"
+	render_unlocked "$tasks_dir"
+	printf 'edited %s\n' "$(basename "$file")"
+}
+
 # Print the final N entries of a task's Work Log section, verbatim, from a
 # snapshot supplied on stdin. Entries start at each "### " heading; the tail
 # begins at the Nth-from-last heading and runs to the end of the section
@@ -762,6 +949,7 @@ main() {
 		release) cmd_release "$@" ;;
 		report) cmd_report "$@" ;;
 		log) cmd_log "$@" ;;
+		edit) cmd_edit "$@" ;;
 		show) cmd_show "$@" ;;
 		help | -h | --help) usage ;;
 		*) err "unknown command: $cmd"; usage; exit 2 ;;
