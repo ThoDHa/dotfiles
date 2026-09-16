@@ -10,7 +10,7 @@ behind them.
 
 | Agent | Mode | Model | Duties |
 |-------|------|-------|--------|
-| manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, architecture duties (codebase exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
+| manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, checkpoint commits on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | session | simplify-review in analysis-only mode, expectation checks, no command execution beyond read-only git |
@@ -20,6 +20,12 @@ implementation duty (it never authors implementation content), and its
 file edits are limited to `.tasks/**`. Integration commits and pushing
 are coordination duties, not implementation work; unit workers commit
 their own checkpoint work on the branches the manager assigned them.
+The architect grant follows the same line: the manager delegates as
+much work as the fleet can take, and the command freedom exists to
+unblock and steer the fleet (scouting a dispatch, unblocking a worker,
+checking a unit's result); any duty that grows into sustained work of
+its own is dispatched to a fleet agent rather than absorbed, since
+capability never reduces the delegation duty.
 
 The verifier and reviewer split verification along the judgment line:
 transcription of command results is mechanical and runs on the flash
