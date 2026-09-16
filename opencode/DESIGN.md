@@ -313,9 +313,14 @@ reshape the conversation before each model call and the system-prompt
 transform (`experimental.chat.system.transform`) to deliver its hint.
 Token accounting is approximate: text and tool outputs are sized
 in characters and divided by four, the context budget comes from the
-model's declared limit when one exists and falls back to a 100000-token
-default otherwise, and eviction starts once the estimate crosses half
-the budget (the watermark ratio).
+model's declared limit when one exists or from an explicit
+`defaultContextTokens` plugin option otherwise, and eviction starts
+once the estimate crosses half the budget (the watermark ratio). When
+neither source exists the budget is unknown and eviction stands down
+entirely rather than running against an invented one; dedup, the
+errored-input purge, and the hint line still run, and opencode's
+native auto-compaction remains the overflow backstop for those
+sessions.
 
 Three transforms run in order on every turn, after stale copies of the
 hint line are stripped from the message list. Dedup replaces the output
@@ -336,8 +341,9 @@ entries, oldest dropped), and the `read_evicted` tool returns a
 stashed output by subject, passed exactly as the eviction notice names
 it; stashes are per-session, so only output evicted during the current
 session is reloadable. The `lru_stats` tool reports the live counters,
-stash occupancy, the effective budget, and the last run's token
-estimate as JSON. After each run the plugin also delivers a
+stash occupancy, the effective budget (null, with source `unknown`,
+when no limit was captured and no option is set), and the last run's
+token estimate as JSON. After each run the plugin also delivers a
 `[lru-hot] recently active: ...` line into the system prompt naming up
 to ten most recently touched subjects, so the model sees which files
 and commands are warm without rereading them.
@@ -347,7 +353,10 @@ The plugin keeps a persistent metrics log, on by default, appended to
 run appends one JSON line: eventful means at least one eviction, dedup
 tombstone, or post-eviction touch in the run, or any stash read since
 the previous line. Each line carries an ISO timestamp, the session id,
-the run's token estimate against the watermark, the evicted entries
+the budget in effect and its source (`model` for a captured limit,
+`default` for the `defaultContextTokens` option, `unknown` when
+neither exists), the run's token estimate against the watermark (null
+watermark and deficit on unknown-budget runs), the evicted entries
 with tool, subject, byte size, and age in messages, the dedup and
 post-eviction-touch counts, stash reads since the previous line, and
 the session's running totals. Subjects are rendered to a single line
