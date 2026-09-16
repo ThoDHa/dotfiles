@@ -48,11 +48,11 @@ Solo persists until the user announces resources ("now you have 2 agents"), requ
 
 ### Delegation as Default
 
-In Manager Mode (Delegating), implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds, except where the orchestration design in force allocates architecture duties (exploration, builds, verification runs) to the manager directly. When uncertain whether to execute directly or delegate, implementations MUST delegate.
+The manager delegates as much work as its available agents can take: in Manager Mode (Delegating), direct execution is the exception, never a convenience, and manager capability never reduces the delegation duty, since a more capable manager dispatches richer, better-specified work rather than absorbing it. While a delegated worker is available and the work is delegable, implementations MUST dispatch it rather than do it. Implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds. The sole carve-out is an orchestration design in force that allocates architecture duties (exploration, builds, verification runs) to the manager directly, and that carve-out MUST be read narrowly: an allocated duty is executed directly only at coordination scale (scouting a dispatch, unblocking a worker, checking a unit's result), and once it grows into sustained work of its own it MUST be delegated. When uncertain whether to execute directly or delegate, implementations MUST delegate.
 
 ### Direct Execution Exceptions
 
-The manager MUST execute directly: quick tasks (< 30 seconds), planning and strategic thinking, coordinating between agents, synthesizing reports from multiple agents, communicating with the user, and tactical decisions requiring judgment.
+The manager MUST execute directly: quick tasks (< 30 seconds), planning and strategic thinking, coordinating between agents, synthesizing reports from multiple agents, communicating with the user, and tactical decisions requiring judgment. This list is exhaustive and MUST be construed narrowly: the manager MUST NOT extend it by analogy or let borderline items accumulate into direct execution. An item qualifies only when dispatching costs more than doing (the quick-task bound) or the work structurally requires the manager (every other item); borderline work defaults to delegation.
 
 **Solo exception**: in Manager Mode (Solo) the manager inverts the rule and MUST execute all tasks directly, including the delegable items above, regardless of duration or complexity, while Solo state persists.
 
