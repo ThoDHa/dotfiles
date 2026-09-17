@@ -416,6 +416,65 @@ shrinks only when deleted by hand. A failed append never interrupts
 the session; the error is held in the session's metrics and surfaces
 through `lru_stats` as `logWriteError`.
 
+## LRU sidebar panel
+
+The `/lru` command opens the LRU context manager's panel as a TUI plugin:
+`plugin/lru-context.tui.tsx` default-exports a `TuiPluginModule` (`{ id,
+tui }`) whose `tui()` registers one command, `lru.panel` with slash name
+`lru`, through `api.keymap.registerLayer`, and opens an x-large dialog
+rendered with `@opentui/solid` primitives. The TUI does not auto-scan
+the plugin directory the way the server does; a TUI plugin must be
+listed in the `plugin` array of `tui.json`, which lists
+`./plugin/lru-context.tui.tsx`, a path opencode resolves against the
+config file that declares it. The view is thin: every line
+it shows comes from `panelRows` in `plugin/lru-panel-data.ts`, the same
+module the headless suite covers, so the panel's exact text is
+unit-tested without a terminal.
+
+The panel is a reader over the metrics log and adds no server-side
+surface. Opening it reads `~/.local/share/opencode/lru-metrics.jsonl`
+anew each time (so reopening is refreshing), filters lines to the
+session the TUI route is on, and renders that session's budget with its
+source (per-model limit, plugin default, or inactive), the last run's
+estimate against the watermark and deficit, the cumulative counters of
+the session's most recent line (evictions, bytes reclaimed, dedup,
+post-eviction touches, stash reads with hits and misses, dropped stash
+entries), and the most recent evictions newest first, capped at eight.
+A history line mixes two time windows: sessions and runs count every
+parsed line in the whole log, and since the log is append-only and
+survives server restarts, those counts span the log's entire lifetime;
+evictions and dedup instead sum each session's most recent cumulative
+totals, which restart whenever the plugin's in-memory counters do, on
+server restart or when a session falls out of the plugin's
+eight-session in-memory bound and returns later, so a returning
+session's newest line understates what its older lines recorded. The
+panel reads the whole file on every open, since per-session totals need
+each session's full line history; until the log gains rotation it grows
+without bound, so that read cost grows with it.
+
+Degradation is deliberate: opening the panel outside a session route
+renders "no active session", a session with no logged runs yet renders
+"no metrics recorded for this session yet", both plus the history
+line, malformed lines are skipped at parse, and an unreadable log
+collapses the panel to a header and a warning row naming the error.
+Two live fields are absent
+by design: stash occupancy and skip-state exist only in the server
+plugin's memory, and the TUI api offers no channel to them (the TUI's
+kv store is local to the TUI process and the SDK client cannot invoke a
+plugin tool directly), so the metrics-log-only fallback stands and the
+log's stash hit and miss counts stand in for stash activity.
+
+Deployment note: the repo's tui.json already declares the module, so
+it is live rather than inert, and the facts that keep the file loadable
+from the stowed plugin directory hold unconditionally: the
+`@opencode-ai/plugin/tui` import is type-only (erased before the file
+loads, so the stow-symlink realpath needs no node_modules up-tree), and
+opencode's TUI rewrites `@opentui/solid` specifiers to
+its internal runtime modules for every file outside node_modules, which
+covers the JSX runtime the pragma generates. Headless verification
+covers the data layer and the row model; the dialog's rendering itself
+is verified only by loading the TUI.
+
 ## Known limits
 
 - Soft rules (plan freeze, log discipline, tasks CLI restraint) depend on
