@@ -329,7 +329,9 @@ native auto-compaction remains the overflow backstop for those
 sessions.
 
 Four transforms run in order on every turn, after stale copies of the
-hint line are stripped from the message list. Dedup replaces the output
+hint line are stripped from the message list, plus a fifth,
+`userFenceEviction`, that stands down unless enabled (below). Dedup
+replaces the output
 of an earlier identical tool call (same tool, same input) with a
 `[lru-deduped]` tombstone pointing at the newer copy, whenever the
 retained copy clears the same 2048-byte floor eviction applies, and
@@ -415,7 +417,49 @@ data-URI character count and states that the payloads were dropped,
 advising a re-run of the original tool to regenerate them; the full
 originals remain in the in-memory stash until the stash bound drops
 them (50 entries per session, 8 sessions retained).
-The `lru_stats` tool reports the live counters,
+
+Fence eviction is the one transform that edits user prose, so it ships
+default-off behind the `userFenceEviction` option (`{ enabled: false,
+minBlockLines: 40 }` when unset; `enabled` must be a boolean and
+`minBlockLines` a non-negative integer to be honored, otherwise each
+falls back to its default). When enabled it runs after reasoning expiry
+and before budget-driven eviction, whether or not a budget is known,
+scanning the `text` parts of user messages (messages whose info carries
+`role: "user"`) that sit outside the recent window for fenced code
+blocks: a line indented by at most three spaces whose remaining text
+opens with at least three backticks starts a block, a later line of
+nothing but backticks after the same at-most-three-space indent (at
+least as many as the opener) closes it; a line indented four or more
+spaces neither opens nor closes a block, since CommonMark classes it
+as indented code rather than a fence; and a block that reaches the end
+of the part
+without a closer is never touched, so an unterminated fence is never
+partially evicted however large it has grown. A closed block whose
+content spans strictly more than `minBlockLines` lines (the fence
+delimiter lines do not count) is replaced by a single
+`[lru-evicted-fence]` tombstone line naming the first word of the
+opener's info string as the language tag when the opener carried one,
+the content line count, and the first non-empty
+content line rendered as a subject (single line, capped at 160
+characters, the same bound as every other subject); a block holding no
+non-empty content line at all is never evicted, since it names nothing
+and reclaiming blank lines recovers almost nothing. The reload pointer
+in the tombstone names that subject, and the exact removed span (opener
+through closer, terminators included) enters the session stash like a
+tool output, under the same 50-entry bound and reload path (fence
+insertions drop the oldest entries past that bound exactly like tool
+evictions do). Prose
+before, between, and after the fences is preserved byte for byte,
+blocks at or under the threshold stay untouched, and assistant messages
+and messages inside the recent window are never scanned. Each evicted
+block counts in a distinct `fenceEvicted` counter (on `lru_stats` and
+as `fenceEvictedThisRun` in the metrics log) while its removed bytes
+join `bytesReclaimed`; with the option disabled the pass stands down
+entirely and the transform list behaves exactly as before it existed.
+
+The `lru_stats` tool reports the live counters (including the distinct
+`fenceEvicted` fence-eviction count and the resolved
+`userFenceEviction` option),
 stash occupancy, the effective budget (null, with source `unknown`,
 when no limit was captured and no option is set) together with the
 source that produced it (`override` for a winning `modelContextTokens`
@@ -429,8 +473,9 @@ and commands are warm without rereading them.
 The plugin keeps a persistent metrics log, on by default, appended to
 `~/.local/share/opencode/lru-metrics.jsonl`. Every eventful transform
 run appends one JSON line: eventful means at least one eviction, dedup
-tombstone, reasoning expiry, or post-eviction touch in the run, or any
-stash read since the previous line. Each line carries an ISO timestamp,
+tombstone, reasoning expiry, fence eviction, or post-eviction touch in
+the run, or any stash read since the previous line. Each line carries
+an ISO timestamp,
 the session id, the budget in effect and its source (`override` for a
 `modelContextTokens` entry, `model` for a
 captured limit, `default` for the `defaultContextTokens` option,
@@ -439,8 +484,9 @@ watermark (null watermark and deficit on unknown-budget runs), the
 evicted entries with tool, subject, byte size, attachment byte size,
 and age in messages, the dedup and post-eviction-touch counts, the
 expired-reasoning count and bytes for the run (counted separately from
-eviction reclaims), stash reads since the previous line, and the
-session's running totals. `bytesReclaimed` counts every character the
+eviction reclaims), the fence-eviction count for the run, and stash
+reads since the previous line, and the session's running totals.
+`bytesReclaimed` counts every character the
 transform removed from the provider-bound context: the evicted output
 strings plus, for parts that carried attachments, the full character
 length of each attachment's data-URI `url` as the named proxy for
