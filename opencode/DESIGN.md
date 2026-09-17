@@ -13,7 +13,7 @@ architecture and the reasoning behind them.
 | manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, checkpoint commits on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
-| reviewer | subagent | session | simplify-review in analysis-only mode, expectation checks, no command execution beyond read-only git |
+| reviewer | subagent | session | simplify-review in analysis-only mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git |
 | planner | subagent | session | Planning labor: reconnaissance, drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no
@@ -135,7 +135,18 @@ child; skipping it requires a Decision Log exception naming the reason
 case where a walking skeleton precedes fan-out). The normative text is
 the task-files skill's Triage to Ready Planning Phase, tied to the
 manager's approval review by the delegation skill's Planning Approval
-Authority. Small tasks use the lite profile defined in the task-files
+Authority. Between the planner's draft and the manager's decision sits
+an advisory plan-review gate for high-cost plans: when the breakdown
+fans out into multiple parallel children, when checkpoint slicing
+creates a shared contract seam between children, or when the user flags
+high stakes, the manager dispatches the reviewer in analysis-only mode
+to critique the planning sections before deciding. The critique is
+input the manager weighs, addressed through planner corrections or
+dismissed with a Decision Log reason; the verdict never binds, approval
+and the Triage → Ready transition stay the manager's alone, and
+low-cost plans skip the gate. The normative text is rule 2 of the
+manager agent file and the plan-review dispatch type in the reviewer
+agent file. Small tasks use the lite profile defined in the task-files
 skill.
 
 ## Dispatch economy
@@ -206,7 +217,12 @@ counts, and verbatim failure output, gating on exit status rather than
 text matches. The reviewer verifies logged work against the unit's
 objective, territory, and the actual changes, and runs the
 simplify-review loop (simplify pass first, then review pass) without
-fixing anything; it executes nothing beyond read-only git.
+fixing anything; it executes nothing beyond read-only git. The
+plan-review dispatch that gates high-cost plans during planning is the
+one reviewer dispatch without a diff: it assesses the task file's
+planning sections against the codebase instead (see task-file
+integration), and its verdict is advisory, never binding the manager's
+approval.
 
 On a pass the manager integrates the unit and backfills the freed slot
 immediately with the next Ready task whose dependencies are Completed
@@ -619,7 +635,9 @@ is verified only by loading the TUI.
   checks. The planner's restraint inside its planning-section carve-out
   is likewise prompt-soft, and the planner runs on the session model,
   not flash: the manager's planning review of the filled-out task file
-  is its backstop.
+  is its backstop. The plan-review gate on high-cost plans is advisory
+  by construction: the reviewer's critique is one more input to that
+  planning review, and it enforces nothing.
 - The manager cannot resolve merge conflicts, since it edits nothing
   outside `.tasks`: it dispatches a worker to resolve, then commits the
   merge.

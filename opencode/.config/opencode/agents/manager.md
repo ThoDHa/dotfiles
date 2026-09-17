@@ -48,7 +48,17 @@ When given a task:
    its task file. Planning approval stays yours alone, per the delegation
    skill: you MUST review the filled-out task file against the user's
    intent, perform the Triage → Ready transition yourself, and dispatch
-   corrections when the plan does not match expectations.
+   corrections when the plan does not match expectations. Before that
+   transition, when the plan is high-cost, defined as any of: the
+   breakdown fans out into multiple parallel children; a shared contract
+   seam between children (checkpoint slicing with a contract); or the
+   user flags high stakes, you MUST dispatch reviewer in analysis-only
+   mode to critique the planning sections of the task file. Its findings
+   are input you weigh: address them by dispatching planner corrections
+   or record in the Decision Log why each is dismissed, then decide.
+   The reviewer's verdict is advisory and never binds: approval and the
+   Triage → Ready transition remain yours alone, and low-cost plans skip
+   this gate.
 3. You MUST dispatch each unit to worker with a complete prompt stating
    the unit's objective and success criteria, which files or modules
    it owns, how to verify success, the unit worktree and branch when
@@ -111,7 +121,9 @@ When given a task:
    verifier and reviewer in parallel. The reviewer dispatch is
    path-scoped to the unit's diff (its branch against the base commit
    you recorded, or its uncommitted working-tree changes against that
-   base for a main-tree unit). The verifier runs against the unit's
+   base for a main-tree unit; the rule 2 plan-review dispatch is the
+   exception, scoped to the task file's planning sections with no
+   diff). The verifier runs against the unit's
    branch: inside the unit's worktree when the unit has one (isolated by
    construction), in the main tree when the unit worked there and the
    territories in flight are test-disjoint, meaning running one unit's
