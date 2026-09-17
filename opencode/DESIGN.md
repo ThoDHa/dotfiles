@@ -1,10 +1,10 @@
 # OpenCode Orchestration Design
 
-This note documents the manager, worker, verifier, and reviewer agent
-pipeline, the git authority model, and the task-file integration. The
-agent files under the opencode config carry the normative requirements
-in RFC 2119 form; this note explains the architecture and the reasoning
-behind them.
+This note documents the manager, worker, verifier, reviewer, and
+planner agent pipeline, the git authority model, and the task-file
+integration. The agent files under the opencode config carry the
+normative requirements in RFC 2119 form; this note explains the
+architecture and the reasoning behind them.
 
 ## Roles
 
@@ -14,6 +14,7 @@ behind them.
 | worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, checkpoint commits on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | session | simplify-review in analysis-only mode, expectation checks, no command execution beyond read-only git |
+| planner | subagent | session | Planning labor: reconnaissance, drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no
 implementation duty (it never authors implementation content), and its
@@ -80,7 +81,7 @@ When the task-files protocol is active, each unit is a child task file,
 and every `.tasks/` write has exactly one owner. The manager owns the
 task files themselves: header fields, acceptance-criteria checkboxes,
 status transitions, and the dashboard, rendered through the `tasks`
-CLI. Dispatched workers own exactly two channels, both inside that CLI
+CLI. Dispatched agents own exactly two channels, both inside that CLI
 and both attributed to them via `--from`, per the task-files skill's
 Agent Write Path: interim progress as appended Work Log entries, and
 the final report as a verbatim deposit under `.tasks/reports/` whose
@@ -90,13 +91,12 @@ report bodies: its dispatch entry records the instructions given,
 written before the call, and its analysis is an independent check on
 the digest, not a retelling. A worker that finds the plan wrong flags
 that in its report instead of editing the file. The single carve-out is
-the planning-mode exception: a worker dispatched to plan a Triage task
-may edit exactly the planning sections of that named file (Objective,
-Success Criteria, Technical Approach, Risk Assessment, Testing
-Strategy, Task Breakdown, Decision Log), while header fields,
+the planning-mode exception: the planner agent dispatched to plan a
+Triage task may edit exactly the planning sections of that named file
+(Objective, Success Criteria, Technical Approach, Risk Assessment,
+Testing Strategy, Task Breakdown, Decision Log), while header fields,
 checkboxes, Progress, status, and the dashboard stay manager-owned, and
-no status transition, Triage → Ready included, belongs to the planning
-worker.
+no status transition, Triage → Ready included, belongs to the planner.
 
 The reports mechanism keeps bulky output out of the task files, per the
 task-files skill's Reports Namespace: one directory per task file under
@@ -127,7 +127,7 @@ the details (report deposit paths, the Decision Log), sized
 proportionally to the task; the normative text is the task-files
 skill's Closure Digest section. When planning fans the work out into
 parallel children with overlapping territory, a shared reconnaissance
-artifact is the default: the parent deposits a `01-recon` report via
+artifact is the default: the planner deposits a `01-recon` report via
 `tasks report --slug recon`, and each child references it from its
 Files to Review, so exploration happens once instead of once per
 child; skipping it requires a Decision Log exception naming the reason
@@ -285,15 +285,21 @@ denied outright, matching the prompt prohibition), gh writes (the
 read-only gh set), and subagent spawning; the verifier's bash is
 intentionally open so it can run tests, gated only against push, and
 its edit tool and subagent spawning are denied; the reviewer holds
-read-only git only.
+read-only git only; the planner pairs that read-only git with
+`make test*` and the two tasks CLI channels (`tasks log*`,
+`tasks report*`), its edit map opens only `.tasks/**`, and its
+subagent spawning is denied.
 
 Recurring benign commands are pre-allowed so unattended runs do not
-stall on permission prompts: worker and verifier allow `make
+stall on permission prompts: worker, verifier, and planner allow `make
 test*`, the repo's `test` and `test-*` targets (the manager's
 allow-all map subsumes them, and the reviewer is deliberately
-excluded, since its charter bars running tests), and the
+excluded, since its charter bars running tests), the
 worker additionally allows `mktemp` with templates under
-`/tmp/opencode/*`, the invocation forms observed in its workflow.
+`/tmp/opencode/*`, the invocation forms observed in its workflow, and
+the planner allows the `tasks` CLI channels because its deny-first
+bash map would otherwise block the recon deposit and its work-log
+entries.
 Config and agent files load once at
 session start, so permission edits take effect in newly started
 sessions; running sessions keep the maps they already loaded.
@@ -603,7 +609,10 @@ is verified only by loading the TUI.
   the flash worker's adherence; the reviewer's expectation check is the
   backstop, except on all-mechanical tasks where the reviewer is skipped
   and the verifier's raw results plus git reconciliation are the only
-  checks.
+  checks. The planner's restraint inside its planning-section carve-out
+  is likewise prompt-soft, and the planner runs on the session model,
+  not flash: the manager's planning review of the filled-out task file
+  is its backstop.
 - The manager cannot resolve merge conflicts, since it edits nothing
   outside `.tasks`: it dispatches a worker to resolve, then commits the
   merge.

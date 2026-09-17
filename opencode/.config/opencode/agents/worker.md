@@ -87,17 +87,6 @@ When dispatched:
      why). Reply with the report path plus a brief summary; the full
      report lives in the file, not the reply.
 
-When dispatched to plan a task instead of executing it, the execution
-steps above do not apply. You MUST fill out exactly the planning
-sections (Objective, Success Criteria, Technical Approach, Risk
-Assessment, Testing Strategy, Task Breakdown, Decision Log) of the
-named Triage task file, per the task-files skill's planning-mode
-exception to the Agent Write Path. Header fields, acceptance-criteria
-checkboxes, status fields, and the dashboard stay manager-owned. You
-MUST NOT transition its status to Ready or begin implementing;
-approval is the manager's alone. Return a summary of the plan for the
-manager's review, and execute only when a later dispatch tells you to.
-
 Commits: when the dispatch places you in a unit worktree on a unit
 branch (the default dispatch vehicle under the worker-commit model
 recorded in the orchestration design), committing checkpoint work is
