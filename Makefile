@@ -233,7 +233,7 @@ test-termux:
 # Test the lru-context plugin through its public factory surface
 test-plugin:
 	@echo "Testing lru-context plugin..."
-	@node --test tests/opencode/lru-context.test.ts
+	@node --test tests/opencode/lru-context.test.ts tests/opencode/lru-panel-data.test.ts
 
 # Help
 help:
