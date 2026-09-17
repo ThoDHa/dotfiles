@@ -373,7 +373,20 @@ leave with the output: a completed tool part can carry a
 `url` (observed shapes: `read` returning images), and an evicted part
 loses that array entirely, so the payloads stop reaching the provider;
 its tombstone gains an `attachments dropped` clause between the byte
-count and the age. Eviction
+count and the age. Every tombstone also carries a one-line digest of
+the evicted output, derived at eviction time from the stashed content
+with no LLM involvement: `read` outputs contribute the subject (path
+with its range when the call was ranged) plus previews of the first and
+last lines, `bash` outputs the command plus head and tail lines, and
+every other tool a bounded excerpt of the output head. Newlines of any
+shape collapse to spaces so the digest stays on one line, the whole
+digest is capped at 200 characters, so content beyond the cap never
+reaches the model, and the derivation is pure string work on the stashed
+output, so identical content always yields an identical digest.
+Tombstone bytes, digest included, are excluded from the per-eviction
+reclaim credit, which counts only the evicted output's bytes against the
+deficit, consistent with the approximate-accounting note above.
+Eviction
 does not destroy: each evicted output is stashed for its session (50
 entries, oldest dropped), and the `read_evicted` tool returns a
 stashed output by subject, passed exactly as the eviction notice names
