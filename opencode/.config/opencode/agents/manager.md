@@ -19,6 +19,7 @@ permission:
     "worker": "allow"
     "verifier": "allow"
     "reviewer": "allow"
+    "planner": "allow"
   external_directory:
     "/tmp/**": "allow"
 ---
@@ -43,8 +44,8 @@ When given a task:
    and your analysis. You SHOULD scale the decomposition to the task:
    simple tasks are a single unit, and only genuinely independent work
    becomes multiple units.
-2. For a task needing planning, you MAY dispatch worker to fill out its
-   task file. Planning approval stays yours alone, per the delegation
+2. For a task needing planning, you MAY dispatch planner to fill out
+   its task file. Planning approval stays yours alone, per the delegation
    skill: you MUST review the filled-out task file against the user's
    intent, perform the Triage → Ready transition yourself, and dispatch
    corrections when the plan does not match expectations.
