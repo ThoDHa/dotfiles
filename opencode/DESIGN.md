@@ -334,7 +334,22 @@ of an earlier identical tool call (same tool, same input) with a
 `[lru-deduped]` tombstone pointing at the newer copy, whenever the
 retained copy clears the same 2048-byte floor eviction applies, and
 drops the superseded copy's `state.attachments` alongside the output so
-a tombstoned part carries no media. The
+a tombstoned part carries no media. File attachments dedup in a
+sibling pass (`deduplicateFileAttachments`) running beside the
+tool-output dedup in the same stage: a `file` part (the
+`@`-reference surface, carrying `mime`, `url`, and an optional
+`filename`) whose `mime` and `url` both match a newer
+occurrence is replaced by a `[lru-deduped]` text tombstone naming the
+newer occurrence's message index, so the superseded payload stops
+reaching the provider. The key is `mime` plus `url`, the content
+identity: identical basenames in different directories must not
+collapse, and the optional `filename` is display metadata that falls
+back to the `mime` in the tombstone label when absent or empty. The
+newest occurrence is always retained verbatim, occurrences inside the
+recent window are never tombstoned, and no size floor applies because
+a `file` part's payload size is not observable from its `url`; file
+tombstones count in the same `deduped` metric under the same
+count-only accounting. The
 errored-input purge replaces the recorded input of failed tool calls
 older than the recent window with `[lru-purged-input]`, so prompts,
 paths, and commands from failed attempts do not linger in context.
