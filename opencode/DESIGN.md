@@ -315,7 +315,8 @@ Token accounting is approximate: text and tool outputs are sized
 in characters and divided by four, the context budget resolves in a
 fixed order (a `modelContextTokens` plugin option entry keyed
 `providerID/modelID` for the session's model, then the model's
-declared limit from `chat.params`, then an explicit
+declared limit from `chat.params`, accepted only when finite and
+positive, then an explicit
 `defaultContextTokens` option, which like the map entries must be a
 finite positive number and is otherwise dropped at option resolution),
 and eviction starts
@@ -329,6 +330,26 @@ entirely rather than running against an invented one; dedup, the
 errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
 sessions.
+
+The `manualMode` plugin option (default false) turns that stand-down
+into a choice rather than a symptom of an unknown budget: with it set,
+the transform behaves exactly as it does on an unknown budget (no
+`[lru-evicted]` tombstones, null watermark and deficit in the last-run
+metrics) even when a limit was captured, a `defaultContextTokens`
+option exists, or a `modelContextTokens` entry names the session's
+model, so debugging and demonstrations can isolate the plugin's
+eviction effect without changing anything else. Manual mode suspends
+only budget-driven eviction: dedup, the errored-input purge, fence
+eviction (still behind its own `userFenceEviction` switch), reasoning
+expiry, hint delivery, the stash, `read_evicted`, and `lru_stats` all
+keep running, and a run whose only event is a dedup tombstone or an
+expired reasoning part still counts as eventful for the metrics log. A
+non-boolean value falls back to false, keeping eviction active.
+`lru_stats` reports the resolved flag in its options block; that one
+surface is enough to tell the two stand-downs apart (manual mode:
+budget fields stay populated while the last run's watermark and
+deficit are null by choice; unknown budget: the budget itself is
+null), so no dedicated top-level field exists for it.
 
 Four transforms run in order on every turn, after stale copies of the
 hint line are stripped from the message list, plus a fifth,
@@ -462,7 +483,7 @@ entirely and the transform list behaves exactly as before it existed.
 
 The `lru_stats` tool reports the live counters (including the distinct
 `fenceEvicted` fence-eviction count and the resolved
-`userFenceEviction` option),
+`userFenceEviction` and `manualMode` options),
 stash occupancy, the effective budget (null, with source `unknown`,
 when no limit was captured and no option is set) together with the
 source that produced it (`override` for a winning `modelContextTokens`
@@ -483,7 +504,8 @@ the session id, the budget in effect and its source (`override` for a
 `modelContextTokens` entry, `model` for a
 captured limit, `default` for the `defaultContextTokens` option,
 `unknown` when neither exists), the run's token estimate against the
-watermark (null watermark and deficit on unknown-budget runs), the
+watermark (null watermark and deficit on unknown-budget and
+manual-mode runs), the
 evicted entries with tool, subject, byte size, attachment byte size,
 and age in messages, the dedup and post-eviction-touch counts, the
 expired-reasoning count and bytes for the run (counted separately from
@@ -537,9 +559,11 @@ The panel is a reader over the metrics log and adds no server-side
 surface. Opening it reads `~/.local/share/opencode/lru-metrics.jsonl`
 anew each time (so reopening is refreshing), filters lines to the
 session the TUI route is on, and renders that session's budget with its
-source (per-model limit, plugin default, or inactive), the last run's
+source (per-model override, per-model limit, plugin default, or
+inactive), the last run's
 estimate against the watermark and deficit, the cumulative counters of
-the session's most recent line (evictions, bytes reclaimed, dedup,
+the session's most recent line (evictions with bytes reclaimed, fence
+evictions, dedup, expired reasoning parts with their bytes,
 post-eviction touches, stash reads with hits and misses, dropped stash
 entries), and the most recent evictions newest first, capped at eight.
 A history line mixes two time windows: sessions and runs count every
@@ -559,6 +583,9 @@ renders "no active session", a session with no logged runs yet renders
 "no metrics recorded for this session yet", both plus the history
 line, malformed lines are skipped at parse, and an unreadable log
 collapses the panel to a header and a warning row naming the error.
+Lines whose totals predate the reasoning and fence-eviction counters
+fail the panel's totals check and are dropped, so panel history counts
+only lines the current schema wrote.
 Two live fields are absent
 by design: stash occupancy and skip-state exist only in the server
 plugin's memory, and the TUI api offers no channel to them (the TUI's
