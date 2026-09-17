@@ -326,7 +326,9 @@ Four transforms run in order on every turn, after stale copies of the
 hint line are stripped from the message list. Dedup replaces the output
 of an earlier identical tool call (same tool, same input) with a
 `[lru-deduped]` tombstone pointing at the newer copy, whenever the
-retained copy clears the same 2048-byte floor eviction applies. The
+retained copy clears the same 2048-byte floor eviction applies, and
+drops the superseded copy's `state.attachments` alongside the output so
+a tombstoned part carries no media. The
 errored-input purge replaces the recorded input of failed tool calls
 older than the recent window with `[lru-purged-input]`, so prompts,
 paths, and commands from failed attempts do not linger in context.
@@ -344,12 +346,27 @@ touch (a later call against the same file, pattern, or command counts
 as a touch) and, once the estimate exceeds the watermark, replaces the
 least recently active outputs with `[lru-evicted]` tombstones; outputs
 last touched within the most recent four messages, the `task` and
-`todowrite` tools, and outputs under 2048 bytes are exempt. Eviction
+`todowrite` tools, and outputs under 2048 bytes are exempt. Attachments
+leave with the output: a completed tool part can carry a
+`state.attachments` array whose items hold a `mime` and a data-URI
+`url` (observed shapes: `read` returning images), and an evicted part
+loses that array entirely, so the payloads stop reaching the provider;
+its tombstone gains an `attachments dropped` clause between the byte
+count and the age. Eviction
 does not destroy: each evicted output is stashed for its session (50
 entries, oldest dropped), and the `read_evicted` tool returns a
 stashed output by subject, passed exactly as the eviction notice names
 it; stashes are per-session, so only output evicted during the current
-session is reloadable. The `lru_stats` tool reports the live counters,
+session is reloadable. The stash keeps the original attachment objects
+with the output, but the reload text cannot re-attach binary content:
+the tool returns a string, and re-serving megabyte data URIs would
+re-inflate the context eviction just reclaimed. So `read_evicted`
+appends a manifest line naming each dropped attachment's mime and
+data-URI character count and states that the payloads were dropped,
+advising a re-run of the original tool to regenerate them; the full
+originals remain in the in-memory stash until the stash bound drops
+them (50 entries per session, 8 sessions retained).
+The `lru_stats` tool reports the live counters,
 stash occupancy, the effective budget (null, with source `unknown`,
 when no limit was captured and no option is set), and the last run's
 token estimate as JSON. After each run the plugin also delivers a
@@ -366,11 +383,23 @@ the session id, the budget in effect and its source (`model` for a
 captured limit, `default` for the `defaultContextTokens` option,
 `unknown` when neither exists), the run's token estimate against the
 watermark (null watermark and deficit on unknown-budget runs), the
-evicted entries with tool, subject, byte size, and age in messages, the
-dedup and post-eviction-touch counts, the expired-reasoning count and
-bytes for the run (counted separately from eviction reclaims), stash
-reads since the previous line, and the session's running totals.
-Subjects are rendered to a single line
+evicted entries with tool, subject, byte size, attachment byte size,
+and age in messages, the dedup and post-eviction-touch counts, the
+expired-reasoning count and bytes for the run (counted separately from
+eviction reclaims), stash reads since the previous line, and the
+session's running totals. `bytesReclaimed` counts every character the
+transform removed from the provider-bound context: the evicted output
+strings plus, for parts that carried attachments, the full character
+length of each attachment's data-URI `url` as the named proxy for
+attachment payload size. The proxy is exact for the serialized context
+(the whole data-URI string is what a provider would receive), while
+the token estimate that drives the deficit keeps sizing text parts and
+output strings only, so the eviction loop converts output bytes to
+tokens but never attachment bytes; a heavy attachment therefore
+over-delivers its share of the deficit rather than distorting the
+estimate. Dedup strips attachments from the superseded copy without
+adding to `bytesReclaimed`, consistent with dedup's count-only
+accounting. Subjects are rendered to a single line
 capped at 160 characters (newlines flattened), the same cap that
 bounds every subject in the `[lru-hot]` hint line and the eviction
 notices; subjects cover file paths (with ranges), grep and glob
