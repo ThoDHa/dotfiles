@@ -316,7 +316,9 @@ in characters and divided by four, the context budget resolves in a
 fixed order (a `modelContextTokens` plugin option entry keyed
 `providerID/modelID` for the session's model, then the model's
 declared limit from `chat.params`, then an explicit
-`defaultContextTokens` option), and eviction starts
+`defaultContextTokens` option, which like the map entries must be a
+finite positive number and is otherwise dropped at option resolution),
+and eviction starts
 once the estimate crosses half the budget (the watermark ratio). Map
 entries must be finite positive numbers (percentage strings, zero,
 negative, and non-finite values are dropped at option resolution, and
@@ -428,8 +430,9 @@ scanning the `text` parts of user messages (messages whose info carries
 `role: "user"`) that sit outside the recent window for fenced code
 blocks: a line indented by at most three spaces whose remaining text
 opens with at least three backticks starts a block, a later line of
-nothing but backticks after the same at-most-three-space indent (at
-least as many as the opener) closes it; a line indented four or more
+backticks optionally followed by spaces, after the same
+at-most-three-space indent and at least as many as the opener, closes
+it; a line indented four or more
 spaces neither opens nor closes a block, since CommonMark classes it
 as indented code rather than a fence; and a block that reaches the end
 of the part
