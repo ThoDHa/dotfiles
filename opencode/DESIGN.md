@@ -312,11 +312,17 @@ message-list transform (`experimental.chat.messages.transform`) to
 reshape the conversation before each model call and the system-prompt
 transform (`experimental.chat.system.transform`) to deliver its hint.
 Token accounting is approximate: text and tool outputs are sized
-in characters and divided by four, the context budget comes from the
-model's declared limit when one exists or from an explicit
-`defaultContextTokens` plugin option otherwise, and eviction starts
-once the estimate crosses half the budget (the watermark ratio). When
-neither source exists the budget is unknown and eviction stands down
+in characters and divided by four, the context budget resolves in a
+fixed order (a `modelContextTokens` plugin option entry keyed
+`providerID/modelID` for the session's model, then the model's
+declared limit from `chat.params`, then an explicit
+`defaultContextTokens` option), and eviction starts
+once the estimate crosses half the budget (the watermark ratio). Map
+entries must be finite positive numbers (percentage strings, zero,
+negative, and non-finite values are dropped at option resolution, and
+entries for model ids the session never reports are simply never
+looked up). When no source exists the budget is unknown
+and eviction stands down
 entirely rather than running against an invented one; dedup, the
 errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
@@ -368,7 +374,10 @@ originals remain in the in-memory stash until the stash bound drops
 them (50 entries per session, 8 sessions retained).
 The `lru_stats` tool reports the live counters,
 stash occupancy, the effective budget (null, with source `unknown`,
-when no limit was captured and no option is set), and the last run's
+when no limit was captured and no option is set) together with the
+source that produced it (`override` for a winning `modelContextTokens`
+entry, `model` for a captured limit, `default` for the
+`defaultContextTokens` option), and the last run's
 token estimate as JSON. After each run the plugin also delivers a
 `[lru-hot] recently active: ...` line into the system prompt naming up
 to ten most recently touched subjects, so the model sees which files
@@ -379,7 +388,8 @@ The plugin keeps a persistent metrics log, on by default, appended to
 run appends one JSON line: eventful means at least one eviction, dedup
 tombstone, reasoning expiry, or post-eviction touch in the run, or any
 stash read since the previous line. Each line carries an ISO timestamp,
-the session id, the budget in effect and its source (`model` for a
+the session id, the budget in effect and its source (`override` for a
+`modelContextTokens` entry, `model` for a
 captured limit, `default` for the `defaultContextTokens` option,
 `unknown` when neither exists), the run's token estimate against the
 watermark (null watermark and deficit on unknown-budget runs), the
