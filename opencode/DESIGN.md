@@ -322,7 +322,7 @@ errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
 sessions.
 
-Three transforms run in order on every turn, after stale copies of the
+Four transforms run in order on every turn, after stale copies of the
 hint line are stripped from the message list. Dedup replaces the output
 of an earlier identical tool call (same tool, same input) with a
 `[lru-deduped]` tombstone pointing at the newer copy, whenever the
@@ -330,7 +330,16 @@ retained copy clears the same 2048-byte floor eviction applies. The
 errored-input purge replaces the recorded input of failed tool calls
 older than the recent window with `[lru-purged-input]`, so prompts,
 paths, and commands from failed attempts do not linger in context.
-Eviction, the main transform, ranks completed tool outputs by last
+Reasoning expiry deletes `reasoning` parts from messages strictly older
+than the recent window, the same boundary the purge uses: reasoning
+from earlier turns has no consumers, so expiry is plain deletion with
+no stash, no tombstone, and no reload path, and it runs whether or not
+a budget is known. Parts at or inside the window are untouched,
+including Anthropic-style signature-carrying blocks an in-flight
+tool-use continuation may still need. Expired parts are counted
+separately from evictions (parts and bytes on `lru_stats` and in the
+metrics log) and never added back. Eviction, the main transform, ranks
+completed tool outputs by last
 touch (a later call against the same file, pattern, or command counts
 as a touch) and, once the estimate exceeds the watermark, replaces the
 least recently active outputs with `[lru-evicted]` tombstones; outputs
@@ -351,15 +360,17 @@ and commands are warm without rereading them.
 The plugin keeps a persistent metrics log, on by default, appended to
 `~/.local/share/opencode/lru-metrics.jsonl`. Every eventful transform
 run appends one JSON line: eventful means at least one eviction, dedup
-tombstone, or post-eviction touch in the run, or any stash read since
-the previous line. Each line carries an ISO timestamp, the session id,
-the budget in effect and its source (`model` for a captured limit,
-`default` for the `defaultContextTokens` option, `unknown` when
-neither exists), the run's token estimate against the watermark (null
-watermark and deficit on unknown-budget runs), the evicted entries
-with tool, subject, byte size, and age in messages, the dedup and
-post-eviction-touch counts, stash reads since the previous line, and
-the session's running totals. Subjects are rendered to a single line
+tombstone, reasoning expiry, or post-eviction touch in the run, or any
+stash read since the previous line. Each line carries an ISO timestamp,
+the session id, the budget in effect and its source (`model` for a
+captured limit, `default` for the `defaultContextTokens` option,
+`unknown` when neither exists), the run's token estimate against the
+watermark (null watermark and deficit on unknown-budget runs), the
+evicted entries with tool, subject, byte size, and age in messages, the
+dedup and post-eviction-touch counts, the expired-reasoning count and
+bytes for the run (counted separately from eviction reclaims), stash
+reads since the previous line, and the session's running totals.
+Subjects are rendered to a single line
 capped at 160 characters (newlines flattened), the same cap that
 bounds every subject in the `[lru-hot]` hint line and the eviction
 notices; subjects cover file paths (with ranges), grep and glob
