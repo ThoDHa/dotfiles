@@ -352,7 +352,22 @@ touch (a later call against the same file, pattern, or command counts
 as a touch) and, once the estimate exceeds the watermark, replaces the
 least recently active outputs with `[lru-evicted]` tombstones; outputs
 last touched within the most recent four messages, the `task` and
-`todowrite` tools, and outputs under 2048 bytes are exempt. Attachments
+`todowrite` tools, and outputs under 2048 bytes are exempt. The
+`protectedPatterns` option adds a subject-based exemption beside those
+tool names: each candidate's extracted subject paths are matched
+against the configured glob list (a bash command string is a subject
+whose path is the command, so the same globs guard commands), and any
+match keeps the output out of eviction entirely. Glob rules: `**`
+spans path separators, `*` and `?` stay within one, a pattern
+containing a separator must match the whole subject string, and a
+slashless pattern also matches any single separator-delimited segment,
+so `.env*` guards dotenv files at any depth and `**/AGENTS.md` guards
+the file however deeply it was read; subjects without an extracted
+path never match, and the default empty list changes nothing. Pattern
+protection guards against information loss, not redundancy: dedup
+still tombstones an older identical call even when both copies match a
+protected pattern, because the retained newest output keeps the
+content in context. Attachments
 leave with the output: a completed tool part can carry a
 `state.attachments` array whose items hold a `mime` and a data-URI
 `url` (observed shapes: `read` returning images), and an evicted part
