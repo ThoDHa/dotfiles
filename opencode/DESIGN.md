@@ -161,9 +161,26 @@ verification commands are referenced via the project's AGENTS.md when
 it documents them. Session resume for dependent units is the
 delegation skill's context continuity rule: the manager resumes the
 earlier unit's worker instead of dispatching fresh, so context stays
-in the worker and reports are not retold through the manager; fresh
-dispatches with the report as background remain for cross-worker
-dependencies and poisoned contexts.
+in the worker and reports are not retold through the manager. The
+standing-session policy extends that per-unit rule to the batch
+(normative in rule 5 of the manager agent file): when the next unit
+is sequential over territory an in-flight or recently finished worker
+whose session is still available already holds (the same files or
+module, a fix/refine chain, or follow-up corrections), the manager
+resumes that worker's session by task id instead of dispatching fresh.
+The motivation is cost: every fresh dispatch re-pays the exploration,
+file reads, and skill loads the prior session already made, and the
+user's plan-level usage caps make that re-payment the dominant
+avoidable cost in a sequential chain. Fresh dispatches with the report
+as background remain required when the dependency crosses agents, when
+the prior session's context is poisoned (unrelated failures, dead ends
+that would mislead the next unit), or when the unit must run in
+parallel with work already occupying that session. Two exclusions
+stand regardless: the reviewer is never resumed across units, because
+accumulated verdicts would erode its independence, the reason each
+unit's review and the plan-review gate alike dispatch a fresh
+reviewer; and the verifier stays stateless by design, its
+transcription of command results carrying nothing worth resuming.
 
 When work is tracked in task files, the dispatch prompt itself may be
 a pointer instead of a duplicated payload, per the execution-standards
