@@ -168,7 +168,46 @@ build:
 EXPECTED_RULES := $(notdir $(wildcard opencode/.config/opencode/rules/*.md))
 EXPECTED_SKILLS := $(foreach d,$(wildcard agents/.agents/skills/*),$(notdir $(d)))
 
-# Test all symlinks exist and opencode loads rules
+# GNU stow's built-in default ignore list (man stow, "Ignore Lists") plus
+# .stow-local-ignore control files: stow never deploys these, so the
+# deployment completeness walk must skip them too. The trailing (/|$) makes
+# a match cover the whole subtree beneath an ignored directory, not just the
+# directory entry itself.
+STOW_DEFAULT_IGNORE_REGEX := (^|/)(\.stow-local-ignore|CVS|RCS|SCCS|\.git|\.gitignore|\.gitmodules|\.gitattributes|\.cvsignore|\.cvsrc|\.svn|\.arch-ids|\{arch\}|=BUILD|=DEPS|=CHECKIN|=template|\.bzr|\.bzrignore|\.hg|\.hgignore|_darcs)(/|$$)
+
+# Check deployment completeness: every file stow would deploy from the
+# stowed packages must exist under the stow target. Repo-to-target
+# direction only, so pre-existing unmanaged files at the target never
+# fail this check. Honors each package's .stow-local-ignore regexes,
+# scoped to that package's own walk, alongside stow's default ignores.
+# $(call check_deploy_completeness, PACKAGES)
+define check_deploy_completeness
+@echo "  Checking deployment completeness..."; \
+for pkg in $(1); do \
+    [ -d "$$pkg" ] || { echo "FAIL: package directory '$$pkg' missing from the repo"; exit 1; }; \
+    local_ignores=''; \
+    if [ -f $$pkg/.stow-local-ignore ]; then \
+        local_ignores=$$(sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$$/d' $$pkg/.stow-local-ignore | paste -sd '|' -); \
+    fi; \
+    ignore_re="$(STOW_DEFAULT_IGNORE_REGEX)$${local_ignores:+|$$local_ignores}"; \
+    echo '' | grep -E "$$ignore_re" >/dev/null 2>&1; \
+    if [ $$? -gt 1 ]; then \
+        echo "FAIL: invalid ignore regex for $$pkg: $$ignore_re" && exit 1; \
+    fi; \
+    find $$pkg \( -type f -o -type l \) | sed "s|^$$pkg/||" | grep -Ev "$$ignore_re" | \
+    while IFS= read -r rel; do \
+        deployed=$(STOW_TARGET)/$$rel; \
+        if [ ! -e "$$deployed" ] && [ ! -L "$$deployed" ]; then \
+            echo "FAIL: $$deployed missing from deployment (repo: $$pkg/$$rel; stale stow links)"; \
+            echo "      Run 'make stow' or 'make restow' to deploy it."; \
+            exit 1; \
+        fi; \
+    done || exit 1; \
+    echo "    $$pkg OK"; \
+done
+endef
+
+# Test deployment completeness, symlinks, and opencode rules loading
 test: test-links test-rules test-tasks test-termux test-plugin
 	@echo ""
 	@echo "All tests passed!"
@@ -176,8 +215,9 @@ test: test-links test-rules test-tasks test-termux test-plugin
 # Full check flow: the complete test suite
 check: test
 
-# Test that all expected symlinks exist
+# Test deployment completeness and that all expected symlinks exist
 test-links:
+	$(call check_deploy_completeness,$(STOW_PACKAGES))
 	@echo "Testing opencode symlinks..."
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Checking rules directory exists..."
@@ -263,7 +303,7 @@ help:
 	@echo "Testing:"
 	@echo "  make test        - Run all tests (symlinks + rules + tasks + termux + plugin)"
 	@echo "  make check       - Alias for make test"
-	@echo "  make test-links  - Verify all symlinks exist"
+	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-plugin - Run lru-context plugin tests"
