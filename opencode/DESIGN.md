@@ -330,6 +330,26 @@ errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
 sessions.
 
+The `manualMode` plugin option (default false) turns that stand-down
+into a choice rather than a symptom of an unknown budget: with it set,
+the transform behaves exactly as it does on an unknown budget (no
+`[lru-evicted]` tombstones, null watermark and deficit in the last-run
+metrics) even when a limit was captured, a `defaultContextTokens`
+option exists, or a `modelContextTokens` entry names the session's
+model, so debugging and demonstrations can isolate the plugin's
+eviction effect without changing anything else. Manual mode suspends
+only budget-driven eviction: dedup, the errored-input purge, fence
+eviction (still behind its own `userFenceEviction` switch), reasoning
+expiry, hint delivery, the stash, `read_evicted`, and `lru_stats` all
+keep running, and a run whose only event is a dedup tombstone or an
+expired reasoning part still counts as eventful for the metrics log. A
+non-boolean value falls back to false, keeping eviction active.
+`lru_stats` reports the resolved flag in its options block; that one
+surface is enough to tell the two stand-downs apart (manual mode:
+budget fields stay populated while the last run's watermark and
+deficit are null by choice; unknown budget: the budget itself is
+null), so no dedicated top-level field exists for it.
+
 Four transforms run in order on every turn, after stale copies of the
 hint line are stripped from the message list, plus a fifth,
 `userFenceEviction`, that stands down unless enabled (below). Dedup
@@ -462,7 +482,7 @@ entirely and the transform list behaves exactly as before it existed.
 
 The `lru_stats` tool reports the live counters (including the distinct
 `fenceEvicted` fence-eviction count and the resolved
-`userFenceEviction` option),
+`userFenceEviction` and `manualMode` options),
 stash occupancy, the effective budget (null, with source `unknown`,
 when no limit was captured and no option is set) together with the
 source that produced it (`override` for a winning `modelContextTokens`
