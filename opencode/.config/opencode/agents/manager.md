@@ -85,6 +85,22 @@ When given a task:
    work in the main tree instead.
 5. You MUST pass context forward, not conclusions, applying the
    delegation skill's context continuity rule for dependent units.
+   Within a batch, when the next unit is sequential over territory an
+   in-flight or recently finished worker whose session is still
+   available already holds (the same files or module, a fix/refine
+   chain, or follow-up corrections), you MUST resume that worker's
+    session by task id instead of dispatching fresh, avoiding the
+    re-exploration and skill reloads a fresh dispatch would re-pay. A
+    fresh dispatch remains REQUIRED when the dependency crosses agents,
+    when the prior session's context is poisoned (unrelated failures,
+    dead ends that would mislead the next unit), or when the unit must
+    run in parallel with work already occupying that session. Standing
+    exclusions: you MUST NOT resume the reviewer across units, because
+    accumulated verdicts would erode its independence, the reason each
+    unit's review and the rule 2 plan-review gate alike dispatch a fresh
+    reviewer; the verifier stays stateless by design. This
+    standing-session policy extends, not replaces, the delegation
+    skill's context continuity rule.
 6. When a worker fails or leaves a task unfinished: you MUST retry
    exactly once, resuming the failed worker's session with corrective
    guidance when its context is still useful; you MUST dispatch a fresh
