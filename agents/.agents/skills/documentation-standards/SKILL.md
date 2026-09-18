@@ -46,7 +46,7 @@ Prohibited patterns include:
 
 Every bullet point, list item, or documentation entry MUST provide substantive information.
 
-An entry MUST satisfy ALL of the following to be substantive:
+An entry MUST satisfy all of the following to be substantive:
 - Specific enough to be actionable or informative
 - Contains detail that could not be inferred from the heading alone
 - Answers "what," "how," or "why," rather than merely naming a topic
@@ -63,7 +63,7 @@ The em-dash prohibition in the core rule's Punctuation and Formatting Requiremen
 
 ### Colon-as-Enthusiasm-Break Prohibition
 
-Implementations MUST NOT use a colon as a casual enthusiasm break that splices an unrelated exclamation onto a clause (for example, `Click here: it works great!`). This restriction targets ONLY the lazy break. The colon remains the CORRECT punctuation for introducing a genuine explanation or list.
+Implementations MUST NOT use a colon as a casual enthusiasm break that splices an unrelated exclamation onto a clause (for example, `Click here: it works great!`). This restriction targets ONLY the lazy break. The colon remains the correct punctuation for introducing a genuine explanation or list.
 
 ### En-Dash Numeric-Range Rule
 

@@ -145,10 +145,9 @@ to critique the planning sections before deciding. The critique is
 input the manager weighs, addressed through planner corrections or
 dismissed with a Decision Log reason; the verdict never binds, approval
 and the Triage → Ready transition stay the manager's alone, and
-low-cost plans skip the gate. The normative text is rule 2 of the
-manager agent file and the plan-review dispatch type in the reviewer
-agent file. Small tasks use the lite profile defined in the task-files
-skill.
+low-cost plans skip the gate. The normative text is rule 2 of the manager
+agent file and the plan-review dispatch type in the reviewer agent file.
+Small tasks use the lite profile defined in the task-files skill.
 
 ## Dispatch economy
 
@@ -235,12 +234,11 @@ counts, and verbatim failure output, gating on exit status rather than
 text matches. The reviewer verifies logged work against the unit's
 objective, territory, and the actual changes, and runs the
 simplify-review loop (simplify pass first, then review pass) without
-fixing anything; it executes nothing beyond read-only git. The
-plan-review dispatch that gates high-cost plans during planning is the
-one reviewer dispatch without a diff: it assesses the task file's
-planning sections against the codebase instead (see task-file
-integration), and its verdict is advisory, never binding the manager's
-approval.
+fixing anything; it executes nothing beyond read-only git. The plan-review
+dispatch that gates high-cost plans during planning is the one reviewer
+dispatch without a diff: it assesses the task file's planning sections
+against the codebase instead (see task-file integration), and its verdict
+is advisory, never binding the manager's approval.
 
 On a pass the manager integrates the unit and backfills the freed slot
 immediately with the next Ready task whose dependencies are Completed
@@ -324,24 +322,21 @@ read-only git only; the planner pairs that read-only git with
 `tasks report*`), its edit map opens only `.tasks/**`, and its
 subagent spawning is denied.
 
-Recurring benign commands are pre-allowed so unattended runs do not
-stall on permission prompts: worker, verifier, and planner allow `make
-test*`, the repo's `test` and `test-*` targets (the manager's
-allow-all map subsumes them, and the reviewer is deliberately
-excluded, since its charter bars running tests), the
-worker additionally allows `mktemp` with templates under
-`/tmp/opencode/*`, the invocation forms observed in its workflow, and
-the planner allows the `tasks` CLI channels because its deny-first
-bash map would otherwise block the recon deposit and its work-log
-entries.
-Config and agent files load once at
-session start, so permission edits take effect in newly started
-sessions; running sessions keep the maps they already loaded.
+Recurring benign commands are pre-allowed so unattended runs do not stall
+on permission prompts: worker, verifier, and planner allow `make test*`,
+the repo's `test` and `test-*` targets (the manager's allow-all map
+subsumes them, and the reviewer is deliberately excluded, since its charter
+bars running tests), the worker additionally allows `mktemp` with templates
+under `/tmp/opencode/*`, the invocation forms observed in its workflow, and
+the planner allows the `tasks` CLI channels because its deny-first bash map
+would otherwise block the recon deposit and its work-log entries. Config
+and agent files load once at session start, so permission edits take effect
+in newly started sessions; running sessions keep the maps they
+already loaded.
 
-Prefix-based bash permissions are guardrails against uninstructed
-behavior, not security boundaries: a determined `sh -c` or `git -C` route
-slips past them. Hard enforcement would require hooks or credential
-separation.
+Prefix-based bash permissions are guardrails against uninstructed behavior,
+not security boundaries: a determined `sh -c` or `git -C` route slips past
+them. Hard enforcement would require hooks or credential separation.
 
 ## LRU context plugin
 
@@ -350,26 +345,23 @@ it walks the same mechanisms end to end and adds the token economics
 behind them and the plugin's honest limits.
 
 Every session loads the LRU context manager as a plugin: opencode.json's
-`plugin` array names `./plugin/lru-context.ts`, so the transforms below
-run for the manager and every subagent alike. The plugin hooks the
-message-list transform (`experimental.chat.messages.transform`) to
-reshape the conversation before each model call and the system-prompt
-transform (`experimental.chat.system.transform`) to deliver its hint.
-Token accounting is approximate: text and tool outputs are sized
-in characters and divided by four, the context budget resolves in a
-fixed order (a `modelContextTokens` plugin option entry keyed
-`providerID/modelID` for the session's model, then the model's
-declared limit from `chat.params`, accepted only when finite and
-positive, then an explicit
-`defaultContextTokens` option, which like the map entries must be a
-finite positive number and is otherwise dropped at option resolution),
-and eviction starts
-once the estimate crosses half the budget (the watermark ratio). Map
-entries must be finite positive numbers (percentage strings, zero,
-negative, and non-finite values are dropped at option resolution, and
-entries for model ids the session never reports are simply never
-looked up). When no source exists the budget is unknown
-and eviction stands down
+`plugin` array names `./plugin/lru-context.ts`, so the transforms below run
+for the manager and every subagent alike. The plugin hooks the message-list
+transform (`experimental.chat.messages.transform`) to reshape the
+conversation before each model call and the system-prompt transform
+(`experimental.chat.system.transform`) to deliver its hint. Token
+accounting is approximate: text and tool outputs are sized in characters
+and divided by four, the context budget resolves in a fixed order (a
+`modelContextTokens` plugin option entry keyed `providerID/modelID` for the
+session's model, then the model's declared limit from `chat.params`,
+accepted only when finite and positive, then an explicit
+`defaultContextTokens` option, which like the map entries must be a finite
+positive number and is otherwise dropped at option resolution), and
+eviction starts once the estimate crosses half the budget (the watermark
+ratio). Map entries must be finite positive numbers (percentage strings,
+zero, negative, and non-finite values are dropped at option resolution, and
+entries for model ids the session never reports are simply never looked
+up). When no source exists the budget is unknown and eviction stands down
 entirely rather than running against an invented one; dedup, the
 errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
@@ -479,11 +471,10 @@ output, so identical content always yields an identical digest.
 Tombstone bytes, digest included, are excluded from the per-eviction
 reclaim credit, which counts only the evicted output's bytes against the
 deficit, consistent with the approximate-accounting note above.
-Eviction
-does not destroy: each evicted output is stashed for its session (50
-entries, oldest dropped), and the `read_evicted` tool returns a
-stashed output by subject, passed exactly as the eviction notice names
-it; stashes are per-session, so only output evicted during the current
+Eviction does not destroy: each evicted output is stashed for its session
+(50 entries, oldest dropped), and the `read_evicted` tool returns a stashed
+output by subject, passed exactly as the eviction notice names it; stashes
+are per-session, so only output evicted during the current
 session is reloadable. The stash keeps the original attachment objects
 with the output, but the reload text cannot re-attach binary content:
 the tool returns a string, and re-serving megabyte data URIs would
@@ -683,11 +674,10 @@ snapshot keeps only what the log cannot say (mode, occupancy, hot
 subjects); otherwise the snapshot stands. The metrics log still
 supplies what the snapshot does not carry: the eventful-run count, the
 most recent evictions newest first capped at eight, and the history
-line. A missing, malformed, or foreign-session
-snapshot degrades to the metrics-log-only block, which renders the
-budget, last run, counters, and evictions from the session's most
-recent logged line and carries no mode, occupancy, or hot-subject
-rows.
+line. A missing, malformed, or foreign-session snapshot degrades to the
+metrics-log-only block, which renders the budget, last run, counters, and
+evictions from the session's most recent logged line and carries no mode,
+occupancy, or hot-subject rows.
 A history line mixes two time windows: sessions and runs count every
 parsed line in the whole log, and since the log survives server
 restarts, those counts span the log's entire lifetime with rotation
@@ -723,8 +713,7 @@ client cannot invoke a plugin tool directly, so live fields once had
 no path to the sidebar, while the snapshot now carries the stash
 occupancy and the stand-down facts (the manual mode flag and the
 budget with its source). In the snapshot-less fallback those rows stay
-absent and the log's stash hit and miss counts stand in for stash
-activity.
+absent and the log's stash hit and miss counts stand in for stash activity.
 
 Deployment note: the repo's tui.json already declares the module, so
 it is live rather than inert, and the facts that keep the file loadable
