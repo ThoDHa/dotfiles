@@ -344,6 +344,10 @@ separation.
 
 ## LRU context plugin
 
+`lru-context-DESIGN.md` beside this file is the plugin's design note:
+it walks the same mechanisms end to end and adds the token economics
+behind them and the plugin's honest limits.
+
 Every session loads the LRU context manager as a plugin: opencode.json's
 `plugin` array names `./plugin/lru-context.ts`, so the transforms below
 run for the manager and every subagent alike. The plugin hooks the

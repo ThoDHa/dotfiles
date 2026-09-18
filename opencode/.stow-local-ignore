@@ -2,3 +2,4 @@
 # Repo documentation lives here but must never be linked into $HOME.
 
 ^DESIGN\.md$
+^lru-context-DESIGN\.md$
