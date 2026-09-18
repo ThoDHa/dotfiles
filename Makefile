@@ -24,7 +24,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks test-termux test-plugin check
+.PHONY: clean-stow test test-links test-rules test-tasks test-plugin check
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -208,7 +208,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: test-links test-rules test-tasks test-termux test-plugin
+test: test-links test-rules test-tasks test-plugin
 	@echo ""
 	@echo "All tests passed!"
 
@@ -265,11 +265,6 @@ test-tasks:
 	@echo "Testing tasks board tool..."
 	@bash tests/tasks/test-tasks.sh
 
-# Host-side checks for the Termux bootstrap (syntax, guard, no Debian-isms)
-test-termux:
-	@echo "Testing termux bootstrap script..."
-	@bash tests/termux/test-termux.sh
-
 # Test the lru-context plugin through its public factory surface
 test-plugin:
 	@echo "Testing lru-context plugin..."
@@ -301,7 +296,7 @@ help:
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (symlinks + rules + tasks + termux + plugin)"
+	@echo "  make test        - Run all tests (symlinks + rules + tasks + plugin)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"

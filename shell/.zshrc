@@ -123,7 +123,7 @@ export TMUX_TMPDIR="$HOME/.local/state/tmux"
 alias vim='nvim'
 alias vimdiff='nvim -d'
 
-# Debian ships fd/bat as fdfind/batcat; Termux and most other systems use the
+# Debian ships fd/bat as fdfind/batcat; most other systems use the
 # real names. Alias only when the Debian names are what's installed.
 command -v fdfind &> /dev/null && alias fd='fdfind'
 command -v batcat &> /dev/null && alias bat='batcat'
@@ -136,10 +136,8 @@ else
     BAT_CMD='bat'
 fi
 
-# Clipboard command per platform: Termux, macOS, Wayland, X11.
-if command -v termux-clipboard-set &> /dev/null; then
-    CLIP_CMD='termux-clipboard-set'
-elif command -v pbcopy &> /dev/null; then
+# Clipboard command per platform: macOS, Wayland, X11.
+if command -v pbcopy &> /dev/null; then
     CLIP_CMD='pbcopy'
 elif command -v wl-copy &> /dev/null; then
     CLIP_CMD='wl-copy'
@@ -223,7 +221,7 @@ export NVM_DIR=~/.nvm
 #fix bug with ressurecting tmux without this folder
 mkdir -p ~/.tmux/resurrect
 
-# Load the first key that exists; a fresh machine (or Termux install) may
+# Load the first key that exists; a fresh machine may
 # have none yet, and ssh-add with a missing path just prints an error.
 # Reuse an agent that already answers (ssh-add -l exits 0 with keys, 1
 # with an empty agent); exit 2 means nothing is listening, so spawn one.
