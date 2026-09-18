@@ -486,7 +486,7 @@ cmd_init() {
 	local dir=""
 	while (($#)); do
 		case "$1" in
-			--dir) dir="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "init: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) die "init: unknown argument: $1" ;;
 		esac
 	done
@@ -500,7 +500,7 @@ cmd_render() {
 	local dir=""
 	while (($#)); do
 		case "$1" in
-			--dir) dir="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "render: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) die "render: unknown argument: $1" ;;
 		esac
 	done
@@ -512,11 +512,11 @@ cmd_new() {
 	local id="" name="" status="$DEFAULT_STATUS" priority="$DEFAULT_PRIORITY" dir=""
 	while (($#)); do
 		case "$1" in
-			--id) id="$2"; shift 2 ;;
-			--name) name="$2"; shift 2 ;;
-			--status) status="$2"; shift 2 ;;
-			--priority) priority="$2"; shift 2 ;;
-			--dir) dir="$2"; shift 2 ;;
+			--id) [[ $# -ge 2 && "$2" != --* ]] || die "new: --id requires a value"; id="$2"; shift 2 ;;
+			--name) [[ $# -ge 2 && "$2" != --* ]] || die "new: --name requires a value"; name="$2"; shift 2 ;;
+			--status) [[ $# -ge 2 && "$2" != --* ]] || die "new: --status requires a value"; status="$2"; shift 2 ;;
+			--priority) [[ $# -ge 2 && "$2" != --* ]] || die "new: --priority requires a value"; priority="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "new: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) die "new: unknown option: $1" ;;
 		esac
 	done
@@ -590,7 +590,7 @@ cmd_set() {
 	local dir="" args=()
 	while (($#)); do
 		case "$1" in
-			--dir) dir="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "set: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
@@ -630,8 +630,8 @@ cmd_claim() {
 	local owner="" dir="" target=""
 	while (($#)); do
 		case "$1" in
-			--owner) owner="$2"; shift 2 ;;
-			--dir) dir="$2"; shift 2 ;;
+			--owner) [[ $# -ge 2 && "$2" != --* ]] || die "claim: --owner requires a value"; owner="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "claim: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) target="$1"; shift ;;
 		esac
 	done
@@ -661,7 +661,7 @@ cmd_release() {
 	local dir="" target=""
 	while (($#)); do
 		case "$1" in
-			--dir) dir="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "release: --dir requires a value"; dir="$2"; shift 2 ;;
 			*) target="$1"; shift ;;
 		esac
 	done
