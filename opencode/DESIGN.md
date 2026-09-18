@@ -1,10 +1,11 @@
 # OpenCode Orchestration Design
 
 This note documents the manager, worker, verifier, reviewer, and
-planner agent pipeline, the git authority model, and the task-file
-integration. The agent files under the opencode config carry the
-normative requirements in RFC 2119 form; this note explains the
-architecture and the reasoning behind them.
+planner agent pipeline, the git authority model, the task-file
+integration, and the LRU context plugin with its sidebar panel. The
+agent files under the opencode config carry the normative requirements
+in RFC 2119 form; this note explains the architecture and the
+reasoning behind them.
 
 ## Roles
 
@@ -80,23 +81,23 @@ board mirroring.
 When the task-files protocol is active, each unit is a child task file,
 and every `.tasks/` write has exactly one owner. The manager owns the
 task files themselves: header fields, acceptance-criteria checkboxes,
-status transitions, and the dashboard, rendered through the `tasks`
-CLI. Dispatched agents own exactly two channels, both inside that CLI
-and both attributed to them via `--from`, per the task-files skill's
-Agent Write Path: interim progress as appended Work Log entries, and
-the final report as a verbatim deposit under `.tasks/reports/` whose
-Work Log entry carries the agent-supplied digest and a relative link.
-The manager never restates
+status transitions, body prose through `tasks edit`, and the dashboard,
+rendered through the `tasks` CLI. Dispatched agents own exactly two
+channels, both inside that CLI and both attributed to them via
+`--from`, per the task-files skill's Agent Write Path: interim progress
+as appended Work Log entries, and the final report as a verbatim
+deposit under `.tasks/reports/` whose Work Log entry carries the
+agent-supplied digest and a relative link. The manager never restates
 report bodies: its dispatch entry records the instructions given,
 written before the call, and its analysis is an independent check on
 the digest, not a retelling. A worker that finds the plan wrong flags
 that in its report instead of editing the file. The single carve-out is
 the planning-mode exception: the planner agent dispatched to plan a
-Triage task may edit exactly the planning sections of that named file
-(Objective, Success Criteria, Technical Approach, Risk Assessment,
-Testing Strategy, Task Breakdown, Decision Log), while header fields,
-checkboxes, Progress, status, and the dashboard stay manager-owned, and
-no status transition, Triage → Ready included, belongs to the planner.
+Triage task may edit exactly the planning sections of that named file,
+the list the task-files skill's Agent Write Path defines, while header
+fields, checkboxes, Progress, status, and the dashboard stay
+manager-owned, and no status transition, Triage → Ready included,
+belongs to the planner.
 
 The reports mechanism keeps bulky output out of the task files, per the
 task-files skill's Reports Namespace: one directory per task file under
@@ -107,19 +108,19 @@ so numbers are never reused even when gaps appear. Because `current/`,
 `archive/`, and `reports/` are siblings, the `../reports/...` relative
 link in a task file resolves identically from both directories, so
 archiving moves the task file alone and reports never move. `tasks log`,
-`tasks report`, and the dashboard render they trigger each hold the
-exclusive `flock` on `.tasks/.lock` for their read-modify-write span, a
-process-held lock released on exit, so concurrent sessions serialize
-instead of racing. `tasks show <taskfile> --tail N` prints
-the header fields, the Latest Update pointer, and the last N Work Log
-entries without taking the lock: the delta read for catching up on a
-task. Until the subcommands exist in an environment, the manual
-fallback preserves the same contract by hand: the worker writes the
-next report file at the canonical path without overwriting and returns
-path and digest to the manager, who makes the entry and header writes
-(the task-files skill's Manual Fallback). Without task files at all,
-worker reports go to `/tmp/opencode/reports/<unit-name>.md` as
-artifacts.
+`tasks edit`, `tasks report`, and the dashboard render they trigger
+each hold the exclusive `flock` on `.tasks/.lock` for their
+read-modify-write span, a process-held lock released on exit, so
+concurrent sessions serialize instead of racing.
+`tasks show <taskfile> --tail N` prints the header fields, the Latest
+Update pointer, and the last N Work Log entries without taking the
+lock: the delta read for catching up on a task. Until the subcommands
+exist in an environment, the manual fallback preserves the same
+contract by hand: the worker writes the next report file at the
+canonical path without overwriting and returns path and digest to the
+manager, who makes the entry and header writes (the task-files skill's
+Manual Fallback). Without task files at all, worker reports go to
+`/tmp/opencode/reports/<unit-name>.md` as artifacts.
 
 Every completed task's Final Summary opens with a closure digest, at
 most five lines naming the outcome, the key decisions, and links into
@@ -217,7 +218,7 @@ inside the unit worktree (isolated by construction), in the main tree
 for a lone unit when the territories in flight are test-disjoint, or
 pinned to a throwaway worktree at the unit's state (unit work
 committed to a temporary branch, or the working tree copied in)
-otherwise; when the shared state is a fixed external path that
+otherwise; when the shared state is verdict-relevant fixed state that
 pinning cannot isolate, verification runs at the integration commit
 instead. Neither edits files, and only the verifier runs non-git
 commands, so the two cannot contend. Four independent sources are

@@ -93,7 +93,7 @@ Verbatim agent reports live as files under `.tasks/reports/`, not inline in task
 
 | Component | Requirement |
 |-----------|-------------|
-| `<taskfile-basename>` | The task file's full filename INCLUDING the `.md` extension (e.g. `AUTH-1-20241222-0710-api-auth-refactor.md`); keying by the full filename is collision-proof across tasks sharing a description |
+| `<taskfile-basename>` | The task file's full filename including the `.md` extension (e.g. `AUTH-1-20241222-0710-api-auth-refactor.md`); keying by the full filename is collision-proof across tasks sharing a description |
 | `NN` | Report sequence number within the task, zero-padded to two digits (`01`, `02`), assigned in deposit order |
 | `<slug>` | Kebab-case slug naming the report's content (e.g. `recon`, `final-report`) |
 
@@ -197,7 +197,7 @@ Cell rules:
 
 ### Index Maintenance
 
-The master index and individual task files MUST remain synchronized at all times: a modification is complete ONLY when the dashboard reflects it, and status changes MUST update both the task file AND the dashboard in the same operation.
+The master index and individual task files MUST remain synchronized at all times: a modification is complete ONLY when the dashboard reflects it, and status changes MUST update both the task file and the dashboard in the same operation.
 
 | When This Happens | You MUST Do This Immediately |
 |-------------------|------------------------------|
@@ -207,7 +207,7 @@ The master index and individual task files MUST remain synchronized at all times
 | Work progresses | Update progress percentage in dashboard (if In Progress) |
 | Task completed | Move to Completed table + populate "Completed" and "Duration" columns |
 | Task blocked/cancelled | Move to Blocked/Cancelled table + record the reason prominently in the task file (not the dashboard) |
-| ANY task file write | Update dashboard "Last updated" timestamp |
+| Any task file write | Update dashboard "Last updated" timestamp |
 
 These direct edits assume a single writer; when concurrent sessions are possible they are superseded by [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety).
 
@@ -215,7 +215,7 @@ These direct edits assume a single writer; when concurrent sessions are possible
 
 ## Concurrency and Multi-Session Safety
 
-This section applies ONLY when two or more sessions may operate on the same `.tasks/` directory concurrently; in the single-session case the direct-edit rules above stand and this section does not apply. When applicable, it GOVERNS and supersedes conflicting in-place-edit instructions.
+This section applies ONLY when two or more sessions may operate on the same `.tasks/` directory concurrently; in the single-session case the direct-edit rules above stand and this section does not apply. When applicable, it governs and supersedes conflicting in-place-edit instructions.
 
 Sessions do not share memory, and every session rewrites `dashboard.md` on each state change, so naive concurrent edits produce lost updates. Two hazards exist: shared-aggregate contention (many sessions writing the single board) and same-task contention (two sessions claiming one task file). Every shared mutable file MUST have exactly one writer at any instant, enforced structurally:
 
@@ -240,8 +240,10 @@ The manager's edits to task-file body prose are writer operations like any other
 
 Direct edit-tool writes to a task-file body are permitted ONLY when both of the following hold:
 
-- **The section is one the dedicated structured channels do not cover.** Work Log appends, report deposits, and canonical header fields are written through their own channels (`tasks log`, `tasks report`, `tasks set`); free-form planning prose (Objective, Success Criteria, Technical Approach, and the like) has no dedicated channel.
+- **The section is one the dedicated structured channels do not cover.** Work Log appends, report deposits, and canonical header fields are written through their own channels (`tasks log`, `tasks report`, `tasks set`); free-form planning prose (Objective, Success Criteria, Technical Approach, and the like) has no dedicated structured channel (`log`, `report`, `set`).
 - **No other session's dispatch for that task is in flight.** The manager MUST NEVER race another writer's `tasks log` appends or `tasks report` deposits to the same file: a direct write bypasses the lock the other writer's channel holds, so the race is a lost update, not a serialization.
+
+Sanctioned planning-worker edits sit outside this gate: a worker dispatched to plan a Triage task file edits exactly the planning sections of its named file under the planning-mode exception ([Agent Write Path](#agent-write-path)) while its own dispatch is in flight, and condition 2's flight check governs every other writer's timing, never the planner's own sanctioned edits.
 
 Replace mode reconciles with [Content Preservation](#content-preservation) the same way the [Latest Update field](#latest-update-field) does: replacing a section body is sanctioned for planning-prose revision only (Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown, Decision Log), with superseded decisions preserved in the Decision Log; cumulative sections (Work Log, Execution Log, Failed Approaches, and deposited report content) are append-only and MUST be written only with `--append`, never replaced.
 
@@ -468,7 +470,7 @@ Before transitioning to In Progress, the task file MUST have:
 
 ### Completion Validation
 
-A task CANNOT be marked Completed unless:
+A task cannot be marked Completed unless:
 
 - All tests pass (including newly written tests)
 - Test coverage meets or exceeds target percentage (if specified)
@@ -498,10 +500,10 @@ A task CANNOT be marked Completed unless:
 
 #### Progress Log
 
-**Progress Log Update Requirement:** for tasks expected to take >5 minutes, implementations MUST add updates DURING execution, capturing what is being worked on, interim findings, obstacles and their handling, and next immediate steps.
+**Progress Log Update Requirement:** for tasks expected to take >5 minutes, implementations MUST add updates during execution, capturing what is being worked on, interim findings, obstacles and their handling, and next immediate steps.
 
 - [Timestamp] Started by [Agent identifier]
-- [Timestamp] Update: [Progress checkpoint, added DURING work]
+- [Timestamp] Update: [Progress checkpoint, added during work]
 - [Timestamp] Completed: [Results summary]
 
 ---
@@ -514,7 +516,7 @@ This section is the task's Jira-style narrative: a chronological comment stream 
 
 **Purpose:** [Brief description of what this agent was asked to do]
 
-**Instructions Given:** [The authoritative record of dispatch instructions; written verbatim BEFORE the agent is dispatched, per Dispatch by Reference in the `delegation` skill]
+**Instructions Given:** [The authoritative record of dispatch instructions; written verbatim before the agent is dispatched, per Dispatch by Reference in the `delegation` skill]
 
 ```
 [Verbatim dispatch instructions]
@@ -655,7 +657,7 @@ Custom prefixes MAY be used when they improve clarity.
 | A coordination (parent) task begins executing a Ready child (directly or via dispatch) | child: Ready → In Progress | Move the child row to In Progress table |
 | Task becomes blocked | In Progress → Blocked | Move to Blocked/Cancelled table; record reason in task file |
 | Blocked task can proceed | Blocked → Ready or In Progress | Move back to appropriate table |
-| All acceptance criteria met AND Simplify and Review Loop converged | In Progress → Completed | Move to Completed table with completion timestamp |
+| All acceptance criteria met and Simplify and Review Loop converged | In Progress → Completed | Move to Completed table with completion timestamp |
 | Task no longer needed | Any state → Cancelled | Move to Blocked/Cancelled table; record reason in task file |
 
 ### Triage to Ready Planning Phase
@@ -685,7 +687,7 @@ Large tasks SHOULD be decomposed so work reaches verifiable, working states at i
 
 ### When to Use Checkpoint Slicing
 
-Apply when BOTH hold: the task is large enough that a single build-then-verify pass would leave substantial work unverified for a long stretch (as a guide, two or more independently meaningful slices); and the seams between slices have a **definable contract** (interface, schema, or API agreed in advance).
+Apply when both hold: the task is large enough that a single build-then-verify pass would leave substantial work unverified for a long stretch (as a guide, two or more independently meaningful slices); and the seams between slices have a **definable contract** (interface, schema, or API agreed in advance).
 
 MUST NOT apply when: the task is small enough that one slice is the whole job; or the contract is genuinely unknown (mocking a guessed contract only defers the mismatch). In the unknown-contract case, first build a thin **walking skeleton** (one minimal end-to-end slice through all layers with real components) to establish the contract, then fan out.
 
@@ -727,12 +729,12 @@ Under both modes, each reached checkpoint MUST be recorded as a milestone in the
 
 ### Real-Time Updates
 
-For any work done related to a task file, the task file MUST be updated immediately and thoroughly, in real time, as the work occurs: actions, discoveries, decisions, status changes, and progress, with no exceptions. It is strictly prohibited to defer, batch, or omit updates. Task files are living documents updated DURING execution, not historical records written afterward; failure to update the task file for related work is a critical conformance failure.
+For any work done related to a task file, the task file MUST be updated immediately and thoroughly, in real time, as the work occurs: actions, discoveries, decisions, status changes, and progress, with no exceptions. It is strictly prohibited to defer, batch, or omit updates. Task files are living documents updated during execution, not historical records written afterward; failure to update the task file for related work is a critical conformance failure.
 
-- Work Log updated AS work happens: progress during agent execution (not only at completion), findings/decisions/actions as the manager works, and report deposits with their Work Log entries appended immediately when a report arrives (see [Agent Report Entries](#agent-report-entries))
-- Decision Log updated AT THE MOMENT significant choices are made
+- Work Log updated as work happens: progress during agent execution (not only at completion), findings/decisions/actions as the manager works, and report deposits with their Work Log entries appended immediately when a report arrives (see [Agent Report Entries](#agent-report-entries))
+- Decision Log updated at the moment significant choices are made
 - [Latest Update field](#latest-update-field) refreshed whenever a more recent notable change occurs
-- Failed Approaches documented IMMEDIATELY when attempts fail
+- Failed Approaches documented immediately when attempts fail
 - Task status updates follow [Index Maintenance](#index-maintenance) synchronization rules
 
 **Dashboard Synchronization:** the dashboard MUST reflect task file changes immediately, through the serialized path of [Concurrency and Multi-Session Safety](#concurrency-and-multi-session-safety) when sessions may share the directory. Users should be able to open a task file at any moment and see current status, not outdated information.
@@ -794,11 +796,11 @@ Every completed task's Final Summary MUST open with a **Closure Digest**: at mos
 
 Implementations MUST NEVER delete, clear, or overwrite previously written content in task files. Task files are cumulative records that only grow; use append operations and preserve all existing sections. The dashboard likewise preserves all task references. The ONLY permissible deletion is when a user explicitly and specifically commands it; ambiguous instructions MUST NOT trigger deletion.
 
-As with the [Latest Update field](#latest-update-field), whose in-place refresh does not violate this section because the full record stays in place behind the pointer, section-body replacement through `tasks edit` is sanctioned for exactly one class: planning-prose revision (Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown, Decision Log), with superseded decisions preserved in the Decision Log. Cumulative sections (Work Log, Execution Log, Failed Approaches, and deposited report content) are append-only: they MUST be written only by appending (`tasks log`, `tasks report`, or `tasks edit --append`) and MUST NOT be replaced (see [Serialized Task-File Body Edits](#serialized-task-file-body-edits)).
+As with the [Latest Update field](#latest-update-field), whose in-place refresh does not violate this section because the full record stays in place behind the pointer, section-body replacement through `tasks edit` is sanctioned for exactly one class: planning-prose revision (Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown, Decision Log), with superseded decisions preserved in the Decision Log. Cumulative sections (Work Log, Execution Log, Failed Approaches, and deposited report content) are append-only: they MUST be written only by appending (`tasks log`, `tasks report`, or `tasks edit --append`) and MUST NOT be replaced (see [Serialized Task-File Body Edits](#serialized-task-file-body-edits)). The [Agent Write Path](#agent-write-path)'s planning-mode exception sits inside this sanction, not against it: a planning worker's direct edit-tool edits reach exactly the planning sections of its named Triage task file, the same sanctioned class, and every other rule in this section applies to them unchanged.
 
 ### Deferred Work Capture at Closure
 
-This applies to EVERY task closure, Solo and Delegating. Before a task may be marked Completed, implementations MUST capture every piece of identified-but-undone work: deferred improvements, follow-ups and "nice-to-haves", anything discovered but ruled out of scope, and simpler-solution tradeoffs recorded per the `coding-standards` rule's Simple Solution Documentation.
+This applies to every task closure, Solo and Delegating. Before a task may be marked Completed, implementations MUST capture every piece of identified-but-undone work: deferred improvements, follow-ups and "nice-to-haves", anything discovered but ruled out of scope, and simpler-solution tradeoffs recorded per the `coding-standards` rule's Simple Solution Documentation.
 
 For each item: create a new task file in Triage state with a proper Task ID and descriptive name; register it in the dashboard; link it from the closing task's Final Summary "Remaining Work" entry. Placeholder labels MUST NOT be used.
 
