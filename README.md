@@ -50,7 +50,6 @@ dotfiles/
 │       └── task-files/SKILL.md
 ├── bootstrap/          # Setup scripts (not stowed)
 │   ├── setup.sh        # Desktop (Debian/Ubuntu) bootstrap
-│   ├── termux.sh       # Android (Termux) bootstrap
 │   ├── patches/        # tmux source patches applied by setup.sh
 │   └── Dockerfile
 ├── reference/          # Template configs (not stowed)
@@ -116,40 +115,6 @@ the tool is present (override with `FORCE_OPENCODE=1` / `FORCE_CLAUDECODE=1`).
 Non-interactive runs take the default answer for both prompts.
 
 The script is idempotent — safe to run multiple times.
-
-## Termux (Android)
-
-For Android devices, `bootstrap/termux.sh` builds a phone/tablet development
-environment: NeoVim with Python LSP, tmux, zsh, and the Android integration
-pieces (Nerd Font, clipboard bridge, extra keyboard keys). The desktop
-`setup.sh` cannot run on Termux (no root, no apt, bionic libc instead of
-glibc), so the two scripts are separate by design.
-
-```bash
-# Install Termux from F-Droid (the Play Store build is outdated), then:
-pkg install -y git
-git clone https://github.com/ThoDHa/dotfiles.git ~/dotfiles
-cd ~/dotfiles
-./bootstrap/termux.sh
-```
-
-Also install the **Termux:API** companion app (F-Droid) — the clipboard
-bridge between NeoVim, tmux, and Android depends on it.
-
-What the script installs:
-
-- Core packages via `pkg`: neovim, python, tmux, zsh, nodejs, ripgrep, fd, bat, fzf, jq, clang toolchain
-- Python tooling via pip: black, isort, debugpy, djlint (the nvim config formats on save)
-- pyright via npm as the Python language server (Mason's prebuilt binaries are glibc and do not run on Android)
-- JetBrainsMono Nerd Font to `~/.termux/font.ttf` and an extra-keys row (ESC/CTRL) in `termux.properties`
-- oh-my-zsh, TPM, the NeoVim config, and the stowed shell/tmux/isort packages
-- An SSH key (generated if absent) for cloning private repos
-
-Deliberately not installed on Termux: OpenCode, Claude Code, and Docker
-(Android provides no daemon or container kernel support).
-
-The script is idempotent and ends with a verification step. Host-side tests
-for it run via `make test-termux`.
 
 ## Reference Templates
 

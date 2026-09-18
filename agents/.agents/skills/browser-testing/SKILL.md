@@ -40,7 +40,7 @@ docker run --rm --init \
 ## Local Install Constraints
 
 - Local Playwright MUST exist only as a repository devDependency locked by the repo's lockfile. Global host installs (`npm i -g playwright`) MUST NOT be created.
-- Environments without Docker (Termux per the dotfiles' Android target) fall back to the local-install leg for every scenario above.
+- Environments without Docker fall back to the local-install leg for every scenario above.
 
 ## Conformance
 
