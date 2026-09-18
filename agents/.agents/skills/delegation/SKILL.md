@@ -77,7 +77,7 @@ Conduct requirements for dispatched agents are canonical in the Dispatch Economy
 
 When the work is tracked in task files, the dispatch prompt MAY be a pointer instead of a duplicated payload; the pointer form is sanctioned:
 
-1. **Instructions Given first.** The manager writes the full dispatch instructions verbatim into the target task file's Work Log (the **Instructions Given** field of the dispatch entry, per the `task-files` skill) BEFORE making the Task call. That entry is the authoritative instruction record.
+1. **Instructions Given first.** The manager writes the full dispatch instructions verbatim into the target task file's Work Log (the **Instructions Given** field of the dispatch entry, per the `task-files` skill) before making the Task call. That entry is the authoritative instruction record.
 2. **Minimal bootstrap frame.** The Task call carries only a bootstrap frame: the agent's role, the task file to read (naming the exact path and the **Instructions Given** entry that is the contract), and the report-back expectation (including the report mechanism when task files are active, per the `task-files` skill).
 3. **Mid-flight steering stays in the call.** Any instruction issued while the agent runs goes through the dispatch channel, never only in the file: the agent cannot be assumed to re-read the file mid-flight.
 4. **Write once.** The manager MUST NOT restate the entry's instructions in the Task call; the prompt is written once, in the file.
@@ -90,7 +90,7 @@ When a unit of work depends on the output of an earlier unit the same agent prod
 
 ## Safety Requirements
 
-The parallel-safety rules are canonical in the Parallel Safety Requirements section of the `execution-standards` rule and apply to ALL parallel operations, including standard operations outside Manager Mode. When runtime-footprint disjointness cannot be determined, uncertainty is resolved as sequencing. When conflicts are unavoidable, the fallback defined in that section governs. The worktree protocol lives in the Worktree Isolation and Worktree Teardown sections below.
+The parallel-safety rules are canonical in the Parallel Safety Requirements section of the `execution-standards` rule and apply to all parallel operations, including standard operations outside Manager Mode. When runtime-footprint disjointness cannot be determined, uncertainty is resolved as sequencing. When conflicts are unavoidable, the fallback defined in that section governs. The worktree protocol lives in the Worktree Isolation and Worktree Teardown sections below.
 
 ### Worktree Isolation
 
@@ -98,7 +98,7 @@ Two regimes govern worktree use, set by the orchestration design in force. When 
 
 Isolation worktrees MUST be created inside the repository under `.worktrees/` (one directory per isolated task or unit, for example `.worktrees/<unit-name>`), never beside the repository or under `/tmp`: disk-backed and project-local, with no RAM cost. The `.worktrees/` directory MUST be gitignored; implementations MUST verify this with `git check-ignore .worktrees` before the first creation and stop to have the ignore entry added when it is missing, since an un-ignored worktree pollutes status, staging, and tree-walking tools. Worktrees keep a task-scoped lifetime: reconcile and tear down within the task, and clean up stale `.worktrees/` directories from crashed sessions when discovered. Before creating a worktree, implementations MUST run `git worktree prune` so stale registrations self-heal instead of accumulating.
 
-Under the contention-only reservation, implementations SHOULD raise worktree isolation as an option when ALL of the following hold: two or more independent tasks would otherwise be serialized solely because they touch the same file or shared working-tree state; the work is tracked in git; and the parallelism gained is worth the overhead of creating, reconciling, and later tearing down the worktrees. Worktree isolation MUST NOT be used to bypass dependency sequencing: genuinely dependent tasks still run in order. After isolated work completes, implementations MUST reconcile the separate worktrees (merge or apply the changes back) and resolve any resulting conflicts before integration.
+Under the contention-only reservation, implementations SHOULD raise worktree isolation as an option when all of the following hold: two or more independent tasks would otherwise be serialized solely because they touch the same file or shared working-tree state; the work is tracked in git; and the parallelism gained is worth the overhead of creating, reconciling, and later tearing down the worktrees. Worktree isolation MUST NOT be used to bypass dependency sequencing: genuinely dependent tasks still run in order. After isolated work completes, implementations MUST reconcile the separate worktrees (merge or apply the changes back) and resolve any resulting conflicts before integration.
 
 ### Worktree Teardown
 
@@ -132,7 +132,7 @@ In Manager Mode (both Delegating and Solo), questions arise from delegated agent
 
 The manager MUST NOT fabricate an answer to a Significant question to avoid interrupting the user. When uncertain how to classify, treat the question as Significant.
 
-**Escalation.** Surface deferred Significant questions when ANY occurs:
+**Escalation.** Surface deferred Significant questions when any occurs:
 
 - **Hard block**: the question now gates all remaining unblocked work; ask immediately
 - **Checkpoint**: a phase or batch of parallel work completes, or no unblocked work remains
@@ -162,4 +162,4 @@ No failure is hidden or minimized, under either mode. Without a standing restart
 
 ## Conformance
 
-ALL requirements are mandatory. Executing directly when delegation is required (outside Direct Execution Exceptions, outside Solo mode, and outside the Delegation as Default architecture carve-out for duties the orchestration design in force allocates to the manager directly), failing to report progress, operating Solo without maintaining Manager Mode requirements, or altering the decision-making process in Solo mode are conformance failures.
+All requirements are mandatory. Executing directly when delegation is required (outside Direct Execution Exceptions, outside Solo mode, and outside the Delegation as Default architecture carve-out for duties the orchestration design in force allocates to the manager directly), failing to report progress, operating Solo without maintaining Manager Mode requirements, or altering the decision-making process in Solo mode are conformance failures.

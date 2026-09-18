@@ -52,7 +52,7 @@ Related changes MUST be grouped together in the same commit:
 - A refactor with its updated documentation
 - A fix with its new regression test
 
-**Exception:** Changes that ALTER the expected behavior of EXISTING tests MUST be committed separately from the production code, per the coding-standards rule's "Separation of Code and Test Changes" section. New tests written for new code still group with that code.
+**Exception:** Changes that alter the expected behavior of existing tests MUST be committed separately from the production code, per the coding-standards rule's "Separation of Code and Test Changes" section. New tests written for new code still group with that code.
 
 ### Concern Separation
 
@@ -117,7 +117,7 @@ The subject line MUST:
 - Be 50 characters or fewer
 - Use imperative mood ("add feature" not "added feature")
 - Not end with a period
-- Describe WHAT changed
+- Describe what changed
 
 ### Body Requirements
 
@@ -125,7 +125,7 @@ When a body is included, it MUST:
 
 - Be separated from subject by one blank line
 - Wrap at 72 characters
-- Explain WHY the change was made (not just what)
+- Explain why the change was made (not just what)
 - Provide context that the diff cannot convey
 
 ### Message Quality
@@ -210,7 +210,7 @@ Continue with force push? (y/n): _
 
 `--no-verify` bypasses quality and security hooks and is prohibited in automated contexts: automated tools, CI pipelines, scripts, and non-interactive agents MUST NOT use it under any circumstances, and any automated attempt to bypass hooks fails the job and is treated as a security incident.
 
-A human user MAY use `--no-verify` ONLY when shown an explicit warning that pre-commit and commit-msg hooks will be bypassed AND the user supplies a non-empty justification, recorded verbatim in the commit message body as a footer line: `No-Verify-Reason: <reason text>`. Blank justification or user decline aborts the commit. Each use MUST also append an entry (ISO 8601 timestamp, committer identity, justification text, commit hash) to the auditable `.opencode/no-verify.log`, kept tracked via an un-ignore rule or stored in an equivalent auditable location.
+A human user MAY use `--no-verify` ONLY when shown an explicit warning that pre-commit and commit-msg hooks will be bypassed and the user supplies a non-empty justification, recorded verbatim in the commit message body as a footer line: `No-Verify-Reason: <reason text>`. Blank justification or user decline aborts the commit. Each use MUST also append an entry (ISO 8601 timestamp, committer identity, justification text, commit hash) to the auditable `.opencode/no-verify.log`, kept tracked via an un-ignore rule or stored in an equivalent auditable location.
 
 ### Safe Push Behavior
 
@@ -222,4 +222,4 @@ When a force push is unavoidable and approved per [Force Push Protection](#force
 
 ## Conformance
 
-ALL requirements are mandatory. Force pushing without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and an immediate conformance failure.
+All requirements are mandatory. Force pushing without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and an immediate conformance failure.
