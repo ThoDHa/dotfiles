@@ -246,11 +246,10 @@ assert_eq "concurrent set loses no update across rounds" "0" "$concfail"
 rm -rf "$concdir"
 
 echo "== status enum validation =="
-t set "$f_cs" Status=Bogus >/dev/null 2>&1 && bad "set rejects an unknown status" || ok "set rejects an unknown status"
+refuse "set rejects an unknown status" set "$f_cs" Status=Bogus
 assert_contains "rejected status leaves the file untouched" \
 	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cs")" "Triage"
-t new --id API-5 --name "Bogus Status Task" --status Bogus >/dev/null 2>&1 \
-	&& bad "new rejects an unknown status" || ok "new rejects an unknown status"
+refuse "new rejects an unknown status" new --id API-5 --name "Bogus Status Task" --status Bogus
 if t set "$f_cs" Status=Blocked >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
 t set "$f_cs" Status=Triage >/dev/null
 
@@ -293,8 +292,7 @@ t render >/dev/null
 
 echo "== claim/release with a stale sidecar =="
 printf '%s\n' "stale-session" >"$f_cs.claim"
-t claim "$f_cs" --owner newcomer >/dev/null 2>&1 \
-	&& bad "claim under a stale sidecar is rejected" || ok "claim under a stale sidecar is rejected"
+refuse "claim under a stale sidecar is rejected" claim "$f_cs" --owner newcomer
 claim_err="$(t claim "$f_cs" --owner newcomer 2>&1 >/dev/null || true)"
 assert_contains "rejection names the stale owner" "$claim_err" "stale-session"
 t release "$f_cs" >/dev/null
@@ -417,6 +415,12 @@ else
 	assert_eq "failed deposit leaves Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
 fi
 
+echo "== report: whitespace-only --from re-defaults to Manager =="
+mgr_reports_before="$(grep -cE '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Report$' "$f_rp" || true)"
+printf 'Whitespace from body\n' | t report "$f_rp" --slug ws-from --from " " --digest "Whitespace from check" >/dev/null
+mgr_reports_after="$(grep -cE '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Report$' "$f_rp" || true)"
+assert_eq "report re-defaults a whitespace-only --from to Manager" "$((mgr_reports_before + 1))" "$mgr_reports_after"
+
 echo "== report: links resolve from current/ and archive/ =="
 f_res="$(t new --id RPT-2 --name "Link Resolution Target")"
 resbase="$(basename "$f_res")"
@@ -473,6 +477,8 @@ lg_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager:
 lg_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
 [[ "$lg_updated" == "$(date '+%Y-%m-%d')"* ]] \
 	&& ok "log bumps Updated to today" || bad "log bumps Updated to today (got [$lg_updated])"
+assert_eq "successful log leaves exactly one Updated line on a headed file" "1" \
+	"$(grep -c '^\*\*Updated:\*\*' "$f_lg")"
 assert_eq "log leaves Latest Update untouched" "$lg_latest_before" \
 	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_lg")"
 assert_contains "dashboard reflects the log bump" "$(grep -F 'Log Entry Target' "$DASH")" "$lg_updated"
@@ -501,8 +507,11 @@ lf_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Worker-C
 t log "$f_lf" --from "" "Empty from falls back to Manager" >/dev/null
 ef_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Empty from falls back to Manager$' "$f_lf" || true)"
 [[ -n "$ef_entry" ]] && ok "log re-defaults an empty --from to Manager" || bad "log re-defaults an empty --from to Manager"
+t log "$f_lf" --from " " "Whitespace-only from falls back to Manager" >/dev/null
+ws_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Whitespace-only from falls back to Manager$' "$f_lf" || true)"
+[[ -n "$ws_entry" ]] && ok "log re-defaults a whitespace-only --from to Manager" || bad "log re-defaults a whitespace-only --from to Manager"
 # The Manager default stays covered by the log tests above (f_lg), which
-# exercise the same from="$DEFAULT_FROM" path without the flag.
+# exercise the same re-default path without the flag.
 
 echo "== log: heading-line and CR rejection =="
 # The seven-hash line is not a markdown heading and is accepted (its entry
@@ -571,6 +580,23 @@ assert_eq "headingless append writes exactly one Updated line" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$hless")"
 hless_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Entry on a headingless file$' "$hless" || true)"
 [[ -n "$hless_entry" ]] && ok "headingless append still appends the entry" || bad "headingless append still appends the entry"
+# With no "## " heading the header region never terminates, so an existing
+# **Updated:** field must be swapped in place rather than joined by a second.
+hless_predated="$TASKS_DIR/current/20240101-1230-headingless-predated.md"
+cat >"$hless_predated" <<'EOF'
+# Task: Headingless Predated Target
+
+**Status:** Triage
+**Updated:** 2024-01-01 12:00
+EOF
+t log "$hless_predated" "Entry on a predated headingless file" >/dev/null
+assert_eq "headingless append replaces an existing Updated field in place" "1" \
+	"$(grep -c '^\*\*Updated:\*\*' "$hless_predated")"
+hless_predated_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$hless_predated")"
+[[ "$hless_predated_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "headingless append bumps the predated Updated value" \
+	|| bad "headingless append bumps the predated Updated value (got [$hless_predated_updated])"
+rm -f "$hless_predated"
 rm -f "$hless"
 t render >/dev/null
 

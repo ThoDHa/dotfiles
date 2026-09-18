@@ -716,7 +716,7 @@ cmd_report() {
 	[[ -n "$digest" ]] || die "report: --digest is required"
 	valid_slug "$slug" || die "report: invalid slug: $slug (expected kebab-case: lowercase letters, digits, hyphens)"
 	[[ "$digest" != *$'\n'* && "$digest" != *$'\r'* ]] || die "report: --digest must be a single line"
-	[[ -n "$from" ]] || from="$DEFAULT_FROM"
+	[[ -n "${from//[[:space:]]/}" ]] || from="$DEFAULT_FROM"
 	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "report: --from must be a single line"
 
 	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
@@ -771,7 +771,7 @@ cmd_report() {
 }
 
 cmd_log() {
-	local dir="" from="$DEFAULT_FROM" args=()
+	local dir="" from="" args=()
 	while (($#)); do
 		case "$1" in
 			--dir) (($# >= 2)) || die "log: --dir requires a value"; dir="$2"; shift 2 ;;
@@ -787,7 +787,7 @@ cmd_log() {
 	[[ -n "${message//[[:space:]]/}" ]] || die "log: message must not be empty"
 	local first="${message%%$'\n'*}"
 	[[ -n "${first//[[:space:]]/}" ]] || die "log: message's first line must not be blank (it becomes the entry heading)"
-	[[ -n "$from" ]] || from="$DEFAULT_FROM"
+	[[ -n "${from//[[:space:]]/}" ]] || from="$DEFAULT_FROM"
 	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "log: --from must be a single line"
 	[[ "$message" != *$'\r'* ]] || die "log: message must not contain carriage return characters"
 	# Entry bodies ride verbatim into the Work Log section, whose structure
