@@ -1,6 +1,6 @@
 ---
 name: documentation-standards
-description: Documentation standards covering prohibited vague bullet patterns, substance requirements, specific concrete language, and documentation-specific punctuation rules. Use when writing or reviewing documentation, README files, CHANGELOG entries, PR descriptions, technical specifications, code comments and docstrings, or any extended prose output.
+description: Documentation standards covering prohibited vague bullet patterns, substance requirements, specific concrete language, documentation-specific punctuation rules, and the one-paragraph-per-line wrapping format for markdown documentation. Use when writing or reviewing documentation, README files, CHANGELOG entries, PR descriptions, technical specifications, code comments and docstrings, or any extended prose output.
 ---
 
 # Documentation Standards
@@ -71,6 +71,18 @@ An en-dash (`–`) is permitted ONLY tight-bound between the endpoints of a nume
 
 ---
 
+## Line-Wrapping Format
+
+**Scope of [Line-Wrapping Format](#line-wrapping-format):** This rule governs the physical line structure of markdown documentation files. It applies to design documents, README files, CHANGELOG entries, technical specifications, and extended prose. It does NOT apply to source code, configuration files, table cells, fenced code examples, or frontmatter, and it constrains line structure only, never wording.
+
+### One Paragraph Per Line
+
+Prose in a markdown documentation file MUST be written unwrapped: each paragraph occupies exactly one physical line, with no hard wrapping and no fixed column limit. Column limits, where a project sets them for source code, do not govern `.md` files. Structural line breaks are preserved: headings, list items (each item on its own line), table rows, and fenced code blocks keep their existing line structure, and only prose paragraphs are joined. A line break inside a prose paragraph is a formatting defect to fix by joining the lines, not a structure to preserve; under this rule the physical line count of a markdown file carries no meaning.
+
+Enforcement applies to prose being written or edited: newly written prose follows this format, and an existing wrapped file conforms when it is substantively edited, in the regions the edit touches. A wholesale reflow of an otherwise untouched file is a deliberate maintenance task, not an obligation that attaches on contact.
+
+---
+
 ## Prose Quality Requirements
 
 ### Completeness
@@ -91,4 +103,4 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ## Conformance
 
-Violations of MUST requirements constitute conformance failures, including the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns) and the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements).
+Violations of MUST requirements constitute conformance failures, including the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns), the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements), and the wrapping requirements in [Line-Wrapping Format](#line-wrapping-format).
