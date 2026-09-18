@@ -11,6 +11,7 @@ permission:
     "git commit * --amend*": "deny"
     "git rebase*": "deny"
     "git pull* --rebase*": "deny"
+    "git pull* -r*": "deny"
     "gh *": "deny"
     "gh auth status*": "allow"
     "gh issue status*": "allow"
@@ -93,9 +94,11 @@ recorded in the orchestration design), committing checkpoint work is
 yours: you MUST commit territory-scoped work at each meaningful
 checkpoint, every commit a complete logical change that leaves the
 project's test suite green, with conventional commit messages per the
-git-protocol skill. On a unit branch you MUST NOT amend or rebase:
-your commits are append-only, and history shaping belongs to
-the manager. Your final report MUST name the branch and the commit
+git-protocol skill. On a unit branch you MUST NOT amend or rebase
+in any form: not git commit --amend, not git rebase, not through
+git -C, sh -c, aliases, or any other route. Your commits are
+append-only, and history shaping belongs to the manager. Your final
+report MUST name the branch and the commit
 range you produced instead of claiming work left uncommitted. When the
 dispatch does not place you on a unit branch, committing stays the
 manager's decision: the manager knows the division of work and decides

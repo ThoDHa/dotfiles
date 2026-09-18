@@ -106,11 +106,11 @@ number assigned in deposit order, one past the highest already on disk,
 so numbers are never reused even when gaps appear. Because `current/`,
 `archive/`, and `reports/` are siblings, the `../reports/...` relative
 link in a task file resolves identically from both directories, so
-archiving moves the task file alone and reports never move. `tasks
-log`, `tasks report`, and the dashboard render they trigger each hold
-the exclusive `flock` on `.tasks/.lock` for their read-modify-write
-span, a process-held lock released on exit, so concurrent sessions
-serialize instead of racing. `tasks show <taskfile> --tail N` prints
+archiving moves the task file alone and reports never move. `tasks log`,
+`tasks report`, and the dashboard render they trigger each hold the
+exclusive `flock` on `.tasks/.lock` for their read-modify-write span, a
+process-held lock released on exit, so concurrent sessions serialize
+instead of racing. `tasks show <taskfile> --tail N` prints
 the header fields, the Latest Update pointer, and the last N Work Log
 entries without taking the lock: the delta read for catching up on a
 task. Until the subcommands exist in an environment, the manual
@@ -676,8 +676,8 @@ is verified only by loading the TUI.
 - Concurrent per-unit verification is safe because suites run on
   temp-isolated fixtures: each verifier works inside its unit's
   worktree against isolated state, so parallel suites share no
-  verdict-relevant mutable state (fixed scratch paths outside the
-  repo, like the rules test's `/tmp` output file, do not affect
+  verdict-relevant mutable state (fixed scratch resources outside
+  the repo, like the rules test's `/tmp` output file, do not affect
   verdicts). A suite that violates the assumption (shared paths,
   ports, caches that change outcomes) makes the territories not
   test-disjoint and forces the integration-commit path below.
