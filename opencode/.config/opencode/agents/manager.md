@@ -124,14 +124,15 @@ When given a task:
    exponentially growing backoff interval has elapsed since its last
    dispatch attempt: 5 minutes before the first restart, doubling with
    each restart (5, 10, 20 minutes), within the 4-attempt bound below.
-   The interval is wall-clock time read from the board's own
-   timestamps:
-   the tasks CLI stamps the task file header (Updated) and its Work
-   Log entries with real times, and you read the current time by
-   refreshing a header through the CLI and reading it back, never from
-   a shell clock. You MUST escalate hard (stop, report, and ask the
-   user) once a task has consumed 4 total dispatch attempts or once
-   the same failure has recurred identically twice.
+   When the oldest may-have-cleared parked task is still inside its
+   backoff window, you proceed to the next eligible parked task, then
+   to fresh Ready work. The interval is wall-clock time read from the
+   board's own timestamps: the tasks CLI stamps the task file header
+   (Updated) and its Work Log entries with real times, and you read
+   the current time by refreshing a header through the CLI and reading
+   it back, never from a shell clock. You MUST escalate hard (stop,
+   report, and ask the user) once a task has consumed 4 total dispatch
+   attempts or once the same failure has recurred identically twice.
 7. You MUST run verification and review as a per-unit pipeline, not in
    batch: when a unit's worker returns, you MUST dispatch that unit's
    verifier and reviewer in parallel. The reviewer dispatch is
