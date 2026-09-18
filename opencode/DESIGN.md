@@ -594,6 +594,35 @@ drop a line to `logWriteError`, and a foreign append landing between
 another writer's size check and its write can leave the cap
 transiently overshot by one line until the next rotation.
 
+Alongside the log, every transform run, quiet runs included, rewrites
+one live-state snapshot per session at
+`~/.local/share/opencode/lru-state/<sessionID>.json`, so a reader can
+see a session's current state as of its last model call even when
+nothing eventful ever happened. The snapshot carries an ISO timestamp,
+the `manualMode` flag, the budget in effect and its source, the last
+run's estimate against the watermark and deficit, the same cumulative
+counters the log's totals use, the stash occupancy (entries held
+against the 50-entry capacity), and the hot-subject list, which is the
+same rendered, deduplicated, most-recent-first subject list the
+`[lru-hot]` hint delivers, capped by `hintSubjects`. One file per
+session is single-writer by construction (the plugin process is the
+only writer of every session's file), so the write replaces the file
+in place with no rotation and no append history; a reader that catches
+a torn write sees malformed JSON and must degrade. The `liveStateLog`
+option (default on) disables the snapshot and `liveStatePath`
+relocates the directory, mirroring the log's own options; `lru_stats`
+reports the resolved trio in its options block. The write lands first,
+and only after it succeeds does the plugin prune the directory by age:
+`*.json` files whose mtime is older than `liveStatePruneMaxAgeMs`
+(default 7 days, `0` disables) are removed, bounding the disk
+footprint of dead sessions. Pruning is best-effort: a stale file that
+cannot be stat'd or removed is skipped, so one undeletable entry never
+blocks another session's snapshot, and prune failures of any kind
+never surface as errors. A failed mkdir or write never interrupts the
+session; the error is held in the session's metrics and surfaces
+through `lru_stats` as `stateWriteError`, the same tolerance the log
+gives `logWriteError`, and a later successful write clears it.
+
 ## LRU sidebar panel
 
 The `/lru` command opens the LRU context manager's panel as a TUI plugin:
@@ -609,17 +638,30 @@ it shows comes from `panelRows` in `plugin/lru-panel-data.ts`, the same
 module the headless suite covers, so the panel's exact text is
 unit-tested without a terminal.
 
-The panel is a reader over the metrics log and adds no server-side
-surface. Opening it reads `~/.local/share/opencode/lru-metrics.jsonl`
-anew each time (so reopening is refreshing), filters lines to the
-session the TUI route is on, and renders that session's budget with its
-source (per-model override, per-model limit, plugin default, or
-inactive), the last run's
-estimate against the watermark and deficit, the cumulative counters of
-the session's most recent line (evictions with bytes reclaimed, fence
-evictions, dedup, expired reasoning parts with their bytes,
-post-eviction touches, stash reads with hits and misses, dropped stash
-entries), and the most recent evictions newest first, capped at eight.
+The panel is a reader over the files the server plugin writes and adds
+no server-side surface. Opening it reads
+`~/.local/share/opencode/lru-metrics.jsonl` anew each time (so
+reopening is refreshing), filters lines to the session the TUI route
+is on, and also reads that session's live-state snapshot from
+`~/.local/share/opencode/lru-state/<sessionID>.json`. When a
+well-formed snapshot for the requested session exists, the session
+block is built from it: the budget with its source, the last run's
+estimate against the watermark and deficit, the cumulative counters,
+the mode as a `mode: manual` or `mode: auto` row, the stash occupancy
+appended to the stash reads row, and the hot-subject list as its own
+row, all as of the session's last model call, quiet runs included.
+Both the snapshot and the log line carry an ISO timestamp: when the
+session's newest logged line is newer than the snapshot's, the log
+wins the fields it carries (budget, last run, counters) and the
+snapshot keeps only what the log cannot say (mode, occupancy, hot
+subjects); otherwise the snapshot stands. The metrics log still
+supplies what the snapshot does not carry: the eventful-run count, the
+most recent evictions newest first capped at eight, and the history
+line. A missing, malformed, or foreign-session
+snapshot degrades to the metrics-log-only block, which renders the
+budget, last run, counters, and evictions from the session's most
+recent logged line and carries no mode, occupancy, or hot-subject
+rows.
 A history line mixes two time windows: sessions and runs count every
 parsed line in the whole log, and since the log survives server
 restarts, those counts span the log's entire lifetime with rotation
@@ -638,19 +680,25 @@ when the file holding them rotates away, in the same spirit as the
 malformed lines the panel already drops at parse.
 
 Degradation is deliberate: opening the panel outside a session route
-renders "no active session", a session with no logged runs yet renders
-"no metrics recorded for this session yet", both plus the history
-line, malformed lines are skipped at parse, and an unreadable log
-collapses the panel to a header and a warning row naming the error.
-Lines whose totals predate the reasoning and fence-eviction counters
-fail the panel's totals check and are dropped, so panel history counts
-only lines the current schema wrote.
-Two live fields are absent
-by design: stash occupancy and skip-state exist only in the server
-plugin's memory, and the TUI api offers no channel to them (the TUI's
-kv store is local to the TUI process and the SDK client cannot invoke a
-plugin tool directly), so the metrics-log-only fallback stands and the
-log's stash hit and miss counts stand in for stash activity.
+renders "no active session", a session with neither a snapshot nor
+logged runs renders "no metrics recorded for this session yet", both
+plus the history line, malformed lines and snapshots are skipped at
+parse, and an unreadable log collapses the panel to a header and a
+warning row naming the error, with the session's snapshot block still
+served under the warning when the snapshot itself is readable. Lines
+whose totals predate the reasoning
+and fence-eviction counters fail the panel's totals check and are
+dropped, so panel history counts only lines the current schema wrote;
+the same field checks apply to snapshots, so a snapshot written under
+a different schema degrades instead of rendering half a block. The
+snapshot file is the channel the earlier metrics-log-only panel
+lacked: the TUI's kv store is local to the TUI process and the SDK
+client cannot invoke a plugin tool directly, so live fields once had
+no path to the sidebar, while the snapshot now carries the stash
+occupancy and the stand-down facts (the manual mode flag and the
+budget with its source). In the snapshot-less fallback those rows stay
+absent and the log's stash hit and miss counts stand in for stash
+activity.
 
 Deployment note: the repo's tui.json already declares the module, so
 it is live rather than inert, and the facts that keep the file loadable
