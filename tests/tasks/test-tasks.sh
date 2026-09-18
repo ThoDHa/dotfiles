@@ -39,6 +39,11 @@ DASH="$TASKS_DIR/dashboard.md"
 
 t() { "$TASKS_BIN" "$@"; }
 
+edit_stderr_of() { # rest is the edit invocation; echoes its stderr
+	# edit consumes stdin even when refusing, so detach it
+	t edit "$@" </dev/null 2>&1 >/dev/null || true
+}
+
 echo "== init =="
 t init >/dev/null
 [[ -d "$TASKS_DIR/current" && -d "$TASKS_DIR/archive" && -f "$DASH" ]] \
@@ -663,13 +668,15 @@ refuse "edit refuses the level-1 document title as a section" edit "$f_ed" --sec
 ea_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ea")"
 refuse "empty append still rejects an unknown section" edit "$f_ea" --section "No Such Section" --append
 assert_eq "edit refusals leave the file byte-identical" "$ed_before" "$(cat "$f_ed")"
-title_err="$(t edit "$f_ed" --section "$ed_title" "$ed_body" 2>&1 >/dev/null || true)"
+title_err="$(edit_stderr_of "$f_ed" --section "$ed_title" "$ed_body")"
 assert_contains "title refusal reports an unknown section" "$title_err" "unknown section"
 assert_eq "refused empty append leaves Updated untouched" "$ea_updated_before" \
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ea")"
-ed_err="$(t edit "$f_ed" --section "No Such Section" "$ed_body" 2>&1 >/dev/null || true)"
+ed_err="$(edit_stderr_of "$f_ed" --section "No Such Section" "$ed_body")"
 assert_contains "unknown-section refusal names the section" "$ed_err" "unknown section"
-head_err="$(t edit "$f_ed" --section Objective "$ed_bad" 2>&1 >/dev/null || true)"
+ea_err="$(edit_stderr_of "$f_ea" --section "No Such Section" --append)"
+assert_contains "empty-append refusal reports an unknown section" "$ea_err" "unknown section"
+head_err="$(edit_stderr_of "$f_ed" --section Objective "$ed_bad")"
 assert_contains "heading-line refusal names the hazard" "$head_err" "heading"
 ed_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
 refuse "edit refuses an empty stdin replacement without a trace" edit "$f_ed" --section Objective
