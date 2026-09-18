@@ -573,11 +573,21 @@ relocates the file, but the current config entry is the bare-string
 form and the runtime extracts an options object only from the
 `[path, options]` tuple form, so with a bare string every option
 resolves to its default, and disabling the log requires switching the
-entry to `["./plugin/lru-context.ts", { "metricsLog": false }]`. There is no
-rotation: lines are appended indefinitely across sessions and the file
-shrinks only when deleted by hand. A failed append never interrupts
-the session; the error is held in the session's metrics and surfaces
-through `lru_stats` as `logWriteError`.
+entry to `["./plugin/lru-context.ts", { "metricsLog": false }]`. Size is
+bounded by the `metricsRotationMaxBytes` option (default 5 MiB, `0`
+disables): before each append the plugin stats the file, and when the
+line would push it past the cap the current file is renamed to
+`<metricsPath>.1`, replacing any prior `.1`, and the append starts the
+fresh file, so only the current and the previous generation exist and
+anything older is gone for good. Below the cap nothing changes: the
+same bytes are appended and counters and line contents are unaffected.
+A failed stat, rename, or append never interrupts the session; the
+error is held in the session's metrics and surfaces through
+`lru_stats` as `logWriteError`. Rotation assumes a single writer and
+has no cross-process atomicity: concurrent rotations can race and
+drop a line to `logWriteError`, and a foreign append landing between
+another writer's size check and its write can leave the cap
+transiently overshot by one line until the next rotation.
 
 ## LRU sidebar panel
 
@@ -606,16 +616,21 @@ evictions, dedup, expired reasoning parts with their bytes,
 post-eviction touches, stash reads with hits and misses, dropped stash
 entries), and the most recent evictions newest first, capped at eight.
 A history line mixes two time windows: sessions and runs count every
-parsed line in the whole log, and since the log is append-only and
-survives server restarts, those counts span the log's entire lifetime;
-evictions and dedup instead sum each session's most recent cumulative
-totals, which restart whenever the plugin's in-memory counters do, on
-server restart or when a session falls out of the plugin's
-eight-session in-memory bound and returns later, so a returning
-session's newest line understates what its older lines recorded. The
-panel reads the whole file on every open, since per-session totals need
-each session's full line history; until the log gains rotation it grows
-without bound, so that read cost grows with it.
+parsed line in the whole log, and since the log survives server
+restarts, those counts span the log's entire lifetime with rotation
+disabled and only the current rotation generation with rotation
+enabled; evictions and dedup instead sum each session's most recent
+cumulative totals, which restart whenever the plugin's in-memory
+counters do, on server restart or when a session falls out of the
+plugin's eight-session in-memory bound and returns later, so a
+returning session's newest line understates what its older lines
+recorded. The panel reads the whole file on every open, since
+per-session totals need each session's full line history; with
+`metricsRotationMaxBytes` active the fresh file is bounded by the cap
+plus one in-flight line, so that read cost is bounded too, at the
+price of history: pre-rotation lines leave panel history permanently
+when the file holding them rotates away, in the same spirit as the
+malformed lines the panel already drops at parse.
 
 Degradation is deliberate: opening the panel outside a session route
 renders "no active session", a session with no logged runs yet renders
