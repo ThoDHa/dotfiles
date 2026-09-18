@@ -222,6 +222,54 @@ assert_contains "claim refuses a trailing --owner" "$claim_guard_err" "claim: --
 release_guard_err="$(t release --dir 2>&1 >/dev/null || true)"
 assert_contains "release refuses a trailing --dir" "$release_guard_err" "release: --dir requires a value"
 
+echo "== --flag=VALUE long form =="
+# The space-separated form refuses any value beginning with --, so such
+# values are only expressible through the long form; it must round-trip
+# verbatim while the space form stays exactly as it is today.
+escdir="$ROOT/longform/.tasks"
+t init --dir="$escdir" >/dev/null
+f_esc1="$(t new --id=ESC-1 --name=--force --status=Ready --priority=High --dir="$escdir")"
+[[ -f "$f_esc1" ]] && ok "new accepts long-form options" || bad "new accepts long-form options"
+assert_contains "new --name=--force writes the raw name" "$(head -1 "$f_esc1")" "# Task: --force"
+assert_contains "new --name=--force writes the raw objective" "$(cat "$f_esc1")" "[ESC-1] --force"
+assert_contains "new --status= writes the status" "$(cat "$f_esc1")" "**Status:** Ready"
+assert_contains "new --priority= writes the priority" "$(cat "$f_esc1")" "**Priority:** High"
+f_esc2="$(t new --id=ESC-2 --name "Long Form Target")"
+[[ -f "$f_esc2" ]] && ok "long and space forms mix in one invocation" || bad "long and space forms mix in one invocation"
+t render --dir="$escdir" >/dev/null
+assert_contains "render --dir= rebuilds the requested board" "$(cat "$escdir/dashboard.md")" "--force"
+t set --dir="$escdir" "$(basename "$f_esc1")" Status=Blocked >/dev/null
+assert_contains "set --dir= applies to the requested board" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_esc1")" "Blocked"
+t claim --dir="$escdir" "$(basename "$f_esc1")" --owner=sess-longform >/dev/null
+assert_contains "claim --owner= writes the owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_esc1")" "sess-longform"
+t release --dir="$escdir" "$(basename "$f_esc1")" >/dev/null
+assert_eq "release --dir= clears the owner" "" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_esc1" || true)"
+show_esc="$(t show --dir="$escdir" "$(basename "$f_esc1")")"
+assert_contains "show --dir= reads the requested board" "$show_esc" "# Task: --force"
+t log --dir="$escdir" "$(basename "$f_esc1")" --from=Worker-LF3 "Long form dir log" >/dev/null
+assert_contains "log --dir= and --from= apply together" "$(cat "$f_esc1")" "Worker-LF3: Long form dir log"
+printf 'Long form dir edit body\n' | t edit --dir="$escdir" "$(basename "$f_esc1")" --section=Objective >/dev/null
+assert_contains "edit --dir= and --section= apply together" "$(cat "$f_esc1")" "Long form dir edit body"
+printf 'Long form dir report body\n' | t report --dir="$escdir" "$(basename "$f_esc1")" --slug=dir-lf --digest="dir long form" >/dev/null
+[[ -f "$escdir/reports/$(basename "$f_esc1")/01-dir-lf.md" ]] \
+	&& ok "report --dir= deposits under the requested board" || bad "report --dir= deposits under the requested board"
+printf 'Long form report body\n' | t report "$f_esc2" --slug=long-form --from=Worker-LF --digest="equals = inside" >/dev/null
+[[ -f "$TASKS_DIR/reports/$(basename "$f_esc2")/01-long-form.md" ]] \
+	&& ok "report --slug= deposits the file" || bad "report --slug= deposits the file"
+assert_contains "report --from= attributes the entry" "$(cat "$f_esc2")" "Worker-LF: Report"
+assert_contains "report --digest= keeps equals signs" "$(cat "$f_esc2")" "**Digest:** equals = inside"
+t log "$f_esc2" --from=Worker-LF2 "Long form log entry" >/dev/null
+assert_contains "log --from= headings the worker" "$(cat "$f_esc2")" "Worker-LF2: Long form log entry"
+printf 'Long form section body\n' | t edit "$f_esc2" --section=Objective >/dev/null
+assert_contains "edit --section= replaces the body" "$(cat "$f_esc2")" "Long form section body"
+show_lf="$(t show "$f_esc2" --tail=1)"
+assert_eq "show --tail=1 prints one entry" "1" "$(grep -c '^### ' <<<"$show_lf")"
+assert_contains "show --tail= includes the newest entry" "$show_lf" "Worker-LF2: Long form log entry"
+refuse "new rejects an empty --name= value" new --id=ESC-9 --name=
+refuse "report rejects an empty --slug= value" report "$f_esc2" --slug= --digest d
+refuse "new rejects an unknown long-form option" new --bogus=x
+assert_contains "usage documents the long-form escape" "$(t help)" '--name=--force'
+
 echo "== concurrent set serializes (no lost update) =="
 f_cs="$(t new --id API-4 --name "Concurrency Set Target")"
 concdir="$(mktemp -d)"
@@ -399,8 +447,18 @@ refuse "report rejects a missing task file" report NOPE-9.md --slug fine --diges
 refuse "report rejects a missing taskfile argument" report --slug fine --digest d
 refuse "report rejects a valueless trailing --slug" report "$f_rp" --slug
 refuse "report rejects a valueless trailing --digest" report "$f_rp" --digest
+refuse "report rejects a valueless trailing --from" report "$f_rp" --from
+refuse "report rejects a valueless trailing --dir" report "$f_rp" --dir
 refuse "report rejects empty stdin content" report "$f_rp" --slug empty-case --digest "empty"
 refuse "report rejects an unreadable content file" report "$f_rp" --slug unreadable --digest d "$ROOT/no-such-report.md"
+slug_guard_err="$(t report "$f_rp" --slug --digest d </dev/null 2>&1 >/dev/null || true)"
+assert_contains "report refuses a flag-shaped --slug value" "$slug_guard_err" "report: --slug requires a value"
+from_guard_err="$(t report "$f_rp" --from --bogus --slug fine --digest d </dev/null 2>&1 >/dev/null || true)"
+assert_contains "report refuses a flag-shaped --from value" "$from_guard_err" "report: --from requires a value"
+digest_guard_err="$(t report "$f_rp" --digest --bogus --slug fine </dev/null 2>&1 >/dev/null || true)"
+assert_contains "report refuses a flag-shaped --digest value" "$digest_guard_err" "report: --digest requires a value"
+dir_guard_err="$(t report "$f_rp" --dir --bogus --slug fine --digest d </dev/null 2>&1 >/dev/null || true)"
+assert_contains "report refuses a flag-shaped --dir value" "$dir_guard_err" "report: --dir requires a value"
 assert_eq "refusals append no Work Log entry" "$rp_entries_before" "$(grep -c -E '^### .*: Report$' "$f_rp" || true)"
 assert_eq "refusals leave Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
 assert_eq "refusals deposit no report files" "5" "$(ls "$rpdir" 2>/dev/null | wc -l)"
@@ -532,10 +590,15 @@ cr_err="$(t log "$f_lf" "$(printf 'crlf first\rsecond line')" 2>&1 >/dev/null ||
 assert_contains "log rejects CR characters in the message" "$cr_err" "carriage return"
 refuse "log rejects a multi-line --from" log "$f_lf" --from "$(printf 'a\nb')" "msg"
 refuse "log rejects a valueless trailing --from" log "$f_lf" --from
+refuse "log rejects a valueless trailing --dir" log "$f_lf" --dir
 assert_eq "rejected heading and CR logs leave Updated untouched" "$lf_updated_before" \
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
 assert_eq "rejected heading and CR logs append no entry" "$lf_entries_before" \
 	"$(grep -c '^### ' "$f_lf")"
+from_flag_err="$(t log "$f_lf" --from --bogus "msg" 2>&1 >/dev/null || true)"
+assert_contains "log refuses a flag-shaped --from value" "$from_flag_err" "log: --from requires a value"
+logdir_flag_err="$(t log "$f_lf" --dir --bogus "msg" 2>&1 >/dev/null || true)"
+assert_contains "log refuses a flag-shaped --dir value" "$logdir_flag_err" "log: --dir requires a value"
 
 echo "== log: blank first line rejection =="
 lf_blank_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
@@ -678,6 +741,14 @@ ea_err="$(edit_stderr_of "$f_ea" --section "No Such Section" --append)"
 assert_contains "empty-append refusal reports an unknown section" "$ea_err" "unknown section"
 head_err="$(edit_stderr_of "$f_ed" --section Objective "$ed_bad")"
 assert_contains "heading-line refusal names the hazard" "$head_err" "heading"
+ed_dir_flag_err="$(edit_stderr_of --dir --bogus)"
+assert_contains "edit refuses a flag-shaped --dir value" "$ed_dir_flag_err" "edit: --dir requires a value"
+ed_sec_flag_err="$(edit_stderr_of "$f_ed" --section --bogus "$ed_body")"
+assert_contains "edit refuses a flag-shaped --section value" "$ed_sec_flag_err" "edit: --section requires a value"
+ed_dir_val_err="$(edit_stderr_of --dir)"
+assert_contains "edit refuses a valueless trailing --dir" "$ed_dir_val_err" "edit: --dir requires a value"
+ed_sec_val_err="$(edit_stderr_of "$f_ed" --section)"
+assert_contains "edit refuses a valueless trailing --section" "$ed_sec_val_err" "edit: --section requires a value"
 ed_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
 refuse "edit refuses an empty stdin replacement without a trace" edit "$f_ed" --section Objective
 assert_eq "refused edits leave Updated untouched" "$ed_updated_before" \
@@ -808,6 +879,11 @@ refuse "show rejects --tail 0" show "$f_sh" --tail 0
 refuse "show rejects a non-numeric tail" show "$f_sh" --tail abc
 refuse "show rejects a negative tail" show "$f_sh" --tail -1
 refuse "show rejects a valueless trailing --tail" show "$f_sh" --tail
+refuse "show rejects a valueless trailing --dir" show "$f_sh" --dir
+tail_flag_err="$(t show "$f_sh" --tail --bogus 2>&1 >/dev/null || true)"
+assert_contains "show refuses a flag-shaped --tail value" "$tail_flag_err" "show: --tail requires a value"
+showdir_flag_err="$(t show "$f_sh" --dir --bogus 2>&1 >/dev/null || true)"
+assert_contains "show refuses a flag-shaped --dir value" "$showdir_flag_err" "show: --dir requires a value"
 refuse "show rejects a missing task file" show NOPE-9.md
 f_nolog="$(t new --id SHW-2 --name "Show No Log Target")"
 out_empty="$(t show "$f_nolog")"

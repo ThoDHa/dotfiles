@@ -89,6 +89,9 @@ Commands:
   release <taskfile>                   Release a claim and clear Owner, render.
   help                                 Show this help.
 
+Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
+a value that itself begins with "--" (e.g. --name=--force).
+
 The .tasks/ directory is located from --dir, then $TASKS_DIR, then by walking
 up from the current directory, then ./.tasks as a last resort.
 EOF
@@ -482,11 +485,17 @@ replace_section_body() {
 
 # --- commands --------------------------------------------------------------
 
+# Every option accepts a --flag=VALUE long form in addition to the
+# space-separated one. The long form is the only way to express a value
+# that itself starts with "--": the space form refuses flag-shaped tokens
+# as values, so a name like "--force" is only spellable --name=--force.
+
 cmd_init() {
 	local dir=""
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "init: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) die "init: unknown argument: $1" ;;
 		esac
 	done
@@ -501,6 +510,7 @@ cmd_render() {
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "render: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) die "render: unknown argument: $1" ;;
 		esac
 	done
@@ -513,10 +523,15 @@ cmd_new() {
 	while (($#)); do
 		case "$1" in
 			--id) [[ $# -ge 2 && "$2" != --* ]] || die "new: --id requires a value"; id="$2"; shift 2 ;;
+			--id=*) id="${1#*=}"; shift ;;
 			--name) [[ $# -ge 2 && "$2" != --* ]] || die "new: --name requires a value"; name="$2"; shift 2 ;;
+			--name=*) name="${1#*=}"; shift ;;
 			--status) [[ $# -ge 2 && "$2" != --* ]] || die "new: --status requires a value"; status="$2"; shift 2 ;;
+			--status=*) status="${1#*=}"; shift ;;
 			--priority) [[ $# -ge 2 && "$2" != --* ]] || die "new: --priority requires a value"; priority="$2"; shift 2 ;;
+			--priority=*) priority="${1#*=}"; shift ;;
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "new: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) die "new: unknown option: $1" ;;
 		esac
 	done
@@ -591,6 +606,7 @@ cmd_set() {
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "set: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
@@ -631,7 +647,9 @@ cmd_claim() {
 	while (($#)); do
 		case "$1" in
 			--owner) [[ $# -ge 2 && "$2" != --* ]] || die "claim: --owner requires a value"; owner="$2"; shift 2 ;;
+			--owner=*) owner="${1#*=}"; shift ;;
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "claim: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) target="$1"; shift ;;
 		esac
 	done
@@ -662,6 +680,7 @@ cmd_release() {
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "release: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
 			*) target="$1"; shift ;;
 		esac
 	done
@@ -698,10 +717,14 @@ cmd_report() {
 	local args=()
 	while (($#)); do
 		case "$1" in
-			--dir) (($# >= 2)) || die "report: --dir requires a value"; dir="$2"; shift 2 ;;
-			--slug) (($# >= 2)) || die "report: --slug requires a value"; slug="$2"; shift 2 ;;
-			--from) (($# >= 2)) || die "report: --from requires a value"; from="$2"; shift 2 ;;
-			--digest) (($# >= 2)) || die "report: --digest requires a value"; digest="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "report: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--slug) [[ $# -ge 2 && "$2" != --* ]] || die "report: --slug requires a value"; slug="$2"; shift 2 ;;
+			--slug=*) slug="${1#*=}"; shift ;;
+			--from) [[ $# -ge 2 && "$2" != --* ]] || die "report: --from requires a value"; from="$2"; shift 2 ;;
+			--from=*) from="${1#*=}"; shift ;;
+			--digest) [[ $# -ge 2 && "$2" != --* ]] || die "report: --digest requires a value"; digest="$2"; shift 2 ;;
+			--digest=*) digest="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
@@ -774,8 +797,10 @@ cmd_log() {
 	local dir="" from="" args=()
 	while (($#)); do
 		case "$1" in
-			--dir) (($# >= 2)) || die "log: --dir requires a value"; dir="$2"; shift 2 ;;
-			--from) (($# >= 2)) || die "log: --from requires a value"; from="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "log: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--from) [[ $# -ge 2 && "$2" != --* ]] || die "log: --from requires a value"; from="$2"; shift 2 ;;
+			--from=*) from="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
@@ -823,8 +848,10 @@ cmd_edit() {
 	local args=()
 	while (($#)); do
 		case "$1" in
-			--dir) (($# >= 2)) || die "edit: --dir requires a value"; dir="$2"; shift 2 ;;
-			--section) (($# >= 2)) || die "edit: --section requires a value"; section="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "edit: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--section) [[ $# -ge 2 && "$2" != --* ]] || die "edit: --section requires a value"; section="$2"; shift 2 ;;
+			--section=*) section="${1#*=}"; shift ;;
 			--append) append=1; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
@@ -912,8 +939,10 @@ cmd_show() {
 	local dir="" tail="$DEFAULT_TAIL" args=()
 	while (($#)); do
 		case "$1" in
-			--dir) (($# >= 2)) || die "show: --dir requires a value"; dir="$2"; shift 2 ;;
-			--tail) (($# >= 2)) || die "show: --tail requires a value"; tail="$2"; shift 2 ;;
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "show: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--tail) [[ $# -ge 2 && "$2" != --* ]] || die "show: --tail requires a value"; tail="$2"; shift 2 ;;
+			--tail=*) tail="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
