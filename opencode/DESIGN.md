@@ -373,7 +373,16 @@ and eviction stands down
 entirely rather than running against an invented one; dedup, the
 errored-input purge, and the hint line still run, and opencode's
 native auto-compaction remains the overflow backstop for those
-sessions.
+sessions. Each captured budget remembers the model identity
+(`providerID/modelID`) it was captured for: a later `chat.params` event
+that captures nothing but names a different model deletes the stored
+entry, so the session falls through to the override map for the new
+model, then its reported limit, then the unknown-budget stand-down,
+instead of silently evicting against the previous model's budget; a
+re-fire of the same model without a limit (which opencode emits on
+every turn) retains the stored entry exactly as before, and an event
+naming a different model with its own usable limit replaces the entry
+through the normal capture path.
 
 The `manualMode` plugin option (default false) turns that stand-down
 into a choice rather than a symptom of an unknown budget: with it set,
@@ -494,7 +503,10 @@ and before budget-driven eviction, whether or not a budget is known,
 scanning the `text` parts of user messages (messages whose info carries
 `role: "user"`) that sit outside the recent window for fenced code
 blocks: a line indented by at most three spaces whose remaining text
-opens with at least three backticks starts a block, a later line of
+opens with at least three backticks starts a block, unless the
+opener's info string itself contains a backtick, in which case
+CommonMark classes the line as content rather than a fence and it
+neither opens a block nor takes part in one; a later line of
 backticks optionally followed by spaces, after the same
 at-most-three-space indent and at least as many as the opener, closes
 it; a line indented four or more
@@ -606,19 +618,33 @@ against the 50-entry capacity), and the hot-subject list, which is the
 same rendered, deduplicated, most-recent-first subject list the
 `[lru-hot]` hint delivers, capped by `hintSubjects`. One file per
 session is single-writer by construction (the plugin process is the
-only writer of every session's file), so the write replaces the file
-in place with no rotation and no append history; a reader that catches
-a torn write sees malformed JSON and must degrade. The `liveStateLog`
+only writer of every session's file), so the write goes to a sibling
+temp file that is then renamed onto the session file: a concurrent
+reader sees either the previous snapshot or the complete new one,
+never a torn write, and a failed write or rename leaves the previous
+snapshot intact with no temp file left behind. The `liveStateLog`
 option (default on) disables the snapshot and `liveStatePath`
 relocates the directory, mirroring the log's own options; `lru_stats`
 reports the resolved trio in its options block. The write lands first,
 and only after it succeeds does the plugin prune the directory by age:
-`*.json` files whose mtime is older than `liveStatePruneMaxAgeMs`
-(default 7 days, `0` disables) are removed, bounding the disk
-footprint of dead sessions. Pruning is best-effort: a stale file that
+`*.json` snapshot files and `*.json.tmp` temp orphans whose mtime is
+older than `liveStatePruneMaxAgeMs` (default 7 days, `0` disables) are
+removed, bounding the disk footprint of dead sessions; a handled write
+failure unlinks its temp immediately, and any temp orphan (a failed
+unlink, or a hard kill between write and rename) is reclaimed by the
+first prune scan to run after it ages past the bound. The directory
+scan itself is throttled to
+at most one per plugin instance per `liveStatePruneMinIntervalMs`
+(default 60 seconds, `0` disables; opencode instantiates the plugin
+once per process, so this is a per-process bound), because per-session
+snapshots fire far more often than state files expire and the scan
+that usually finds nothing is the expensive part; a scan landing
+inside the window is skipped, which only postpones pruning. Pruning is
+best-effort: a stale file that
 cannot be stat'd or removed is skipped, so one undeletable entry never
 blocks another session's snapshot, and prune failures of any kind
-never surface as errors. A failed mkdir or write never interrupts the
+never surface as errors. A failed mkdir, write, or rename never
+interrupts the
 session; the error is held in the session's metrics and surfaces
 through `lru_stats` as `stateWriteError`, the same tolerance the log
 gives `logWriteError`, and a later successful write clears it.
