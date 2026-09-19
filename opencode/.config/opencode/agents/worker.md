@@ -47,8 +47,8 @@ When dispatched:
 1. You MUST read the task prompt carefully.
 2. You MUST record the current git HEAD commit hash as your base commit.
 3. You MUST flag a needed change outside your assigned territory in
-   your report under Blocks (the Report File Template's section for
-   blocked and unfinished items) instead of making it.
+   your report under Blocks (per the task-files skill's Report File
+   Template Blocks section) instead of making it.
 4. You MUST explore the relevant code before making changes.
 5. You MUST implement the change, following existing code conventions.
 6. When the task-files protocol is active and your dispatch names a
@@ -75,8 +75,9 @@ When dispatched:
      Template (the metadata block plus the Findings, Decisions, Blocks,
      and Next sections). Fold the base commit (step 2) and your
      verification claims into Findings, the commit status (the branch
-     and commit range when you worked a unit branch) into Decisions,
-     and anything left undone into Blocks. Reply with a
+      and commit range when you worked a unit branch) into Decisions,
+      and anything left undone into Blocks, categorized per the
+      task-files skill's Report File Template Blocks section. Reply with a
      brief summary that points at the deposited report path.
    - Otherwise: write the full report to
      /tmp/opencode/reports/<unit-name>.md (create the directory if
