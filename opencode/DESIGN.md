@@ -289,9 +289,9 @@ unit dispatched alongside a running sibling, created before dispatch
 and torn down after integration; a lone unit with no sibling in
 flight may work in the main tree instead, and a parked unit's
 worktree stays the one teardown exception, persisting while the unit
-awaits its restart. Setups without the model reserve worktrees for same-file
-contention that would otherwise serialize independent work. In both
-regimes worktrees live inside the repo (disk-backed, no RAM cost),
+awaits its restart. Setups without the model reserve worktrees for
+same-file contention that would otherwise serialize independent work.
+In both regimes worktrees live inside the repo (disk-backed, no RAM cost),
 verified gitignored via `git check-ignore`
 before first creation, pruned (`git worktree prune`) before creation, and
 torn down completely after integration or reconciliation: worktree removed,
