@@ -16,9 +16,7 @@ This specification defines technical implementation requirements for code produc
 
 ## Code Reuse Requirements
 
-Implementations MUST search the current codebase and package registries for existing solutions, and evaluate whether they meet requirements, before implementing custom code. When equivalent functionality exists, implementations MUST use the existing implementation, extending it if modifications are needed, and MUST NOT create duplicate utility functions.
-
-Implementations MUST NOT create custom implementations when adequate solutions exist unless an existing solution has a concrete technical limitation that disqualifies it (unacceptable performance or unacceptable dependencies). A bypass MUST be justified by the specific limitation, not merely asserted, and MUST be documented in a code comment explaining why each existing solution was rejected.
+Implementations MUST search the current codebase and package registries for existing solutions, and evaluate whether they meet requirements, before implementing custom code. When equivalent functionality exists, implementations MUST use the existing implementation, extending it if modifications are needed, and MUST NOT create duplicate utility functions. Implementations MUST NOT create custom implementations when adequate solutions exist unless an existing solution has a concrete technical limitation that disqualifies it (unacceptable performance or unacceptable dependencies). A bypass MUST be justified by the specific limitation, not merely asserted, and MUST be documented in a code comment explaining why each existing solution was rejected.
 
 Repeated code patterns (3+ occurrences) MUST be extracted into a reusable helper function, class, or module in a designated shared location (utility functions in utilities/helpers directories, shared types in types/models directories, common constants in constants/config directories), documented with purpose and usage. Patterns spanning multiple projects SHOULD become a shared internal library or dedicated SDK, documented centrally for team discovery. Implementations MUST use named exports with descriptive identifiers over default exports.
 
@@ -26,9 +24,7 @@ Repeated code patterns (3+ occurrences) MUST be extracted into a reusable helper
 
 ## Literal Value Requirements
 
-Implementations MUST NOT use literal numeric values except 0, 1, -1 in loop constructs and simple arithmetic, mathematical constants and unit conversion factors with obvious meaning (e.g., 100 for percentage, 60 for seconds per minute), and array/string indices when context is clear; all other numeric literals MUST be extracted to named constants with descriptive identifiers. Implementations MUST NOT use literal strings for configuration values, error messages used in multiple locations, API endpoints or route paths, status codes or state identifiers, or feature flags or toggle names; these MUST be extracted to constants, enums, or configuration files.
-
-Implementations MUST externalize configuration values: environment-specific values MUST use environment variables, application settings MUST use dedicated configuration files, and feature flags MUST use a centralized feature management system or config. Implementations MUST NOT hardcode values that may vary between environments.
+Implementations MUST NOT use literal numeric values except 0, 1, -1 in loop constructs and simple arithmetic, mathematical constants and unit conversion factors with obvious meaning, and array/string indices when context is clear; all other numeric literals MUST be extracted to named constants with descriptive identifiers. Implementations MUST NOT use literal strings for configuration values, error messages used in multiple locations, API endpoints or route paths, status codes or state identifiers, or feature flags or toggle names; these MUST be extracted to constants, enums, or configuration files. Implementations MUST externalize configuration values: environment-specific values MUST use environment variables, application settings MUST use dedicated configuration files, and feature flags MUST use a centralized feature management system or config. Implementations MUST NOT hardcode values that may vary between environments.
 
 ---
 
@@ -36,27 +32,23 @@ Implementations MUST externalize configuration values: environment-specific valu
 
 Implementations MUST wrap all external calls (network requests, database operations, file system operations, subprocess execution, fallible third-party libraries) in language-appropriate error handling. The mechanism MUST either handle the error completely or re-throw it with additional context (errors are never silently swallowed and MUST NOT be caught only to log and ignore), provide meaningful context for debugging, release resources per [Resource Cleanup](#resource-cleanup), and log errors at appropriate severity levels at the boundary where they are handled or transformed rather than at every catch point.
 
-Error messages MUST describe what operation failed, include relevant context (identifiers, parameters, state), provide actionable information, suggesting remediation when a known remediation exists, suit the intended audience (user vs developer), protect sensitive information (internal paths and stack traces from end users; secrets per [Secrets Management](#secrets-management)), and focus on the system issue rather than user fault.
-
-Errors MUST bubble up to appropriate handling boundaries unless handled completely at the point of capture, MUST be caught at module/service boundaries for logging and transformation, and MUST NOT cross API boundaries without sanitization.
+Error messages MUST describe what operation failed, include relevant context (identifiers, parameters, state), provide actionable information, suggesting remediation when a known remediation exists, suit the intended audience (user vs developer), protect sensitive information (internal paths and stack traces from end users; secrets per [Secrets Management](#secrets-management)), and focus on the system issue rather than user fault. Errors MUST bubble up to appropriate handling boundaries unless handled completely at the point of capture, MUST be caught at module/service boundaries for logging and transformation, and MUST NOT cross API boundaries without sanitization.
 
 ---
 
 ## Testing Requirements
 
-### Critical Path Coverage
+### Test Coverage and Standards
 
 Implementations MUST write tests for core business logic functions, data transformation and validation functions, error handling paths, security-sensitive operations, and integration points with external services, and critical path tests MUST verify both success and failure conditions. Implementations SHOULD write tests for all new functionality.
 
 Implementations MUST NOT reduce existing test coverage when modifying code: reducing coverage includes deleting, disabling, or skipping tests and weakening assertions or fixtures (for example, loosening expected outcomes or narrowing tested inputs), whether they verify success or failure conditions. The sole exception is removal of the covered code itself.
 
-### Test Standards
-
-Test names MUST describe the system under test, the scenario, and the expected behavior, in the project's naming convention (e.g., `test_api_returns_404_when_user_not_found`), and MUST NOT reference bug IDs, temporary states, or vague identifiers (`test_working`, `test_1`). Tests MUST test one logical concept per case, be independent and not rely on test execution order, and clean up any state they create. Tests SHOULD include edge cases and boundary conditions, use realistic test data, be fast enough to run frequently, and use the AAA pattern (Arrange, Act, Assert) when appropriate.
+Test names MUST describe the system under test, the scenario, and the expected behavior, in the project's naming convention, and MUST NOT reference bug IDs, temporary states, or vague identifiers. Tests MUST test one logical concept per case, be independent and not rely on test execution order, and clean up any state they create. Tests SHOULD include edge cases and boundary conditions, use realistic test data, be fast enough to run frequently, and use the AAA pattern (Arrange, Act, Assert) when appropriate.
 
 ### Test Result Verification
 
-Test run verification MUST gate on the tool's own reported result (the exit status or result code when it encodes the outcome, the reported result metrics when it does not), never on text matching against output, because failed runs also print summary lines a filter matches. Reported results MUST account for every outcome class the runner reports: passed, failed, skipped, and error counts. Any non-zero failure or skip count MUST be named explicitly and investigated before the run is treated as green ([Prohibited Test Behaviors](#prohibited-test-behaviors)): `1 failed | 2530 passed` is a failed run, and `2 passed | 1 skipped` is a run with an uninvestigated skip, not a green run. Where output is truncated or filtered for length, the unfiltered summary (total, passed, failed, skipped) and the runner's exit status MUST still be captured directly at the point of invocation and reported; filtered reading MUST NOT be the sole failure signal.
+Test run verification MUST gate on the tool's own reported result (the exit status or result code when it encodes the outcome, the reported result metrics when it does not), never on text matching against output, because failed runs also print summary lines a filter matches. Reported results MUST account for every outcome class the runner reports: passed, failed, skipped, and error counts. Any non-zero failure or skip count MUST be named explicitly and investigated before the run is treated as green ([Prohibited Test Behaviors](#prohibited-test-behaviors)). Where output is truncated or filtered for length, the unfiltered summary (total, passed, failed, skipped) and the runner's exit status MUST still be captured directly at the point of invocation and reported; filtered reading MUST NOT be the sole failure signal.
 
 ### Prohibited Test Behaviors
 
@@ -68,9 +60,7 @@ All code implementation plans MUST include a test plan specifying what will be t
 
 ### Separation of Code and Test Changes
 
-This rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests; NEW tests for NEW feature code are grouped WITH that code per the `git-protocol` skill's Relationship Preservation section. Implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the two are inseparable and directly coupled.
-
-When a bug fix changes expected behavior, implementations MUST submit the production code fix in one commit or PR and the test update documenting the new expected behavior in a follow-up commit or PR, referencing the related issue or the original change. Only when the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation MAY they share one change set, documenting the rationale in the PR description and securing reviewer approval. All exceptions to the separation rule MUST be documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only behavior changes MUST reference an issue, design decision, or reviewer approval that authorizes them.
+This rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests; NEW tests for NEW feature code are grouped WITH that code per the `git-protocol` skill's Relationship Preservation section. Implementations MUST NOT update production code and the corresponding tests in the same commit, pull request, or change set, except when the two are inseparable and directly coupled. When a bug fix changes expected behavior, implementations MUST submit the production code fix in one commit or PR and the test update documenting the new expected behavior in a follow-up commit or PR, referencing the related issue or the original change. Only when the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation MAY they share one change set, documenting the rationale in the PR description and securing reviewer approval. All exceptions to the separation rule MUST be documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only behavior changes MUST reference an issue, design decision, or reviewer approval that authorizes them.
 
 ### Test Change Intent Verification
 
@@ -86,19 +76,13 @@ Every function MUST carry a function header (docstring) documenting its behavior
 
 ### General Documentation
 
-Implementations SHOULD document complex algorithms with explanatory comments, subject to the [Comment Policy](#comment-policy), and non-obvious implementation decisions.
-
-### Code-Documentation Synchronization
-
-When modifying code, implementations MUST update associated documentation and MUST NOT leave it stale; stale documentation is worse than no documentation.
+Implementations SHOULD document complex algorithms with explanatory comments, subject to the [Comment Policy](#comment-policy), and non-obvious implementation decisions. When modifying code, implementations MUST update associated documentation and MUST NOT leave it stale; stale documentation is worse than no documentation.
 
 ### Comment Policy
 
 This policy governs inline code comments; docstrings follow [Function Documentation](#function-documentation) above. Comments are absent by default: implementations MUST NOT add comments unless the user explicitly requests them or the narrow exception below applies, and before adding any comment implementations MUST first attempt self-explanatory code by renaming variables, functions, or types, extracting logic into named functions, simplifying expressions, and introducing named constants. An autonomous comment is permitted ONLY when ALL of the following hold: the code cannot express its intent on its own after those attempts, the comment explains non-obvious WHY rather than WHAT, and removing it would leave a future reader genuinely confused. Written comments MUST be direct and conversational, and MUST NOT restate what the code already expresses, use filler markers (`Note:`, `Important:`, `Consider:`, `This function...`, `Here we...`), or decorate code with section banners, file-level manifestos, or closing summaries.
 
-A TODO/FIXME is acceptable only with a concrete description and a tracking reference (e.g., `TODO(#142): stream from disk once files exceed 1 GB`); untracked TODOs are barred. Comments MUST NEVER document internal bug-fixing history: bug IDs, attribution, fix chronology, or temporal references ("previously", "before the fix"); internal bugs belong exclusively in commit messages and issue trackers. External library workarounds are the exception: they MUST be documented in comments with full context, including library name and version, issue reference if available, expected vs actual behavior, and the conditions for removing the workaround.
-
-Choose the right home for information: inline comments for code context and library workarounds; commit messages for what changed, why, and bug-fix history; formal documentation for architecture, API specifications, and deployment guidance.
+A TODO/FIXME is acceptable only with a concrete description and a tracking reference (e.g., `TODO(#142): stream from disk once files exceed 1 GB`); untracked TODOs are barred. Comments MUST NEVER document internal bug-fixing history: bug IDs, attribution, fix chronology, or temporal references ("previously", "before the fix"); internal bugs belong exclusively in commit messages and issue trackers. External library workarounds are the exception: they MUST be documented in comments with full context, including library name and version, issue reference if available, expected vs actual behavior, and the conditions for removing the workaround. Choose the right home for information: inline comments for code context and library workarounds; commit messages for what changed, why, and bug-fix history; formal documentation for architecture, API specifications, and deployment guidance.
 
 ---
 
@@ -107,8 +91,6 @@ Choose the right home for information: inline comments for code context and libr
 ### Strict Typing Requirement
 
 Implementations MUST use the strictest type-checking mode available in the project's language and tooling: strict/pedantic compiler flags, static type checkers where available, function-signature annotations per [Type Annotation Boundaries](#type-annotation-boundaries), and no type-escape mechanisms (e.g., `any`, `Object`, `void*`, dynamic casts).
-
-### Type-Escape Exceptions
 
 Type-escape mechanisms MAY be used ONLY when a concrete technical constraint requires it: interfacing with untyped external libraries, or the type system cannot express the required constraint. An escape MUST be justified by the specific constraint, not merely asserted, and documented in a code comment.
 
@@ -126,7 +108,7 @@ Implementations MUST NOT disable linting rules, static analysis warnings, or cod
 
 ### Naming Conventions
 
-Case style (camelCase, snake_case, and similar) follows the project's linter or formatter configuration per [Community Standards and Configuration](#community-standards-and-configuration); this subsection governs semantic naming. Implementations MUST use descriptive, proportionate names: one- and two-letter names are barred except for loop counters in tight scopes (e.g., `i`) and established identifiers (e.g., `id`); function names MUST state the operation performed as a concise verb phrase (`parseConfig`), neither cryptic (`do`) nor padded (`parseTheConfigurationFileFromDisk`); abbreviations MUST NOT truncate words into opaque fragments (`cnt`, `usrMgr`), though established domain terms (`config`, `auth`) are acceptable; one concept keeps one name across the codebase, and mixing synonyms for one operation (`fetch` and `retrieve`) is barred; boolean identifiers MUST read as predicates (`isValid`, `hasAccess`).
+Case style (camelCase, snake_case, and similar) follows the project's linter or formatter configuration per [Community Standards and Configuration](#community-standards-and-configuration); this subsection governs semantic naming. Implementations MUST use descriptive, proportionate names: one- and two-letter names are barred except for loop counters in tight scopes and established identifiers; function names MUST state the operation performed as a concise verb phrase, neither cryptic nor padded; abbreviations MUST NOT truncate words into opaque fragments, though established domain terms are acceptable; one concept keeps one name across the codebase, and mixing synonyms for one operation is barred; boolean identifiers MUST read as predicates.
 
 ### Community Standards and Configuration
 
@@ -171,8 +153,6 @@ Implementations MUST ensure cleanup of file handles, database connections, netwo
 ---
 
 ## Solution Selection Requirements
-
-### Correctness Priority
 
 Implementations MUST prioritize correctness over simplicity: when a solution is both correct and simple it is optimal, and simple solutions that sacrifice correctness are not acceptable.
 
