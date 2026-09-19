@@ -1,6 +1,6 @@
 ---
 name: simplify-review
-description: Simplify and Review Loop covering the post-implementation convergence cycle: a simplify pass (reuse, dead code, redundancy, efficiency) followed by a review pass (correctness bugs, logic errors, edge cases, security), with fix semantics, loop control, and convergence criteria. Use when any task, todo, or user request reaches completion, before reporting work complete, after implementation finishes, or when the user asks to simplify, clean up, or review completed changes.
+description: Simplify and Review Loop covering the post-implementation convergence cycle: a simplify pass (reuse, dead code, redundancy, efficiency) followed by a review pass (correctness bugs, logic errors, edge cases, security), with fix semantics, loop control, convergence criteria, and an Analysis-Only Mode for consumers whose charter forbids edits. Use when any task, todo, or user request reaches completion, before reporting work complete, after implementation finishes, or when the user asks to simplify, clean up, or review completed changes.
 ---
 
 # Simplify and Review Loop
@@ -24,6 +24,17 @@ After implementation ends and tests pass (where tests exist), implementations MU
 2. **Review Pass (bug hunt):** review for correctness bugs, logic errors, missing error handling, edge cases, and security issues. Use `/code-review` where provided, otherwise equivalent manual review. Fix every confirmed finding.
 
 A "fix" is any change applied during the iteration, from either pass.
+
+---
+
+## Analysis-Only Mode
+
+Consumers whose charter forbids edits (a reviewer agent with edit denied, for example) MUST run the loop in Analysis-Only Mode instead of the fix-applying loop. The mode executes both passes of The Loop in order and reports the results without changing anything:
+
+1. **Simplify Pass:** every accepted improvement is reported as a finding instead of applied.
+2. **Review Pass:** every confirmed finding is reported instead of fixed.
+
+In this mode the executor MUST NOT apply fixes and MUST NOT run tests. Every finding MUST be reported with its file and line locations so the consumer of the report can dispatch the fixes. Because the mode produces no fixes, it converges after one complete iteration: the fix-driven repetition in Loop Control cannot trigger, and Final Verification of intended behavior remains the duty of whoever holds the edit charter. Executors running the normal fix-applying loop are unaffected: Analysis-Only Mode is a separate path selected by charter, and The Loop's semantics are unchanged.
 
 ---
 
