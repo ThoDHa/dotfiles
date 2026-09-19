@@ -153,6 +153,8 @@ t release "$f_tr" >/dev/null
 [[ ! -f "$f_tr.claim" ]] && ok "sidecar removed on release" || bad "sidecar removed on release"
 owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
+assert_eq "release leaves the Owner field present and empty" "1" \
+	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
 
 echo "== blocked lane =="
 t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
