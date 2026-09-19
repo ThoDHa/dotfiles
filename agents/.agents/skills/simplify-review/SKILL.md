@@ -31,8 +31,8 @@ A "fix" is any change applied during the iteration, from either pass.
 
 Consumers whose charter forbids edits (a reviewer agent with edit denied, for example) MUST run the loop in Analysis-Only Mode instead of the fix-applying loop. The mode executes both passes of The Loop in order and reports the results without changing anything:
 
-1. **Simplify Pass:** performed exactly as defined in The Loop, with every accepted improvement reported as a finding instead of applied.
-2. **Review Pass:** performed exactly as defined in The Loop, with every confirmed finding reported instead of fixed.
+1. **Simplify Pass:** every accepted improvement is reported as a finding instead of applied.
+2. **Review Pass:** every confirmed finding is reported instead of fixed.
 
 In this mode the executor MUST NOT apply fixes and MUST NOT run tests. Every finding MUST be reported with its file and line locations so the consumer of the report can dispatch the fixes. Because the mode produces no fixes, it converges after one complete iteration: the fix-driven repetition in Loop Control cannot trigger, and Final Verification of intended behavior remains the duty of whoever holds the edit charter. Executors running the normal fix-applying loop are unaffected: Analysis-Only Mode is a separate path selected by charter, and The Loop's semantics are unchanged.
 
