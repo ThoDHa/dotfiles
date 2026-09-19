@@ -39,7 +39,7 @@ readonly STATUS_REASON_KEY="Status Reason"
 # refuses sections outside it; the template's planning sections live
 # between Success Criteria and Work Log, which is exactly the slot the
 # tasks-new scaffold omits.
-readonly TEMPLATE_SECTION_ORDER="Table of Contents|Objective|Success Criteria|Technical Approach|Risk Assessment|Testing Strategy|TDD Workflow|Task Breakdown|Work Log|Execution Log"
+readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Work Log" "Execution Log")
 readonly TEMPLATE_SECTION_LEVEL=2
 
 readonly DEFAULT_PRIORITY="Medium"
@@ -452,8 +452,7 @@ section_exists() { section_level "$1" "$2" >/dev/null; }
 # unknown and are refused.
 can_create_section() {
 	local candidate
-	IFS='|' read -ra template_sections <<<"$TEMPLATE_SECTION_ORDER"
-	for candidate in "${template_sections[@]}"; do
+	for candidate in "${TEMPLATE_SECTIONS[@]}"; do
 		[[ "$candidate" == "$1" ]] && return 0
 	done
 	return 1
@@ -465,8 +464,7 @@ can_create_section() {
 # belongs at the end of the file).
 canonical_section_anchor() {
 	local file="$1" section="$2" candidate after=0
-	IFS='|' read -ra template_sections <<<"$TEMPLATE_SECTION_ORDER"
-	for candidate in "${template_sections[@]}"; do
+	for candidate in "${TEMPLATE_SECTIONS[@]}"; do
 		if ((after == 0)); then
 			[[ "$candidate" == "$section" ]] && after=1
 			continue
@@ -815,6 +813,12 @@ cmd_set() {
 		pair="${args[$i]}"
 		key="${pair%%=*}"
 		value="${pair#*=}"
+		# Empty means delete everywhere except Updated: set exists to keep
+		# that field fresh, the dashboard depends on it, so an emptied
+		# Updated= pair is a refresh request, never a deletion.
+		if [[ "$key" == "Updated" && -z "$value" ]]; then
+			value="$(now)"
+		fi
 		set_header_field "$file" "$key" "$value"
 		[[ "$key" == "Updated" ]] && touched_updated=1
 	done
@@ -1094,7 +1098,10 @@ cmd_edit() {
 	local sec_level created=0
 	if ! sec_level="$(section_level "$file" "$section")"; then
 		can_create_section "$section" || die "edit: unknown section: $section"
-		[[ -n "$content" ]] || die "edit: unknown section: $section"
+		# Creation without content would write a bare heading: refuse with
+		# the actionable message instead of silently scaffolding.
+		[[ -n "$content" ]] \
+			|| die "edit: refusing to create section '$section' with an empty body (supply content)"
 		created=1
 		sec_level="$TEMPLATE_SECTION_LEVEL"
 	fi

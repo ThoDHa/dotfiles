@@ -349,6 +349,12 @@ assert_not_contains "deleting an absent reason field stays absent" "$(kv_hdr)" "
 assert_not_contains "deleting an absent reason inserts no empty duplicate" "$(kv_hdr)" "**StatusReason:**"
 assert_eq "deleting an absent field leaves one Updated line" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$f_kv")"
+t set "$f_kv" Updated="2020-01-01 00:00" >/dev/null
+t set "$f_kv" Updated= >/dev/null
+kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
+[[ "$kv_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "an emptied Updated= pair refreshes instead of deleting" \
+	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
 
 echo "== malformed header resilience =="
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"
