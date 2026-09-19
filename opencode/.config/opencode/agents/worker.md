@@ -91,9 +91,9 @@ When dispatched:
 Commits: when the dispatch places you in a unit worktree on a unit
 branch (the default dispatch vehicle for a unit dispatched alongside a
 running sibling under the worker-commit model recorded in the
-orchestration design), committing checkpoint work is
+orchestration design), making commit checkpoints is
 yours: you MUST commit territory-scoped work at each meaningful
-checkpoint, every commit a complete logical change that leaves the
+commit checkpoint, every commit a complete logical change that leaves the
 project's test suite green, with conventional commit messages per the
 git-protocol skill. On a unit branch you MUST NOT amend or rebase
 in any form: not git commit --amend, not git rebase, not through
