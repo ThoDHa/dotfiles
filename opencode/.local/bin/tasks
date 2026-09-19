@@ -33,6 +33,15 @@ readonly STATUS_COMPLETED="Completed"
 # and every other misspelling via the canonical-key whitelist.
 readonly STATUS_REASON_KEY="Status Reason"
 
+# The sections the task-files skill's Task File Template defines, in the
+# order they must appear. tasks edit creates a missing section from this
+# list at its canonical slot (before its first present successor) and
+# refuses sections outside it; the template's planning sections live
+# between Success Criteria and Work Log, which is exactly the slot the
+# tasks-new scaffold omits.
+readonly TEMPLATE_SECTION_ORDER="Table of Contents|Objective|Success Criteria|Technical Approach|Risk Assessment|Testing Strategy|TDD Workflow|Task Breakdown|Work Log|Execution Log"
+readonly TEMPLATE_SECTION_LEVEL=2
+
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly DEFAULT_FROM="Manager"
@@ -437,6 +446,91 @@ section_level() {
 # at level 2 or deeper. A thin wrapper over section_level for callers that
 # only need the existence bit.
 section_exists() { section_level "$1" "$2" >/dev/null; }
+
+# Report whether the named section is one the task-file template defines,
+# and so may be created when absent. Sections outside the template stay
+# unknown and are refused.
+can_create_section() {
+	local candidate
+	IFS='|' read -ra template_sections <<<"$TEMPLATE_SECTION_ORDER"
+	for candidate in "${template_sections[@]}"; do
+		[[ "$candidate" == "$1" ]] && return 0
+	done
+	return 1
+}
+
+# Print the first section of the canonical template order that comes after
+# the given section and exists in the file: the anchor the new section is
+# inserted before. Prints nothing when no successor exists (the new section
+# belongs at the end of the file).
+canonical_section_anchor() {
+	local file="$1" section="$2" candidate after=0
+	IFS='|' read -ra template_sections <<<"$TEMPLATE_SECTION_ORDER"
+	for candidate in "${template_sections[@]}"; do
+		if ((after == 0)); then
+			[[ "$candidate" == "$section" ]] && after=1
+			continue
+		fi
+		if section_exists "$file" "$candidate"; then
+			printf '%s' "$candidate"
+			return 0
+		fi
+	done
+	return 0
+}
+
+# Insert a section heading and its body at the named anchor heading, or at
+# end of file when the anchor is empty, in one atomic rewrite: output is
+# staged into a temp file and a single mv commits it, so a failure mid-pass
+# leaves the original file untouched. Blank lines separate the new section
+# from the surrounding content, keeping the canonical heading/body layout.
+# The anchor must exist when non-empty; a missing anchor fails the write
+# instead of silently appending. Section name, body, and mode travel via
+# ENVIRON (not awk -v) so backslashes in user text survive verbatim.
+insert_section_body() {
+	local file="$1" section="$2" body="$3" anchor="$4"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	NEW_SECTION="$section" NEW_BODY="$body" ANCHOR="$anchor" awk '
+		function heading_level(    h) {
+			HTEXT = ""
+			if (substr($0, 1, 1) != "#") return 0
+			h = 0
+			while (substr($0, h + 1, 1) == "#") h++
+			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
+			HTEXT = substr($0, h + 2)
+			sub(/[ \t\r]+$/, "", HTEXT)
+			return h
+		}
+		function emit_section() {
+			if (!prevblank) print ""
+			print "## " section
+			print ""
+			printf "%s", body
+			if (body != "") print ""
+			inserted = 1
+		}
+		BEGIN {
+			section = ENVIRON["NEW_SECTION"]; body = ENVIRON["NEW_BODY"]
+			anchor = ENVIRON["ANCHOR"]; atend = anchor == ""
+			inserted = 0; prevblank = 1
+		}
+		{
+			if (!inserted && !atend) {
+				level = heading_level()
+				if (level >= 2 && HTEXT == anchor) {
+					emit_section()
+				}
+			}
+			print
+			prevblank = ($0 == "")
+		}
+		END {
+			if (atend && !inserted) emit_section()
+			if (!inserted) exit 1
+		}
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
 
 # Replace the body of a named section, or append to it, in one atomic
 # rewrite: output is staged into a temp file and a single mv commits it, so
@@ -991,10 +1085,19 @@ cmd_edit() {
 	# Section existence is checked read-only under the lock, so every path
 	# (including the --append empty-input no-op) refuses an unknown section
 	# before anything is written, and a later mktemp or awk write failure
-	# reports as an update failure instead of a lookup miss.
-	local sec_level
-	sec_level="$(section_level "$file" "$section")" \
-		|| die "edit: unknown section: $section"
+	# reports as an update failure instead of a lookup miss. A missing
+	# section the template defines is created instead of refused (the
+	# planning pass must never need a hand edit for a new section); anything
+	# outside the template stays unknown. Creation needs a non-empty body:
+	# an empty --append creates nothing, so it refuses like any unknown
+	# section.
+	local sec_level created=0
+	if ! sec_level="$(section_level "$file" "$section")"; then
+		can_create_section "$section" || die "edit: unknown section: $section"
+		[[ -n "$content" ]] || die "edit: unknown section: $section"
+		created=1
+		sec_level="$TEMPLATE_SECTION_LEVEL"
+	fi
 
 	# Heading guard, level-aware: refuse heading lines at the target
 	# section's level or above; permit strictly deeper structure.
@@ -1007,8 +1110,13 @@ cmd_edit() {
 	done <<<"$content"
 
 	# --append with empty input is a no-op: skip the rewrite, keep the
-	# uniform success bookkeeping (Updated refresh plus render).
-	if ((append == 0)) || [[ -n "$content" ]]; then
+	# uniform success bookkeeping (Updated refresh plus render). A created
+	# section always has a body, so it never takes this branch.
+	if ((created == 1)); then
+		insert_section_body "$file" "$section" "$content" \
+			"$(canonical_section_anchor "$file" "$section")" \
+			|| die "edit: failed to update $(basename "$file")"
+	elif ((append == 0)) || [[ -n "$content" ]]; then
 		replace_section_body "$file" "$section" "$content" "$append" \
 			|| die "edit: failed to update $(basename "$file")"
 	fi
