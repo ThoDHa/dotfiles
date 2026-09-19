@@ -155,7 +155,7 @@ owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
 
 echo "== blocked lane =="
-t set "$f_tr" Status=Blocked >/dev/null
+t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
 blocked_lane="$(awk '/^## Blocked\/Cancelled/{f=1} /^## Completed/{f=0} f' <"$DASH")"
 assert_contains "blocked task appears in Blocked/Cancelled lane" "$blocked_lane" "Add Rate Limiting"
 assert_contains "blocked row carries its Created timestamp" "$blocked_lane" "$tr_created"
@@ -238,7 +238,7 @@ f_esc2="$(t new --id=ESC-2 --name "Long Form Target")"
 [[ -f "$f_esc2" ]] && ok "long and space forms mix in one invocation" || bad "long and space forms mix in one invocation"
 t render --dir="$escdir" >/dev/null
 assert_contains "render --dir= rebuilds the requested board" "$(cat "$escdir/dashboard.md")" "--force"
-t set --dir="$escdir" "$(basename "$f_esc1")" Status=Blocked >/dev/null
+t set --dir="$escdir" "$(basename "$f_esc1")" Status=Blocked "Status Reason=long form probe" >/dev/null
 assert_contains "set --dir= applies to the requested board" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_esc1")" "Blocked"
 t claim --dir="$escdir" "$(basename "$f_esc1")" --owner=sess-longform >/dev/null
 assert_contains "claim --owner= writes the owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_esc1")" "sess-longform"
@@ -303,8 +303,52 @@ refuse "set rejects an unknown status" set "$f_cs" Status=Bogus
 assert_contains "rejected status leaves the file untouched" \
 	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cs")" "Triage"
 refuse "new rejects an unknown status" new --id API-5 --name "Bogus Status Task" --status Bogus
-if t set "$f_cs" Status=Blocked >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
+if t set "$f_cs" Status=Blocked "Status Reason=enum probe" >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
 t set "$f_cs" Status=Triage >/dev/null
+
+echo "== set: unknown header keys are rejected before any write =="
+f_kv="$(t new --id SET-1 --name "Set Validation Target")"
+kv_hdr() { awk '/^## /{exit} {print}' "$f_kv"; }
+kv_before="$(cat "$f_kv")"
+kv_err="$(t set "$f_kv" "StatusReason=blocked for probe" 2>&1 >/dev/null || true)"
+assert_contains "set rejects the no-space Status Reason variant" "$kv_err" "unknown header key: StatusReason"
+assert_contains "key refusal names the canonical fields" "$kv_err" "Status Reason"
+refuse "set rejects an unknown key" set "$f_kv" Bogus=1
+refuse "set rejects an empty key" set "$f_kv" "=value"
+refuse "set validates every pair before writing" set "$f_kv" Priority=High Bogus=1
+assert_not_contains "all-or-nothing refusal applies no valid pair" "$(kv_hdr)" "**Priority:** High"
+assert_eq "rejected sets leave the file byte-identical" "$kv_before" "$(cat "$f_kv")"
+assert_eq "rejected sets leave no temp file behind" "" \
+	"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_kv")." || true)"
+
+echo "== set: empty value deletes the field; Status and Status Reason are coupled =="
+t set "$f_kv" Status=Blocked "Status Reason=blocked for probe" >/dev/null
+assert_contains "spaced Status Reason key writes the field" "$(kv_hdr)" "**Status Reason:** blocked for probe"
+t set "$f_kv" Status=Ready "Status Reason=" >/dev/null
+assert_not_contains "empty value deletes the stale reason" "$(kv_hdr)" "**Status Reason:**"
+assert_not_contains "the no-space variant never appears" "$(kv_hdr)" "**StatusReason:**"
+assert_contains "unblocking lands the status" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_kv")" "Ready"
+t set "$f_kv" Status=Blocked "Status Reason=second block" >/dev/null
+t set "$f_kv" Status=Ready >/dev/null
+assert_not_contains "leaving Blocked without a reason pair drops it" "$(kv_hdr)" "**Status Reason:**"
+kv_blocked_before="$(cat "$f_kv")"
+refuse "entering Blocked without a Status Reason is rejected" set "$f_kv" Status=Blocked
+assert_contains "Blocked refusal demands a reason" \
+	"$(t set "$f_kv" Status=Blocked 2>&1 >/dev/null || true)" "Status Reason"
+assert_eq "rejected Blocked transition leaves the file byte-identical" "$kv_blocked_before" "$(cat "$f_kv")"
+t set "$f_kv" Status=Blocked "Status Reason=work stopped on dependency" >/dev/null
+assert_contains "Blocked with a same-call reason lands both fields" "$(kv_hdr)" \
+	"**Status Reason:** work stopped on dependency"
+kv_reason_before="$(cat "$f_kv")"
+refuse "an explicit reason on a non-Blocked status is rejected" set "$f_kv" Status=Ready "Status Reason=still stuck"
+assert_eq "reason-status mismatch refusal leaves the file byte-identical" "$kv_reason_before" "$(cat "$f_kv")"
+t set "$f_kv" Status=Ready "Status Reason=" >/dev/null
+assert_not_contains "explicit empty reason while unblocking deletes it" "$(kv_hdr)" "**Status Reason:**"
+t set "$f_kv" "Status Reason=" >/dev/null
+assert_not_contains "deleting an absent reason field stays absent" "$(kv_hdr)" "**Status Reason:**"
+assert_not_contains "deleting an absent reason inserts no empty duplicate" "$(kv_hdr)" "**StatusReason:**"
+assert_eq "deleting an absent field leaves one Updated line" "1" \
+	"$(grep -c '^\*\*Updated:\*\*' "$f_kv")"
 
 echo "== malformed header resilience =="
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"

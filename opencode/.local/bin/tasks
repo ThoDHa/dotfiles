@@ -28,12 +28,18 @@ readonly STATUS_BLOCKED="Blocked"
 readonly STATUS_CANCELLED="Cancelled"
 readonly STATUS_COMPLETED="Completed"
 
+# The header contract ties Status Reason to Blocked/Cancelled only (the
+# task-files skill's Task File Template); set refuses the no-space variant
+# and every other misspelling via the canonical-key whitelist.
+readonly STATUS_REASON_KEY="Status Reason"
+
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly DEFAULT_FROM="Manager"
 readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
+readonly HEADER_FIELDS="Created, Status, Status Reason, Priority, Progress, Owner, Checkpoint Gating, Updated, Completed, Duration, Latest Update"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
@@ -52,6 +58,16 @@ valid_status() {
 # (spaces, slashes, glob characters) must never reach a path.
 valid_task_id() {
 	[[ "$1" =~ ^[A-Za-z]+(-[0-9]+)+$ ]]
+}
+
+# The header keys `tasks set` may write are exactly the fields the task-file
+# template defines (see the task-files skill's Task File Template). A near
+# miss like "StatusReason" must be rejected, not inserted as a new field.
+valid_header_key() {
+	case "$1" in
+		"Created"|"Status"|"Status Reason"|"Priority"|"Progress"|"Owner"|"Checkpoint Gating"|"Updated"|"Completed"|"Duration"|"Latest Update") return 0 ;;
+		*) return 1 ;;
+	esac
 }
 
 # Report slugs become filename segments under reports/; strict kebab-case
@@ -294,9 +310,15 @@ render() {
 # --- header mutation -------------------------------------------------------
 
 # Replace a "**Key:** value" line within the header, or insert it just before
-# the Table of Contents if absent. Only the header region is touched.
+# the Table of Contents if absent. An empty value removes the line instead:
+# a blank field is never written (a deleted reason must not survive as an
+# empty duplicate). Only the header region is touched.
 set_header_field() {
 	local file="$1" key="$2" value="$3"
+	if [[ -z "$value" ]]; then
+		delete_header_field "$file" "$key"
+		return
+	fi
 	local tmp; tmp="$(mktemp "$file.XXXXXX")"
 	awk -v key="$key" -v value="$value" '
 		BEGIN { inhdr = 1; done = 0 }
@@ -313,6 +335,24 @@ set_header_field() {
 		END { if (!done) print "**" key ":** " value }
 	' "$file" >"$tmp"
 	mv -f "$tmp" "$file"
+}
+
+# Remove a "**Key:** value" line from the header region (before the first
+# "## " heading). Deleting an absent key is a no-op. Atomic like
+# set_header_field: output is staged into a temp file and a single mv
+# commits it. Only the header region is touched.
+delete_header_field() {
+	local file="$1" key="$2"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	awk -v key="$key" '
+		BEGIN { inhdr = 1 }
+		inhdr && /^## / { inhdr = 0 }
+		{
+			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) next
+			print
+		}
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
 # Append a Work Log entry at the end of the "## Work Log" section and
@@ -612,16 +652,27 @@ cmd_set() {
 	done
 	((${#args[@]} >= 1)) || die "set: usage: tasks set <taskfile> Key=Value..."
 
-	# Validate every pair before touching the file, so a bad Status cannot
-	# leave a half-applied update behind.
-	local pair key value i
+	# Validate every pair before touching the file, so a bad key or a bad
+	# Status cannot leave a half-applied update behind. The Status/Status
+	# Reason coupling needs the file's current header, so it is enforced
+	# under the board lock below, still ahead of the first write.
+	local pair key value i new_status status_reason_value status_reason_given
+	new_status=""
+	status_reason_value=""
+	status_reason_given=0
 	for ((i = 1; i < ${#args[@]}; i++)); do
 		pair="${args[$i]}"
 		[[ "$pair" == *=* ]] || die "set: expected Key=Value, got: $pair"
 		key="${pair%%=*}"
 		value="${pair#*=}"
+		valid_header_key "$key" \
+			|| die "set: unknown header key: $key (valid fields: $HEADER_FIELDS)"
 		if [[ "$key" == "Status" ]]; then
 			valid_status "$value" || die "set: unknown status: $value (valid: $STATUS_VALUES)"
+			new_status="$value"
+		elif [[ "$key" == "$STATUS_REASON_KEY" ]]; then
+			status_reason_value="$value"
+			status_reason_given=1
 		fi
 	done
 
@@ -629,6 +680,36 @@ cmd_set() {
 	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	# Status Reason exists only under Blocked/Cancelled (the header contract
+	# omits it otherwise), so the effective transition target decides what
+	# this call must do with the reason. Landing on Blocked/Cancelled demands
+	# a non-empty reason in the same call or already on the file; landing
+	# anywhere else with a non-empty reason is a contradiction and is refused
+	# rather than silently leaving a stale field behind. A call without a
+	# Status pair keeps the file's current status as the target, so clearing
+	# the reason on a Blocked task is refused instead of unexplained.
+	local target_status current_reason
+	if [[ -n "$new_status" ]]; then
+		target_status="$new_status"
+	else
+		target_status="$(header_field "Status" < <(header_of <"$file"))"
+	fi
+	current_reason="$(header_field "$STATUS_REASON_KEY" < <(header_of <"$file"))"
+	if [[ "$target_status" == "$STATUS_BLOCKED" || "$target_status" == "$STATUS_CANCELLED" ]]; then
+		if ((status_reason_given == 0)); then
+			[[ -n "$current_reason" ]] \
+				|| die "set: entering $target_status requires a $STATUS_REASON_KEY (why is this task blocked?)"
+		else
+			[[ -n "$status_reason_value" ]] \
+				|| die "set: entering $target_status requires a non-empty $STATUS_REASON_KEY (supply one or drop the pair)"
+		fi
+	else
+		if ((status_reason_given == 1)); then
+			[[ -z "$status_reason_value" ]] \
+				|| die "set: $STATUS_REASON_KEY applies only under $STATUS_BLOCKED/$STATUS_CANCELLED (clear it with ${STATUS_REASON_KEY}= or keep the task $STATUS_BLOCKED)"
+		fi
+	fi
 
 	local touched_updated=0
 	for ((i = 1; i < ${#args[@]}; i++)); do
@@ -638,6 +719,14 @@ cmd_set() {
 		set_header_field "$file" "$key" "$value"
 		[[ "$key" == "Updated" ]] && touched_updated=1
 	done
+	# Leaving Blocked/Cancelled drops the reason with the transition (the
+	# header contract omits it under any other status), unless this call
+	# already manages the pair explicitly. Nothing to drop on a task that
+	# never carried one, so the file is not rewritten for nothing.
+	if [[ "$target_status" != "$STATUS_BLOCKED" && "$target_status" != "$STATUS_CANCELLED" ]] \
+		&& ((status_reason_given == 0)) && [[ -n "$current_reason" ]]; then
+		delete_header_field "$file" "$STATUS_REASON_KEY"
+	fi
 	((touched_updated == 0)) && set_header_field "$file" "Updated" "$(now)"
 	render_unlocked "$tasks_dir"
 }
