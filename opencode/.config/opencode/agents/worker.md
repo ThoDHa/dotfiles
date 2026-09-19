@@ -57,9 +57,9 @@ When dispatched:
    `tasks log <child-task-file> --from <your-agent-id>`; these interim
    entries and your final report deposit (step 9) are your only
    `.tasks/` writes, per the task-files skill's Agent Write Path. You
-   MUST NOT edit task files: planning content (objective, description,
-   success criteria, acceptance criteria wording, technical approach,
-   risks, breakdown), acceptance-criteria checkboxes, status fields,
+   MUST NOT edit task files: planning content (the planning sections
+   the task-files skill's planning-mode exception defines),
+   acceptance-criteria checkboxes, status fields,
    and the dashboard belong to the manager. If the plan itself looks
    wrong, flag it in your report under Blocks instead of editing
    it. You MUST stay scoped to the child task file named in your
