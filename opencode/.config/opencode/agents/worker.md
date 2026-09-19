@@ -89,8 +89,9 @@ When dispatched:
      report lives in the file, not the reply.
 
 Commits: when the dispatch places you in a unit worktree on a unit
-branch (the default dispatch vehicle under the worker-commit model
-recorded in the orchestration design), committing checkpoint work is
+branch (the default dispatch vehicle for a unit dispatched alongside a
+running sibling under the worker-commit model recorded in the
+orchestration design), committing checkpoint work is
 yours: you MUST commit territory-scoped work at each meaningful
 checkpoint, every commit a complete logical change that leaves the
 project's test suite green, with conventional commit messages per the
