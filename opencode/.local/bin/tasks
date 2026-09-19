@@ -364,6 +364,34 @@ delete_header_field() {
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
+# Write a bare "**Key:**" line (no value, no trailing space) into the
+# header, replacing any existing "**Key:** ..." line in place, or inserting
+# the field before the Table of Contents when absent. Unlike
+# set_header_field's empty-value branch (which deletes), this keeps the
+# field present: the template header carries **Owner:** even when no claim
+# is held, so clearing the owner must blank the value, not remove the
+# scaffolded line. Atomic like its siblings; only the header region is
+# touched.
+blank_header_field() {
+	local file="$1" key="$2"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	awk -v key="$key" '
+		BEGIN { inhdr = 1; done = 0 }
+		inhdr && /^## / {
+			if (!done) { print "**" key ":**"; done = 1 }
+			inhdr = 0
+		}
+		{
+			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
+				print "**" key ":**"; done = 1; next
+			}
+			print
+		}
+		END { if (!done) print "**" key ":**" }
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
 # Append a Work Log entry at the end of the "## Work Log" section and
 # refresh the Updated/Latest Update header fields in one atomic rewrite:
 # output is staged into a temp file and a single mv commits it, so a
@@ -796,10 +824,10 @@ cmd_set() {
 	if [[ "$target_status" == "$STATUS_BLOCKED" || "$target_status" == "$STATUS_CANCELLED" ]]; then
 		if ((status_reason_given == 0)); then
 			[[ -n "$current_reason" ]] \
-				|| die "set: entering $target_status requires a $STATUS_REASON_KEY (why is this task blocked?)"
+				|| die "set: status $target_status requires a $STATUS_REASON_KEY (why is this task blocked?)"
 		else
 			[[ -n "$status_reason_value" ]] \
-				|| die "set: entering $target_status requires a non-empty $STATUS_REASON_KEY (supply one or drop the pair)"
+				|| die "set: status $target_status requires a non-empty $STATUS_REASON_KEY (supply one or drop the pair)"
 		fi
 	else
 		if ((status_reason_given == 1)); then
@@ -883,7 +911,7 @@ cmd_release() {
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	rm -f "$file$CLAIM_SUFFIX"
-	set_header_field "$file" "Owner" ""
+	blank_header_field "$file" "Owner"
 	set_header_field "$file" "Updated" "$(now)"
 	render_unlocked "$tasks_dir"
 	printf 'released %s\n' "$(basename "$file")"
