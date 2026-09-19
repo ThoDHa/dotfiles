@@ -135,7 +135,7 @@ The manager MUST NOT fabricate an answer to a Significant question to avoid inte
 **Escalation.** Surface deferred Significant questions when any occurs:
 
 - **Hard block**: the question now gates all remaining unblocked work; ask immediately
-- **Checkpoint**: a phase or batch of parallel work completes, or no unblocked work remains
+- **Checkpoint event**: a phase or batch of parallel work completes, or no unblocked work remains
 - **High rework risk**: continuing under a wrong assumption would waste substantial work, so escalate early
 - **User status request**: the user asks for status; include the open questions
 
