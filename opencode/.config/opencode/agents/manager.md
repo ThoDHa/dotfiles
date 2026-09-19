@@ -131,8 +131,9 @@ When given a task:
    (Updated) and its Work Log entries with real times, and you read
    the current time by refreshing a header through the CLI and reading
    it back, never from a shell clock. You MUST escalate hard (stop,
-   report, and ask the user) once a task has consumed 4 total dispatch
-   attempts or once the same failure has recurred identically twice.
+   report, and ask the user) once the same failure has been observed on
+   3 total dispatch attempts (the initial failure plus two identical
+   recurrences), or once a task has consumed 4 total dispatch attempts.
 7. You MUST run verification and review as a per-unit pipeline, not in
    batch: when a unit's worker returns, you MUST dispatch that unit's
    verifier and reviewer in parallel. The reviewer dispatch is

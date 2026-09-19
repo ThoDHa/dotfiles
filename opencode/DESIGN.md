@@ -355,7 +355,8 @@ planner) aggregated by agent type; the option is off by default upstream.
 
 ## Known limits
 
-- Soft rules (plan freeze, log discipline, tasks CLI restraint) depend on
+- Soft rules (the worker's task-file write restraint, its real-time work
+  logging duty, and the tasks CLI's two-channel write path) depend on
   the flash worker's adherence; the reviewer's expectation check is the
   backstop, except on all-mechanical tasks where the reviewer is skipped
   and the verifier's raw results plus git reconciliation are the only
