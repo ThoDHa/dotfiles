@@ -425,22 +425,11 @@ A child task file MUST be registered in the master index dashboard and move betw
 
 ### TDD Execution Protocol
 
-**Mandatory TDD Sequence:** When working on any task, implementations MUST follow:
-
-1. **Check Existing Tests:** run the suite to identify currently failing tests; document the baseline
-2. **Update Tests First:** modify or create tests reflecting expected behavior; they MUST fail before implementation; document changes in the Work Log
-3. **Verify Tests Fail:** confirm failures with the current implementation
-4. **Implement Solution:** write production code to make tests pass
-5. **Run Tests:** verify all pass
-6. **Refactor If Needed:** improve quality while maintaining coverage; document significant refactoring
-7. **Final Verification:** run tests again to ensure no regressions
-8. **Simplify and Review Loop:** run the loop below to convergence
-
-For tasks producing no testable behavior (documentation-only, configuration-only), steps 2 through 5 are vacuous; record this in the task's Testing Strategy line.
+**Mandatory TDD Sequence:** implementations MUST load the `coding-standards` rule's testing requirements, anchored by its Test Planning Requirement, and follow them for every task; tests reflecting expected behavior are written or updated first and verified failing before implementation begins. For tasks producing no testable behavior (documentation-only, configuration-only), the test-production steps are vacuous; record this in the task's Testing Strategy line.
 
 ### Simplify and Review Loop
 
-After tests pass, implementations MUST run the Simplify and Review Loop defined in the `simplify-review` skill to convergence before the task may be marked Completed. Load the skill for the pass structure, fix semantics, loop control, and convergence criteria. When the cap is reached without convergence, stop, document outstanding findings in the Work Log, and consult the user before marking Completed.
+After tests pass, implementations MUST run the Simplify and Review Loop defined in the `simplify-review` skill to convergence before the task may be marked Completed: load the skill for the pass structure, fix semantics, loop control, convergence criteria, and the cap behavior when convergence is not reached.
 
 **Each iteration MUST be recorded in the Work Log:**
 
