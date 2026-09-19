@@ -407,12 +407,12 @@ append_work_log_entry() {
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
-# Report whether the file carries a section heading matching the given name
-# at level 2 or deeper, reading the file without writing anything. Level-1
-# headings are the document title, not sections, and never match, so a
-# --section naming the title is refused instead of silently replacing
-# everything below it.
-section_exists() {
+# Print the heading level (2..6) of the first section heading matching the
+# given name, reading the file without writing anything, and exit non-zero
+# when no heading matches. Level-1 headings are the document title, not
+# sections, and never match, so a --section naming the title is reported
+# as unknown instead of silently replacing everything below it.
+section_level() {
 	SECTION="$2" awk '
 		function heading_level(    h) {
 			HTEXT = ""
@@ -427,11 +427,16 @@ section_exists() {
 		BEGIN { section = ENVIRON["SECTION"]; found = 0 }
 		{
 			level = heading_level()
-			if (level >= 2 && HTEXT == section) { found = 1; exit }
+			if (level >= 2 && HTEXT == section) { print level; found = 1; exit }
 		}
 		END { exit found ? 0 : 1 }
 	' "$1"
 }
+
+# Report whether the file carries a section heading matching the given name
+# at level 2 or deeper. A thin wrapper over section_level for callers that
+# only need the existence bit.
+section_exists() { section_level "$1" "$2" >/dev/null; }
 
 # Replace the body of a named section, or append to it, in one atomic
 # rewrite: output is staged into a temp file and a single mv commits it, so
@@ -969,17 +974,16 @@ cmd_edit() {
 	fi
 
 	# A replacement must never blank a section: an empty body is refused
-	# outright. Body lines shaped like markdown headings are refused too:
-	# sections are heading-delimited, so an unindented heading line would
-	# inject fake section boundaries into every later parser pass.
+	# outright. Whether a heading-shaped body line is refused depends on the
+	# target section's own level (checked under the lock below): sections
+	# are heading-delimited, so a line at the same level or higher would
+	# inject a fake section boundary into every later parser pass, while a
+	# strictly deeper heading is legal structure (### Decision Log inside
+	# ## Technical Approach, ### Task entries inside ## Task Breakdown).
 	if ((append == 0)); then
 		[[ -n "$content" ]] \
 			|| die "edit: refusing to replace section '$section' with an empty body (supply content or use --append)"
 	fi
-	local heading_re='^#{1,6} ' line
-	while IFS= read -r line; do
-		[[ "$line" =~ $heading_re ]] && die "edit: body lines must not begin with a markdown heading"
-	done <<<"$content"
 
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
@@ -988,7 +992,19 @@ cmd_edit() {
 	# (including the --append empty-input no-op) refuses an unknown section
 	# before anything is written, and a later mktemp or awk write failure
 	# reports as an update failure instead of a lookup miss.
-	section_exists "$file" "$section" || die "edit: unknown section: $section"
+	local sec_level
+	sec_level="$(section_level "$file" "$section")" \
+		|| die "edit: unknown section: $section"
+
+	# Heading guard, level-aware: refuse heading lines at the target
+	# section's level or above; permit strictly deeper structure.
+	local heading_line heading_re='^(#{1,6} )' line
+	while IFS= read -r line; do
+		[[ "$line" =~ $heading_re ]] || continue
+		heading_line="${line%% *}"
+		(( ${#heading_line} <= sec_level )) \
+			&& die "edit: body lines must not begin with a heading at or above the '$section' section's own level"
+	done <<<"$content"
 
 	# --append with empty input is a no-op: skip the rewrite, keep the
 	# uniform success bookkeeping (Updated refresh plus render).
