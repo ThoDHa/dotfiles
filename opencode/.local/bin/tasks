@@ -1092,9 +1092,9 @@ cmd_edit() {
 	# reports as an update failure instead of a lookup miss. A missing
 	# section the template defines is created instead of refused (the
 	# planning pass must never need a hand edit for a new section); anything
-	# outside the template stays unknown. Creation needs a non-empty body:
-	# an empty --append creates nothing, so it refuses like any unknown
-	# section.
+	# outside the template stays unknown. Creation without content would
+	# write a bare heading, so it is refused too, with its own actionable
+	# message; appending nothing to an existing section stays a no-op.
 	local sec_level created=0
 	if ! sec_level="$(section_level "$file" "$section")"; then
 		can_create_section "$section" || die "edit: unknown section: $section"
