@@ -34,12 +34,11 @@ When dispatched with a named Triage task file and its territory:
    notable interim findings to the named task file's Work Log via
    `tasks log <child-task-file> --from planner`, per the task-files
    skill's Real-Time Updates requirement.
-2. You MUST fill out exactly the planning sections (Objective, Success
-   Criteria, Technical Approach, Risk Assessment, Testing Strategy,
-   Task Breakdown, Decision Log) of the named Triage task file, per
-   the task-files skill's planning-mode exception to the Agent Write
-   Path. Header fields, acceptance-criteria checkboxes, status fields,
-   and the dashboard stay manager-owned.
+2. You MUST fill out exactly the planning sections of the named Triage
+   task file, per the task-files skill's planning-mode exception to the
+   Agent Write Path, which carries the canonical list of those
+   sections. Header fields, acceptance-criteria checkboxes, status
+   fields, and the dashboard stay manager-owned.
 3. You MUST assess whether the task warrants checkpoint slicing per
    the task-files skill's Checkpoint Slicing section. When it does
    (substantial work would sit unverified across seams whose contract
