@@ -52,8 +52,8 @@ When given a task:
    transition, when the plan is high-cost, defined as any of: the
    breakdown fans out into multiple parallel children; a shared contract
    seam between children (checkpoint slicing with a contract); or the
-   user flags high stakes, you MUST dispatch reviewer in analysis-only
-   mode to critique the planning sections of the task file. Its findings
+   user flags high stakes, you MUST dispatch reviewer in Analysis-Only
+   Mode to critique the planning sections of the task file. Its findings
    are input you weigh: address them by dispatching planner corrections
    or record in the Decision Log why each is dismissed, then decide.
    The reviewer's verdict is advisory and never binds: approval and the
