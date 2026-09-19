@@ -36,7 +36,7 @@ This follows, and does not replace, the Sequential/Parallel protocol prompt: a u
 | "1 agent", "limited resources" | Delegating (single) | Delegate to a single agent/ally at a time |
 | "multiple", "many", "no limit" | Delegating (parallel) | Coordinate multiple agents/allies |
 
-The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer via its permission map), which serves as the standing answer to the resource question.
+The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer, planner via its permission map), which serves as the standing answer to the resource question.
 
 ### Manager Mode (Solo)
 
