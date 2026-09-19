@@ -31,7 +31,7 @@ Task files MUST be created ONLY when:
 
 Casual summary requests ("summarize", "quick recap") do NOT trigger task file creation.
 
-Manager Mode activation is not a creation trigger: activating Manager Mode, explicitly or by choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt, triggers only the offer of task-file tracking per the [Large Task Offer](#large-task-offer) gate, never silent creation; task files are created only on the user's explicit confirmation.
+Manager Mode activation is not a creation trigger: activating Manager Mode, explicitly or by choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt, triggers only the offer of task-file tracking per the [Large Task Offer](#large-task-offer) gate, never silent creation, so an activation on a task below the gate's 4+ todo threshold promises no offer; task files are created only on the user's explicit confirmation.
 
 ### Creation Prohibition
 
@@ -425,7 +425,7 @@ A child task file MUST be registered in the master index dashboard and move betw
 
 ### TDD Execution Protocol
 
-**Mandatory TDD Sequence:** implementations MUST load the `coding-standards` rule's testing requirements, anchored by its Test Planning Requirement, and follow them for every task; tests reflecting expected behavior are written or updated first and verified failing before implementation begins. For tasks producing no testable behavior (documentation-only, configuration-only), the test-production steps are vacuous; record this in the task's Testing Strategy line.
+**Mandatory TDD Requirement:** implementations MUST load the `coding-standards` rule's testing requirements, anchored by its Test Planning Requirement, and follow them for every task; tests reflecting expected behavior are written or updated first and verified failing before implementation begins. For tasks producing no testable behavior (documentation-only, configuration-only), the test-production steps are vacuous; record this in the task's Testing Strategy line.
 
 ### Simplify and Review Loop
 
