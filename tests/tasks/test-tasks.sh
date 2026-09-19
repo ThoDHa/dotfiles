@@ -798,6 +798,76 @@ refuse "edit refuses an empty stdin replacement without a trace" edit "$f_ed" --
 assert_eq "refused edits leave Updated untouched" "$ed_updated_before" \
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
 
+echo "== edit: nested headings deeper than the section are accepted =="
+# The skill's template nests "### Decision Log" inside "## Technical
+# Approach" and "### Task PREFIX-N-N" entries inside "## Task Breakdown";
+# only headings at or above the target section's own level are boundary
+# injections and get refused. The template-shaped fixture carries the
+# sections a fresh tasks-new scaffold does not (P1 covers creating those).
+nested="$TASKS_DIR/current/20240101-1400-nested-headings.md"
+cat >"$nested" <<'EOF'
+# Task: Nested Heading Target
+
+**Status:** Triage
+**Updated:** 2024-01-01 14:00
+
+## Objective
+
+base objective
+
+## Technical Approach
+
+### Decision Log
+
+**Decision: seed decision** - seed body
+
+## Task Breakdown
+
+## Work Log
+
+## Execution Log
+
+- 2024-01-01 14:00 - Task file created
+EOF
+printf 'Strategy line\n\n### Decision Log\n\n**Decision: template nesting works** - entry body\n' | t edit "$nested" --section "Technical Approach" >/dev/null
+nested_ta="$(awk '/^## Technical Approach$/{f=1} /^## Task Breakdown$/{f=0} f' "$nested")"
+assert_contains "edit accepts ### Decision Log inside ## Technical Approach" "$nested_ta" "### Decision Log"
+assert_contains "nested decision body survives the write" "$nested_ta" "**Decision: template nesting works** - entry body"
+printf '### Task EDT-4-1: Child Unit\n\n#### Acceptance Criteria\n\n- [ ] nested acceptance item\n' | t edit "$nested" --section "Task Breakdown" >/dev/null
+nested_tb="$(awk '/^## Task Breakdown$/{f=1} /^## Work Log$/{f=0} f' "$nested")"
+assert_contains "edit accepts ### Task entries inside ## Task Breakdown" "$nested_tb" "### Task EDT-4-1: Child Unit"
+assert_contains "edit accepts #### headings inside a ### entry" "$nested_tb" "#### Acceptance Criteria"
+printf 'deeper append\n#### Progress Log\n\n- checkpoint\n' | t edit "$nested" --section "Technical Approach" --append >/dev/null
+nested_ap="$(awk '/^## Technical Approach$/{f=1} /^## Task Breakdown$/{f=0} f' "$nested")"
+assert_contains "append accepts deeper headings too" "$nested_ap" "#### Progress Log"
+assert_contains "append keeps the pre-existing nested content" "$nested_ap" "**Decision: template nesting works** - entry body"
+# Hash runs longer than six are not markdown headings and stay acceptable
+printf '####### seven hashes is not a heading\n' | t edit "$nested" --section "Objective" >/dev/null
+assert_contains "seven-hash lines stay acceptable in edit bodies" "$(cat "$nested")" "####### seven hashes is not a heading"
+nested_updated_after="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
+[[ "$nested_updated_after" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "nested-heading edits bump Updated" || bad "nested-heading edits bump Updated (got [$nested_updated_after])"
+
+echo "== edit: same-or-higher-level headings stay refused =="
+nested_before="$(cat "$nested")"
+printf 'fine text\n## Injected Sibling\nmore text\n' >"$ROOT/edit-sibling-heading.md"
+nested_sec_err="$(edit_stderr_of "$nested" --section "Technical Approach" "$ROOT/edit-sibling-heading.md")"
+refuse "edit rejects a same-level heading inside a section" edit "$nested" --section "Technical Approach" "$ROOT/edit-sibling-heading.md"
+assert_contains "same-level refusal names the hazard" "$nested_sec_err" "heading"
+printf 'fine text\n# Forged Document Title\nmore text\n' >"$ROOT/edit-title-heading.md"
+refuse "edit rejects a level-1 title line inside a section" edit "$nested" --section "Technical Approach" "$ROOT/edit-title-heading.md"
+refuse "append rejects a same-level heading too" edit "$nested" --section "Technical Approach" --append "$ROOT/edit-sibling-heading.md"
+deeptarget_err="$(printf '## Escape Attempt\n' | t edit "$nested" --section "Decision Log" 2>&1 >/dev/null || true)"
+refuse "edit rejects a same-level heading inside a subsection" edit "$nested" --section "Decision Log" "$ROOT/edit-sibling-heading.md"
+assert_contains "## inside a ### section is refused" "$deeptarget_err" "heading"
+assert_eq "same-or-higher refusals leave the file byte-identical" "$nested_before" "$(cat "$nested")"
+nested_upd_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
+refuse "refused nested edits leave no trace on Updated" edit "$nested" --section "Technical Approach" "$ROOT/edit-sibling-heading.md"
+assert_eq "refused nested edits keep Updated untouched" "$nested_upd_before" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
+rm -f "$nested"
+t render >/dev/null
+
 echo "== edit: write failure is not misreported as unknown section =="
 # Root is immune to mode bits, so the chmod cannot provoke the mktemp
 # failure and the assertions are skipped rather than run as no-ops.
