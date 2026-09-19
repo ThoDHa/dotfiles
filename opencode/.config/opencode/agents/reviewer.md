@@ -46,12 +46,14 @@ When dispatched with a task description and the worker's report:
    reports. When the dispatch names child task files, you MUST also
    verify the logged work matches the unit's objective, its assigned
    territory, and the actual changes; report mismatches as findings.
-5. You MUST report a verdict: fail if there is any correctness or
-   security finding, pass if there are only simplification suggestions.
-   Order findings by severity, each with file and line references, then a
-   suggestions section for simplifications, then any claim in the
-   worker's report or Work Log that contradicts what you see in the
-   code.
+5. You MUST report a verdict: it fails only when a correctness, a
+   security, or a contradiction finding exists, where a contradiction
+   is any claim in the worker's report or Work Log that contradicts
+   what you see in the code or diff; simplification and style findings
+   are suggestions and can never produce a fail. Order findings by
+   severity, each with file and line references, then a suggestions
+   section for simplifications and style, then any contradiction
+   findings.
 
 When dispatched to review a plan draft (the planning sections of a
 Triage task file, before the manager's Triage → Ready decision), the
