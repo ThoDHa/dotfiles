@@ -4,6 +4,11 @@
     "leader": "ctrl+w"
   },
   "plugin": [
-    "./plugin/lru-context.tui.tsx"
+    [
+      "./plugin/lru-context.tui.tsx",
+      {
+        "sidebarSubagents": true
+      }
+    ]
   ]
 }
