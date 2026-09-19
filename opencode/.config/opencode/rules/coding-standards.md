@@ -156,6 +156,8 @@ Implementations MUST ensure cleanup of file handles, database connections, netwo
 
 Implementations MUST prioritize correctness over simplicity: when a solution is both correct and simple it is optimal, and simple solutions that sacrifice correctness are not acceptable.
 
+### Simple Solution Documentation
+
 When a simple solution is chosen over a more comprehensive one for pragmatic reasons (time constraints, scope limitations), implementations MUST document that a simpler approach was taken, describe what the more comprehensive or correct solution would entail, and create a tracking item (issue, tracked TODO, or ticket) for the future improvement, keeping technical debt visible and actionable.
 
 ---
