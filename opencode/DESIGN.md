@@ -344,9 +344,12 @@ The LRU context plugin and its `/lru` sidebar panel live in their own
 repository, [opencode-lru-context](https://github.com/ThoDHa/opencode-lru-context):
 `make install` there symlinks the three plugin files into
 `~/.config/opencode/plugin/`, so the `plugin` array in opencode.json and the
-`tui` entry in tui.json resolve against the symlinked files unchanged, and
-the repository's DESIGN.md carries the full design note for the eviction
-pipeline, the tools, the metrics log, and the panel.
+`tui` entry in tui.json resolve against the symlinked files unchanged, and the
+repository's DESIGN.md carries the full design note for the eviction
+pipeline, the tools, the metrics log, and the panel. tui.json passes the TUI
+entry one option, `sidebarSubagents: true`, so the session sidebar's LRU
+group also lists the fleet's child sessions (worker, verifier, reviewer,
+planner) aggregated by agent type; the option is off by default upstream.
 
 ## Known limits
 
