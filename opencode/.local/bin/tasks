@@ -42,6 +42,24 @@ readonly STATUS_REASON_KEY="Status Reason"
 readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Work Log" "Execution Log")
 readonly TEMPLATE_SECTION_LEVEL=2
 
+# Shared awk function source: parse the current line's markdown heading
+# level (0 when the line is not a level-1..6 heading followed by a space),
+# setting HTEXT to the heading text with trailing whitespace stripped.
+# Concatenated ahead of the program body in the three heading-delimited
+# passes below (section_level, replace_section_body, insert_section_body),
+# so the heading parser exists exactly once.
+readonly AWK_HEADING_LEVEL='		function heading_level(    h) {
+			HTEXT = ""
+			if (substr($0, 1, 1) != "#") return 0
+			h = 0
+			while (substr($0, h + 1, 1) == "#") h++
+			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
+			HTEXT = substr($0, h + 2)
+			sub(/[ \t\r]+$/, "", HTEXT)
+			return h
+		}
+'
+
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly DEFAULT_FROM="Manager"
@@ -450,17 +468,7 @@ append_work_log_entry() {
 # sections, and never match, so a --section naming the title is reported
 # as unknown instead of silently replacing everything below it.
 section_level() {
-	SECTION="$2" awk '
-		function heading_level(    h) {
-			HTEXT = ""
-			if (substr($0, 1, 1) != "#") return 0
-			h = 0
-			while (substr($0, h + 1, 1) == "#") h++
-			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
-			HTEXT = substr($0, h + 2)
-			sub(/[ \t\r]+$/, "", HTEXT)
-			return h
-		}
+	SECTION="$2" awk "$AWK_HEADING_LEVEL"'
 		BEGIN { section = ENVIRON["SECTION"]; found = 0 }
 		{
 			level = heading_level()
@@ -516,17 +524,7 @@ canonical_section_anchor() {
 insert_section_body() {
 	local file="$1" section="$2" body="$3" anchor="$4"
 	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	NEW_SECTION="$section" NEW_BODY="$body" ANCHOR="$anchor" awk '
-		function heading_level(    h) {
-			HTEXT = ""
-			if (substr($0, 1, 1) != "#") return 0
-			h = 0
-			while (substr($0, h + 1, 1) == "#") h++
-			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
-			HTEXT = substr($0, h + 2)
-			sub(/[ \t\r]+$/, "", HTEXT)
-			return h
-		}
+	NEW_SECTION="$section" NEW_BODY="$body" ANCHOR="$anchor" awk "$AWK_HEADING_LEVEL"'
 		function emit_section() {
 			if (!prevblank) print ""
 			print "## " section
@@ -574,17 +572,7 @@ insert_section_body() {
 replace_section_body() {
 	local file="$1" section="$2" body="$3" append="$4"
 	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	SECTION="$section" EDIT_BODY="$body" EDIT_APPEND="$append" awk '
-		function heading_level(    h) {
-			HTEXT = ""
-			if (substr($0, 1, 1) != "#") return 0
-			h = 0
-			while (substr($0, h + 1, 1) == "#") h++
-			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
-			HTEXT = substr($0, h + 2)
-			sub(/[ \t\r]+$/, "", HTEXT)
-			return h
-		}
+	SECTION="$section" EDIT_BODY="$body" EDIT_APPEND="$append" awk "$AWK_HEADING_LEVEL"'
 		function flush_body(    i) {
 			while (nbuf > 0 && buf[nbuf] == "") nbuf--
 			for (i = 1; i <= nbuf; i++) print buf[i]
