@@ -27,12 +27,11 @@ Task files MUST be created ONLY when:
 
 - User explicitly requests task file creation or planning documentation
 - User requests in-depth documentation of work performed, findings, or decisions (e.g., "full report", "document your findings", "write up what you found")
-- User explicitly activates Manager Mode
 - User explicitly confirms task file tracking after being offered for a large task (4+ todos) per [Large Task Offer](#large-task-offer)
 
 Casual summary requests ("summarize", "quick recap") do NOT trigger task file creation.
 
-Choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt does NOT by itself authorize task file creation.
+Manager Mode activation is not a creation trigger: activating Manager Mode, explicitly or by choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt, triggers only the offer of task-file tracking per the [Large Task Offer](#large-task-offer) gate, never silent creation; task files are created only on the user's explicit confirmation.
 
 ### Creation Prohibition
 
