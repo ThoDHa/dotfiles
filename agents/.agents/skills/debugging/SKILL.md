@@ -62,7 +62,7 @@ Implementations MUST identify the root cause through evidence, where the root ca
 
 ## Escalation Requirement
 
-After 3 failed hypotheses (tested and disproven, not merely untried), implementations MUST stop and report: reproduction status, evidence gathered, each failed hypothesis with its disproof, and remaining theories. The user's direction then governs further investigation.
+After 3 failed hypotheses (tested and disproven, not merely untried), implementations MUST stop and report: reproduction status, evidence gathered, each failed hypothesis with its disproof, and remaining theories. The user's direction then governs further investigation. When the escalated work occupies a dispatch slot in a running fleet, the slot is freed on escalation and the task is handled per the delegation skill's Failure Semantics: parked with a Blocked status whose reason carries the escalation report as the failure summary and the attempt count, reported to the user without blocking the remaining work; parking does not auto-restart, and the user's direction above stays the gate on further investigation.
 
 Implementations MUST NOT continue past the escalation threshold without user direction.
 

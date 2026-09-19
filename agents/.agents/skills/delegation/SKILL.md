@@ -48,7 +48,7 @@ Solo persists until the user announces resources ("now you have 2 agents"), requ
 
 ### Delegation as Default
 
-The manager delegates as much work as its available agents can take: in Manager Mode (Delegating), direct execution is the exception, never a convenience, and manager capability never reduces the delegation duty, since a more capable manager dispatches richer, better-specified work rather than absorbing it. While a delegated worker is available and the work is delegable, implementations MUST dispatch it rather than do it. Implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than about 30 seconds. The sole carve-out is an orchestration design in force that allocates architecture duties to the manager directly, and that carve-out MUST be read narrowly: an allocated duty is executed directly only at coordination scale (scouting a dispatch, unblocking a worker, checking a unit's result), and once it grows into sustained work of its own it MUST be delegated. When uncertain whether to execute directly or delegate, implementations MUST delegate.
+The manager delegates as much work as its available agents can take: in Manager Mode (Delegating), direct execution is the exception, never a convenience, and manager capability never reduces the delegation duty, since a more capable manager dispatches richer, better-specified work rather than absorbing it. While a delegated worker is available and the work is delegable, implementations MUST dispatch it rather than do it. Implementations MUST delegate: file modifications and code writing, running commands/builds/tests, codebase exploration or analysis, and any task requiring more than 30 seconds. The sole carve-out is an orchestration design in force that allocates architecture duties to the manager directly, and that carve-out MUST be read narrowly: an allocated duty is executed directly only at coordination scale (scouting a dispatch, unblocking a worker, checking a unit's result), and once it grows into sustained work of its own it MUST be delegated. When uncertain whether to execute directly or delegate, implementations MUST delegate.
 
 ### Direct Execution Exceptions
 
@@ -67,7 +67,7 @@ Planning labor (exploration, analysis, drafting task documentation, proposing a 
 | **Allies** | Independent judgment, specialized skills, full capabilities | Any task of moderate complexity or above: exploration and reconnaissance, architecture review, complex implementation, anything requiring judgment |
 | **Agents** | No judgment, simple execution | Trivial bulk operations (renames, identical commands), simple parallel tasks requiring no decisions |
 
-Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally.
+Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally. The table scopes fleets that have allies: in a fleet whose members are all agents (for example a fixed permission-mapped opencode fleet of worker, verifier, reviewer, and planner), every member takes the table's agent-row semantics and the prefer-allies tie-break rule is inapplicable.
 
 ### Dispatched Agent Conduct
 
@@ -135,7 +135,7 @@ The manager MUST NOT fabricate an answer to a Significant question to avoid inte
 **Escalation.** Surface deferred Significant questions when any occurs:
 
 - **Hard block**: the question now gates all remaining unblocked work; ask immediately
-- **Checkpoint**: a phase or batch of parallel work completes, or no unblocked work remains
+- **Checkpoint event**: a phase or batch of parallel work completes, or no unblocked work remains
 - **High rework risk**: continuing under a wrong assumption would waste substantial work, so escalate early
 - **User status request**: the user asks for status; include the open questions
 
@@ -157,6 +157,8 @@ When a delegated agent fails to complete its task, it gets exactly one retry. Wh
 - Pure coordinators that cannot execute directly (for example, agents whose edit permissions deny implementation) MUST stop, report what was attempted and why it failed, and ask the user how to proceed.
 
 **Standing restart grant.** When the user has granted standing restart authorization, recorded in the orchestration design in force, a pure coordinator parks the failed task instead of stopping the whole effort: the task carries a Blocked status whose reason states the failure summary and the attempt count, reported to the user without blocking the remaining work, and the coordinator re-dispatches it per the design's checkpoint-event rule (restart consideration rides backfill and checkpoint events, oldest-cleared-first, never into an unchanged blocking condition, restart-eligible only after the design's backoff interval has elapsed since the task's last dispatch attempt, with hard escalation per the manager agent file's escalation bounds). The stop-report-ask path above remains the default whenever no such grant is recorded.
+
+The design's backoff interval is measured on wall-clock time taken from the board's own timestamps: the tasks CLI stamps task file headers (Updated) and Work Log entries with real times, and the coordinator reads the current time by refreshing a header through the CLI and reading it back, never from a shell clock.
 
 No failure is hidden or minimized, under either mode. Without a standing restart grant, no failure gets a third attempt; under a recorded grant, re-dispatches of a parked task follow the design's checkpoint-event rule within its escalation bounds. Implementations remain ultimately responsible.
 
