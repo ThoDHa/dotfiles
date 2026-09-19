@@ -868,6 +868,70 @@ assert_eq "refused nested edits keep Updated untouched" "$nested_upd_before" \
 rm -f "$nested"
 t render >/dev/null
 
+echo "== edit: creates missing template sections at their canonical position =="
+# The skill's planning pass needs Technical Approach, Risk Assessment,
+# Testing Strategy, TDD Workflow, and Task Breakdown on a freshly created
+# file; each must be creatable through edit at the template's slot, never
+# requiring a hand edit. Creating them in reverse order forces every
+# insertion to re-anchor, and the final layout must still be canonical.
+f_cr="$(t new --id EDT-5 --name "Section Creation Target")"
+t set "$f_cr" Updated="2020-01-01 00:00" >/dev/null
+printf -- '- [ ] child criterion\n' | t edit "$f_cr" --section "Task Breakdown" >/dev/null
+printf 'Red: repro tests first, then green\n' | t edit "$f_cr" --section "TDD Workflow" >/dev/null
+printf 'Unit tests through tests/tasks/test-tasks.sh\n' | t edit "$f_cr" --section "Testing Strategy" >/dev/null
+printf 'Risks: none beyond ordinary regression risk\n' | t edit "$f_cr" --section "Risk Assessment" >/dev/null
+printf 'Strategy: reverse-order creation probe\n' | t edit "$f_cr" --section "Technical Approach" >/dev/null
+cr_order_ok=1
+cr_prev=0
+for cr_sec in "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Work Log"; do
+	cr_line="$(grep -n "^## $cr_sec\$" "$f_cr" | cut -d: -f1)"
+	if [[ -z "$cr_line" || "$cr_line" -le "$cr_prev" ]]; then cr_order_ok=0; break; fi
+	cr_prev=$cr_line
+done
+[[ "$cr_order_ok" == 1 ]] \
+	&& ok "template sections land in canonical order" || bad "template sections land in canonical order"
+cr_sc_line="$(grep -n '^## Success Criteria$' "$f_cr" | cut -d: -f1)"
+cr_ta_line="$(grep -n '^## Technical Approach$' "$f_cr" | cut -d: -f1)"
+cr_wl_line="$(grep -n '^## Work Log$' "$f_cr" | cut -d: -f1)"
+[[ "$cr_sc_line" -lt "$cr_ta_line" && "$cr_ta_line" -lt "$cr_wl_line" ]] \
+	&& ok "created Technical Approach sits after Success Criteria and before Work Log" \
+	|| bad "created Technical Approach sits after Success Criteria and before Work Log"
+assert_contains "created section carries the supplied body" "$(cat "$f_cr")" "Risks: none beyond ordinary regression risk"
+cr_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cr")"
+[[ "$cr_updated" == "$(date '+%Y-%m-%d')"* ]] \
+	&& ok "section creation bumps Updated" || bad "section creation bumps Updated (got [$cr_updated])"
+assert_contains "dashboard reflects the creation bump" "$(grep -F 'Section Creation Target' "$DASH")" "$cr_updated"
+# Append onto a just-created section appends, not replaces
+printf 'appended planning line\n' | t edit "$f_cr" --section "Risk Assessment" --append >/dev/null
+cr_ra="$(awk '/^## Risk Assessment$/{f=1} /^## Testing Strategy$/{f=0} f' "$f_cr")"
+assert_contains "append works on a created section" "$cr_ra" "appended planning line"
+assert_contains "append keeps the created body" "$cr_ra" "Risks: none beyond ordinary regression risk"
+# Creation accepts nested headings per the level rule
+printf '### Decision Log\n\n**Decision: nested on creation** - body\n' | t edit "$f_cr" --section "Task Breakdown" --append >/dev/null
+assert_contains "creation accepts nested headings per the level rule" "$(cat "$f_cr")" "**Decision: nested on creation** - body"
+# Unknown-to-template headings still refuse
+cr_before="$(cat "$f_cr")"
+cr_unknown_err="$(edit_stderr_of "$f_cr" --section "Made Up Section" "$ROOT/edit-body.md")"
+refuse "edit still refuses an unknown-to-template section" edit "$f_cr" --section "Made Up Section" "$ROOT/edit-body.md"
+assert_contains "unknown-to-template refusal names the section" "$cr_unknown_err" "unknown section"
+assert_eq "refused creation leaves the file byte-identical" "$cr_before" "$(cat "$f_cr")"
+# Creation is all-or-nothing on write failure: a whitelisted-but-absent
+# section passes the check, so the provoked mktemp failure must leave the
+# file untouched. Under root the chmod cannot provoke mktemp, so the
+# assertions are skipped rather than run as no-ops.
+if ((EUID != 0)); then
+	f_cr2="$(t new --id EDT-6 --name "Creation Failure Target")"
+	cr2_perm="$(stat -c %a "$TASKS_DIR/current")"
+	chmod 500 "$TASKS_DIR/current"
+	cr2_err="$(printf 'denied\n' | t edit "$f_cr2" --section "Risk Assessment" 2>&1 >/dev/null || true)"
+	chmod "$cr2_perm" "$TASKS_DIR/current"
+	assert_contains "creation write failure is reported explicitly" "$cr2_err" "failed to update"
+	assert_not_contains "failed creation inserts no section" "$(cat "$f_cr2")" "## Risk Assessment"
+	rm -f "$f_cr2"
+fi
+rm -f "$f_cr"
+t render >/dev/null
+
 echo "== edit: write failure is not misreported as unknown section =="
 # Root is immune to mode bits, so the chmod cannot provoke the mktemp
 # failure and the assertions are skipped rather than run as no-ops.
