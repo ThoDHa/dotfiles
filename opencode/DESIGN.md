@@ -289,9 +289,9 @@ unit dispatched alongside a running sibling, created before dispatch
 and torn down after integration; a lone unit with no sibling in
 flight may work in the main tree instead, and a parked unit's
 worktree stays the one teardown exception, persisting while the unit
-awaits its restart. Setups without the model reserve worktrees for same-file
-contention that would otherwise serialize independent work. In both
-regimes worktrees live inside the repo (disk-backed, no RAM cost),
+awaits its restart. Setups without the model reserve worktrees for
+same-file contention that would otherwise serialize independent work.
+In both regimes worktrees live inside the repo (disk-backed, no RAM cost),
 verified gitignored via `git check-ignore`
 before first creation, pruned (`git worktree prune`) before creation, and
 torn down completely after integration or reconciliation: worktree removed,
@@ -355,7 +355,8 @@ planner) aggregated by agent type; the option is off by default upstream.
 
 ## Known limits
 
-- Soft rules (plan freeze, log discipline, tasks CLI restraint) depend on
+- Soft rules (the worker's task-file write restraint, its real-time work
+  logging duty, and the tasks CLI's two-channel write path) depend on
   the flash worker's adherence; the reviewer's expectation check is the
   backstop, except on all-mechanical tasks where the reviewer is skipped
   and the verifier's raw results plus git reconciliation are the only

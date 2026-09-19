@@ -75,9 +75,9 @@ When dispatched:
      Template (the metadata block plus the Findings, Decisions, Blocks,
      and Next sections). Fold the base commit (step 2) and your
      verification claims into Findings, the commit status (the branch
-      and commit range when you worked a unit branch) into Decisions,
-      and anything left undone into Blocks, categorized per the
-      task-files skill's Report File Template Blocks section. Reply with a
+     and commit range when you worked a unit branch) into Decisions,
+     and anything left undone into Blocks (per the task-files skill's
+     Report File Template Blocks section). Reply with a
      brief summary that points at the deposited report path.
    - Otherwise: write the full report to
      /tmp/opencode/reports/<unit-name>.md (create the directory if
