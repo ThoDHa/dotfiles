@@ -40,13 +40,20 @@ dotfiles/
 │       └── config.toml # -> ~/.config/isort/config.toml
 ├── opencode/           # OpenCode AI config
 │   └── .config/opencode/
+│       ├── agents/     # Agent definitions (manager and fleet)
 │       ├── opencode.json
-│       └── rules/      # RFC 2119 specification files
+│       ├── rules/      # RFC 2119 specification files
+│       └── tui.json
 ├── claudecode/         # Claude Code settings
 │   └── .claude/        # -> ~/.claude (stowed only when claude is installed)
 ├── agents/             # Shared agent skills (opencode, Claude Code, pi)
 │   └── .agents/skills/
+│       ├── browser-testing/SKILL.md
+│       ├── debugging/SKILL.md
 │       ├── delegation/SKILL.md
+│       ├── documentation-standards/SKILL.md
+│       ├── git-protocol/SKILL.md
+│       ├── simplify-review/SKILL.md
 │       └── task-files/SKILL.md
 ├── bootstrap/          # Setup scripts (not stowed)
 │   ├── setup.sh        # Desktop (Debian/Ubuntu) bootstrap
