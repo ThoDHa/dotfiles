@@ -284,10 +284,12 @@ for this orchestration from that point.
 ## Worktree isolation
 
 Under the worker-commit model recorded here, a worktree under
-`.worktrees/` on a unit branch is the default dispatch vehicle, created
-before dispatch and torn down after integration; a parked unit's
-worktree is the one exception, persisting while the unit awaits its
-restart. Setups without the model reserve worktrees for same-file
+`.worktrees/` on a unit branch is the default dispatch vehicle for a
+unit dispatched alongside a running sibling, created before dispatch
+and torn down after integration; a lone unit with no sibling in
+flight may work in the main tree instead, and a parked unit's
+worktree stays the one teardown exception, persisting while the unit
+awaits its restart. Setups without the model reserve worktrees for same-file
 contention that would otherwise serialize independent work. In both
 regimes worktrees live inside the repo (disk-backed, no RAM cost),
 verified gitignored via `git check-ignore`
