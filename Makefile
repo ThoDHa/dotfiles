@@ -24,7 +24,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks check
+.PHONY: clean-stow test test-links test-rules test-tasks lint-corpus check
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -208,7 +208,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: test-links test-rules test-tasks
+test: lint-corpus test-links test-rules test-tasks
 	@echo ""
 	@echo "All tests passed!"
 
@@ -258,6 +258,11 @@ else
 	@echo "  Skipping rules test (opencode not installed)"
 endif
 
+# Mechanical corpus lint: dashes, links, headings, INVENTORY sync, budgets
+lint-corpus:
+	@echo "Linting the corpus..."
+	@bash tests/corpus/lint-corpus.sh
+
 # Test the tasks board tool (render, atomic claim, lane placement)
 test-tasks:
 	@echo "Testing tasks board tool..."
@@ -289,8 +294,9 @@ help:
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (symlinks + rules + tasks)"
+	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks)"
 	@echo "  make check       - Alias for make test"
+	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
