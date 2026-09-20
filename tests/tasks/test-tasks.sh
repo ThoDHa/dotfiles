@@ -334,7 +334,7 @@ t set "$f_kv" Status=Blocked "Status Reason=second block" >/dev/null
 t set "$f_kv" Status=Ready >/dev/null
 assert_not_contains "leaving Blocked without a reason pair drops it" "$(kv_hdr)" "**Status Reason:**"
 kv_blocked_before="$(cat "$f_kv")"
-refuse "entering Blocked without a Status Reason is rejected" set "$f_kv" Status=Blocked
+refuse "Blocked without a Status Reason is rejected" set "$f_kv" Status=Blocked
 assert_contains "Blocked refusal demands a reason" \
 	"$(t set "$f_kv" Status=Blocked 2>&1 >/dev/null || true)" "Status Reason"
 assert_eq "rejected Blocked transition leaves the file byte-identical" "$kv_blocked_before" "$(cat "$f_kv")"
@@ -344,7 +344,7 @@ assert_contains "Blocked with a same-call reason lands both fields" "$(kv_hdr)" 
 t set "$f_kv" Status=Blocked >/dev/null
 assert_contains "re-Blocking with the reason already on file keeps it" "$(kv_hdr)" \
 	"**Status Reason:** work stopped on dependency"
-refuse "entering Blocked with an emptied reason pair is rejected" set "$f_kv" Status=Blocked "Status Reason="
+refuse "Blocked with an emptied reason pair is rejected" set "$f_kv" Status=Blocked "Status Reason="
 kv_reason_before="$(cat "$f_kv")"
 refuse "an explicit reason on a non-Blocked status is rejected" set "$f_kv" Status=Ready "Status Reason=still stuck"
 assert_eq "reason-status mismatch refusal leaves the file byte-identical" "$kv_reason_before" "$(cat "$f_kv")"
