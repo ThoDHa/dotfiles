@@ -342,24 +342,22 @@ render() {
 
 # --- header mutation -------------------------------------------------------
 
-# Replace a "**Key:** value" line within the header, or insert it at its
-# canonical template slot when absent: before the first present field that
-# canonically follows it in TEMPLATE_HEADER_FIELDS, or at end of header
-# when no successor exists (also the fallback for fields outside the
-# template order). When the key is present it is replaced in place; the
-# first occurrence wins and any duplicate key line is dropped rather than
-# rewritten. An empty value removes the line instead: a blank field is
-# never written (a deleted reason must not survive as an empty duplicate).
-# Only the header region is touched.
-set_header_field() {
-	local file="$1" key="$2" value="$3"
-	if [[ -z "$value" ]]; then
-		delete_header_field "$file" "$key"
-		return
-	fi
-	local tmp; tmp="$(mktemp "$file.XXXXXX")"
-	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" -v value="$value" '
-		function emit_field() { print "**" key ":** " value; done = 1 }
+# Rewrite the header region placing one "**Key:** ..." line: an existing
+# "**Key:** ..." line is replaced in place (first occurrence wins, any
+# duplicate key line is dropped), an absent one inserts at its canonical
+# template slot (before the first present field that canonically follows
+# the key in TEMPLATE_HEADER_FIELDS), and end of header is the fallback
+# when no successor exists (also covering fields outside the template
+# order). set_header_field and blank_header_field differ only in the line
+# they write, so this carries their shared single-pass rewrite. Atomic:
+# output is staged into a temp file and a single mv commits it, so a
+# failure mid-pass leaves the original file untouched. Only the header
+# region is touched.
+write_header_field() {
+	local file="$1" key="$2" line="$3"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" -v line="$line" '
+		function emit_field() { print line; done = 1 }
 		BEGIN {
 			inhdr = 1; done = 0
 			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
@@ -381,8 +379,21 @@ set_header_field() {
 			print
 		}
 		END { if (!done) emit_field() }
-	' "$file" >"$tmp"
-	mv -f "$tmp" "$file"
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+# Replace a "**Key:** value" line within the header, or insert it at its
+# canonical template slot when absent (see write_header_field). An empty
+# value removes the line instead: a blank field is never written (a
+# deleted reason must not survive as an empty duplicate).
+set_header_field() {
+	local file="$1" key="$2" value="$3"
+	if [[ -z "$value" ]]; then
+		delete_header_field "$file" "$key"
+		return
+	fi
+	write_header_field "$file" "$key" "**$key:** $value"
 }
 
 # Remove a "**Key:** value" line from the header region (before the first
@@ -404,43 +415,13 @@ delete_header_field() {
 }
 
 # Write a bare "**Key:**" line (no value, no trailing space) into the
-# header, replacing any existing "**Key:** ..." line in place. When absent
-# the field inserts at its canonical template slot: before the first
-# present field that canonically follows it in TEMPLATE_HEADER_FIELDS, or
-# at end of header when no successor exists (also the fallback for fields
-# outside the template order). Unlike set_header_field's empty-value
-# branch (which deletes), this keeps the field present: the template
-# header carries **Owner:** even when no claim is held, so clearing the
-# owner must blank the value, not remove the scaffolded line. Atomic like
-# its siblings; only the header region is touched.
+# header (see write_header_field for the placement rules). Unlike
+# set_header_field's empty-value branch (which deletes), this keeps the
+# field present: the template header carries **Owner:** even when no claim
+# is held, so clearing the owner must blank the value, not remove the
+# scaffolded line.
 blank_header_field() {
-	local file="$1" key="$2"
-	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" '
-		function emit_field() { print "**" key ":**"; done = 1 }
-		BEGIN {
-			inhdr = 1; done = 0
-			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
-			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
-		}
-		inhdr && /^## / {
-			if (!done) emit_field()
-			inhdr = 0
-		}
-		{
-			if (inhdr && !done && match($0, /^\*\*[^*:]+:\*\*/)) {
-				field = substr($0, RSTART + 2, RLENGTH - 5)
-				if ((field in pos) && (key in pos) && pos[field] > pos[key]) emit_field()
-			}
-			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				if (!done) emit_field()
-				next
-			}
-			print
-		}
-		END { if (!done) emit_field() }
-	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
-	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+	write_header_field "$1" "$2" "**$2:**"
 }
 
 # Append a Work Log entry at the end of the "## Work Log" section and
