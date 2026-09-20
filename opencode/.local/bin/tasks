@@ -68,6 +68,12 @@ readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
 readonly HEADER_FIELDS="Created, Status, Status Reason, Priority, Progress, Owner, Checkpoint Gating, Updated, Completed, Duration, Latest Update"
 
+# The same fields as HEADER_FIELDS, machine-readable and in the canonical
+# order the new-task scaffold lays them out in: a re-inserted template
+# field lands before the first present field that canonically follows it,
+# so delete/re-insert cycles keep the header order stable.
+readonly -a TEMPLATE_HEADER_FIELDS=("Created" "Status" "$STATUS_REASON_KEY" "Priority" "Progress" "Owner" "Checkpoint Gating" "Updated" "Completed" "Duration" "Latest Update")
+
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 now() { date '+%Y-%m-%d %H:%M'; }
@@ -336,10 +342,15 @@ render() {
 
 # --- header mutation -------------------------------------------------------
 
-# Replace a "**Key:** value" line within the header, or insert it just before
-# the Table of Contents if absent. An empty value removes the line instead:
-# a blank field is never written (a deleted reason must not survive as an
-# empty duplicate). Only the header region is touched.
+# Replace a "**Key:** value" line within the header, or insert it at its
+# canonical template slot when absent: before the first present field that
+# canonically follows it in TEMPLATE_HEADER_FIELDS, or at end of header
+# when no successor exists (also the fallback for fields outside the
+# template order). When the key is present it is replaced in place; the
+# first occurrence wins and any duplicate key line is dropped rather than
+# rewritten. An empty value removes the line instead: a blank field is
+# never written (a deleted reason must not survive as an empty duplicate).
+# Only the header region is touched.
 set_header_field() {
 	local file="$1" key="$2" value="$3"
 	if [[ -z "$value" ]]; then
@@ -347,19 +358,29 @@ set_header_field() {
 		return
 	fi
 	local tmp; tmp="$(mktemp "$file.XXXXXX")"
-	awk -v key="$key" -v value="$value" '
-		BEGIN { inhdr = 1; done = 0 }
+	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" -v value="$value" '
+		function emit_field() { print "**" key ":** " value; done = 1 }
+		BEGIN {
+			inhdr = 1; done = 0
+			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
+			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
+		}
 		inhdr && /^## / {
-			if (!done) { print "**" key ":** " value; done = 1 }
+			if (!done) emit_field()
 			inhdr = 0
 		}
 		{
+			if (inhdr && !done && match($0, /^\*\*[^*:]+:\*\*/)) {
+				field = substr($0, RSTART + 2, RLENGTH - 5)
+				if ((field in pos) && (key in pos) && pos[field] > pos[key]) emit_field()
+			}
 			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				print "**" key ":** " value; done = 1; next
+				if (!done) emit_field()
+				next
 			}
 			print
 		}
-		END { if (!done) print "**" key ":** " value }
+		END { if (!done) emit_field() }
 	' "$file" >"$tmp"
 	mv -f "$tmp" "$file"
 }
@@ -383,29 +404,41 @@ delete_header_field() {
 }
 
 # Write a bare "**Key:**" line (no value, no trailing space) into the
-# header, replacing any existing "**Key:** ..." line in place, or inserting
-# the field before the Table of Contents when absent. Unlike
-# set_header_field's empty-value branch (which deletes), this keeps the
-# field present: the template header carries **Owner:** even when no claim
-# is held, so clearing the owner must blank the value, not remove the
-# scaffolded line. Atomic like its siblings; only the header region is
-# touched.
+# header, replacing any existing "**Key:** ..." line in place. When absent
+# the field inserts at its canonical template slot: before the first
+# present field that canonically follows it in TEMPLATE_HEADER_FIELDS, or
+# at end of header when no successor exists (also the fallback for fields
+# outside the template order). Unlike set_header_field's empty-value
+# branch (which deletes), this keeps the field present: the template
+# header carries **Owner:** even when no claim is held, so clearing the
+# owner must blank the value, not remove the scaffolded line. Atomic like
+# its siblings; only the header region is touched.
 blank_header_field() {
 	local file="$1" key="$2"
 	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	awk -v key="$key" '
-		BEGIN { inhdr = 1; done = 0 }
+	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" '
+		function emit_field() { print "**" key ":**"; done = 1 }
+		BEGIN {
+			inhdr = 1; done = 0
+			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
+			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
+		}
 		inhdr && /^## / {
-			if (!done) { print "**" key ":**"; done = 1 }
+			if (!done) emit_field()
 			inhdr = 0
 		}
 		{
+			if (inhdr && !done && match($0, /^\*\*[^*:]+:\*\*/)) {
+				field = substr($0, RSTART + 2, RLENGTH - 5)
+				if ((field in pos) && (key in pos) && pos[field] > pos[key]) emit_field()
+			}
 			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				print "**" key ":**"; done = 1; next
+				if (!done) emit_field()
+				next
 			}
 			print
 		}
-		END { if (!done) print "**" key ":**" }
+		END { if (!done) emit_field() }
 	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }

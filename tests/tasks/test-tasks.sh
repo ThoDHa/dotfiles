@@ -362,6 +362,35 @@ kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
 	&& ok "an emptied Updated= pair refreshes instead of deleting" \
 	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
 
+echo "== set: re-inserted template fields land at their canonical slot =="
+# A field deleted with Key= must re-insert at its template position (the
+# new-task scaffold's order), never at end of header; the dashboard parser
+# and humans both key on that order.
+f_pos="$(t new --id POS-1 --name "Canonical Insert Target")"
+t set "$f_pos" "Checkpoint Gating=none" >/dev/null
+pos_order() {
+	awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_pos"
+}
+POS_CANONICAL_ORDER="$(printf '%s\n' Created Status Priority Progress Owner "Checkpoint Gating" Updated "Latest Update")"
+t set "$f_pos" Owner= >/dev/null
+assert_not_contains "Owner deletion removes the field" "$(awk '/^## /{exit}{print}' "$f_pos")" "**Owner:**"
+t set "$f_pos" Owner=worker-pos >/dev/null
+assert_eq "re-set Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t set "$f_pos" Owner= >/dev/null
+t claim "$f_pos" --owner claim-pos >/dev/null
+assert_eq "claimed Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t release "$f_pos" >/dev/null
+assert_eq "release keeps Owner in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t set "$f_pos" Owner= >/dev/null
+t release "$f_pos" >/dev/null
+assert_eq "blank-path Owner insert lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+assert_eq "blank-path Owner insert writes the bare field" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_pos")"
+t set "$f_pos" "Latest Update=" >/dev/null
+t set "$f_pos" "Latest Update=restored" >/dev/null
+assert_eq "re-set Latest Update falls back to end of header" "$POS_CANONICAL_ORDER" "$(pos_order)"
+rm -f "$f_pos"
+t render >/dev/null
+
 echo "== malformed header resilience =="
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"
 cat >"$malformed" <<'EOF'
