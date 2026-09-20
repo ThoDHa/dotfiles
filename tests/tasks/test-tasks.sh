@@ -1137,6 +1137,135 @@ assert_contains "work_log_tail with n=2 reaches the first entry" "$wlt_two" \
 wlt_none="$(printf '## Objective\n\nno Work Log section here\n' | file=/dev/null work_log_tail 5)"
 assert_eq "work_log_tail without a Work Log section prints nothing" "" "$wlt_none"
 
+echo "== render: lanes sort chronologically and cells carry task IDs =="
+# Dedicated board: ordering needs controlled Created/Completed values,
+# deliberate date ties, and undated fixtures, isolated from the main
+# board's accumulated tasks. Active lanes must read in Created order,
+# Completed/Archive in Completed order, undated rows last, date ties in
+# segment-numeric task ID order (parent before child), and every Task
+# cell must carry the filename-derived ID prefix.
+orddir="$ROOT/order/.tasks"
+t init --dir "$orddir" >/dev/null
+ordboard="$orddir/dashboard.md"
+ord_rows() { # lane next-lane; prints the lane's task rows
+	awk -v lane="## $1" -v after="## ${2:-}" \
+		'after != "" && index($0, after) == 1 { f = 0 }
+		 index($0, lane) == 1 { f = 1; next }
+		 f && index($0, "| [") == 1' "$ordboard"
+}
+ord_labels() { # lane next-lane; prints each row's link text in lane order
+	ord_rows "$1" "${2:-}" | sed -E 's/^\| \[([^]]*)\]\(.*/\1/'
+}
+# Triage fixture: Created order deliberately disagrees with both filename
+# order and ID order, and the tie group covers the segment-numeric rules
+# (ORD-2 < ORD-2-1 < ORD-10 < ORD-1231).
+f_o2="$(t new --id ORD-2 --name "Tie Task Two" --dir "$orddir")"
+f_o21="$(t new --id ORD-2-1 --name "Tie Task Child" --dir "$orddir")"
+f_o10="$(t new --id ORD-10 --name "Tie Task Ten" --dir "$orddir")"
+f_o1231="$(t new --id ORD-1231 --name "Tie Task Twelve Thirty One" --dir "$orddir")"
+f_o9="$(t new --id ORD-9 --name "Early Task" --dir "$orddir")"
+f_o3="$(t new --id ORD-3 --name "Late Task" --dir "$orddir")"
+for ord_f in "$f_o9" "$f_o2" "$f_o21" "$f_o10" "$f_o1231" "$f_o3"; do
+	case "$(basename "$ord_f")" in
+		ORD-9-*) ord_created="2025-01-15 08:30" ;;
+		ORD-3-*) ord_created="2026-05-20 11:00" ;;
+		*) ord_created="2026-03-02 10:00" ;;
+	esac
+	t set --dir "$orddir" "$(basename "$ord_f")" "Created=$ord_created" Updated="2026-01-01 00:00" >/dev/null
+done
+# A task file with no leading ID component and no Created field: bare
+# name fallback and last place in its lane.
+cat >"$orddir/current/99991231-2359-no-id-task.md" <<'EOF'
+# Task: No ID Task
+
+**Status:** Triage
+**Priority:** Low
+**Updated:** 2026-01-01 00:00
+
+## Objective
+EOF
+t render --dir "$orddir" >/dev/null
+assert_eq "Triage sorts by Created ascending, ties segment-numerically, undated last" \
+	"$(printf '%s\n' \
+		"ORD-9: Early Task" \
+		"ORD-2: Tie Task Two" \
+		"ORD-2-1: Tie Task Child" \
+		"ORD-10: Tie Task Ten" \
+		"ORD-1231: Tie Task Twelve Thirty One" \
+		"ORD-3: Late Task" \
+		"No ID Task")" \
+	"$(ord_labels Triage Ready)"
+assert_contains "task cell carries the ID prefix derived from the filename" \
+	"$(ord_rows Triage Ready)" "| [ORD-9: Early Task](./current/"
+assert_contains "filename without a leading ID renders the bare descriptive name" \
+	"$(ord_rows Triage Ready)" "| [No ID Task](./current/99991231-2359-no-id-task.md) |"
+assert_not_contains "no-ID fallback adds no ID prefix" \
+	"$(ord_labels Triage Ready)" "No ID Task:"
+f_o31="$(t new --id ORD-31 --name "Ready Older" --status Ready --dir "$orddir")"
+f_o30="$(t new --id ORD-30 --name "Ready Younger" --status Ready --dir "$orddir")"
+t set --dir "$orddir" "$(basename "$f_o31")" Created="2026-04-01 09:00" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o30")" Created="2026-04-05 09:00" Updated="2026-01-01 00:00" >/dev/null
+assert_eq "Ready sorts by Created ascending regardless of task ID order" \
+	"$(printf '%s\n' "ORD-31: Ready Older" "ORD-30: Ready Younger")" \
+	"$(ord_labels Ready "In Progress")"
+f_o20="$(t new --id ORD-20 --name "Active Younger" --status "In Progress" --dir "$orddir")"
+f_oa21="$(t new --id ORD-21 --name "Active Older" --status "In Progress" --dir "$orddir")"
+t set --dir "$orddir" "$(basename "$f_o20")" Created="2026-03-10 09:00" Updated="2026-06-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_oa21")" Created="2026-01-10 09:00" Updated="2026-02-01 00:00" >/dev/null
+assert_eq "In Progress sorts by Created even though the lane shows no Created column" \
+	"$(printf '%s\n' "ORD-21: Active Older" "ORD-20: Active Younger")" \
+	"$(ord_labels "In Progress" "Blocked/Cancelled")"
+f_o32="$(t new --id ORD-32 --name "Stuck Younger" --dir "$orddir")"
+f_o33="$(t new --id ORD-33 --name "Stuck Older" --dir "$orddir")"
+t set --dir "$orddir" "$(basename "$f_o32")" Status=Blocked "Status Reason=order probe" Created="2026-02-02 09:00" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o33")" Status=Blocked "Status Reason=order probe" Created="2026-02-01 09:00" Updated="2026-01-01 00:00" >/dev/null
+assert_eq "Blocked/Cancelled sorts by Created ascending" \
+	"$(printf '%s\n' "ORD-33: Stuck Older" "ORD-32: Stuck Younger")" \
+	"$(ord_labels "Blocked/Cancelled" Completed)"
+f_o6="$(t new --id ORD-6 --name "Done Early" --dir "$orddir")"
+f_o7="$(t new --id ORD-7 --name "Done Mid" --dir "$orddir")"
+f_o40="$(t new --id ORD-40 --name "Done Late" --dir "$orddir")"
+f_o8="$(t new --id ORD-8 --name "Done Undated" --dir "$orddir")"
+f_o5="$(t new --id ORD-5 --name "Done Tie Five" --dir "$orddir")"
+f_o45="$(t new --id ORD-45 --name "Done Tie Forty Five" --dir "$orddir")"
+t set --dir "$orddir" "$(basename "$f_o6")" Status=Completed Completed="2026-02-01 12:00" Duration="1h" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o5")" Status=Completed Completed="2026-03-15 08:00" Duration="1h" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o45")" Status=Completed Completed="2026-03-15 08:00" Duration="1h" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o7")" Status=Completed Completed="2026-04-01 12:00" Duration="2h" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o40")" Status=Completed Completed="2026-06-01 12:00" Duration="3h" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_o8")" Status=Completed Duration="4h" Updated="2026-01-01 00:00" >/dev/null
+assert_eq "Completed sorts by Completed ascending, ties segment-numerically, undated last" \
+	"$(printf '%s\n' \
+		"ORD-6: Done Early" \
+		"ORD-5: Done Tie Five" \
+		"ORD-45: Done Tie Forty Five" \
+		"ORD-7: Done Mid" \
+		"ORD-40: Done Late" \
+		"ORD-8: Done Undated")" \
+	"$(ord_labels Completed Archive)"
+mv "$f_o40" "$orddir/archive/"
+f_o41="$(t new --id ORD-41 --name "Archived Undated" --dir "$orddir")"
+t set --dir "$orddir" "$(basename "$f_o41")" Status=Completed Duration="5h" Updated="2026-01-01 00:00" >/dev/null
+mv "$f_o41" "$orddir/archive/"
+t render --dir "$orddir" >/dev/null
+assert_eq "Archive sorts by Completed ascending with undated last" \
+	"$(printf '%s\n' "ORD-40: Done Late" "ORD-41: Archived Undated")" \
+	"$(ord_labels Archive)"
+# Residual ties (same date, same task ID) still render exactly once each
+# and repeated renders stay byte-identical.
+f_dup1="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
+f_dup2="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
+[[ "$f_dup1" != "$f_dup2" ]] && ok "duplicate-ID creation yields two files" || bad "duplicate-ID creation yields two files"
+t set --dir "$orddir" "$(basename "$f_dup1")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null
+t set --dir "$orddir" "$(basename "$f_dup2")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null
+t render --dir "$orddir" >/dev/null
+dup_count="$(ord_labels Triage Ready | grep -cF 'ORD-50: Duplicate ID Task')"
+assert_eq "residual ties on date and task ID both render" "2" "$dup_count"
+ord_before="$(cat "$ordboard")"
+t render --dir "$orddir" >/dev/null
+ord_after="$(cat "$ordboard")"
+assert_eq "ordered render is byte-identical on repeat" "$ord_before" "$ord_after"
+
 echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
