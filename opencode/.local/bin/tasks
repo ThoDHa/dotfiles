@@ -66,13 +66,21 @@ readonly DEFAULT_FROM="Manager"
 readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
-readonly HEADER_FIELDS="Created, Status, Status Reason, Priority, Progress, Owner, Checkpoint Gating, Updated, Completed, Duration, Latest Update"
-
-# The same fields as HEADER_FIELDS, machine-readable and in the canonical
-# order the new-task scaffold lays them out in: a re-inserted template
-# field lands before the first present field that canonically follows it,
-# so delete/re-insert cycles keep the header order stable.
+# The header fields the task-file template defines, in the canonical order
+# the new-task scaffold lays them out in: valid_header_key checks membership
+# against this list, HEADER_FIELDS is derived from it for error messages,
+# and the header writers insert an absent field before the first present
+# field that canonically follows it, so delete/re-insert cycles keep the
+# header order stable.
 readonly -a TEMPLATE_HEADER_FIELDS=("Created" "Status" "$STATUS_REASON_KEY" "Priority" "Progress" "Owner" "Checkpoint Gating" "Updated" "Completed" "Duration" "Latest Update")
+
+# Comma-separated form of TEMPLATE_HEADER_FIELDS for error messages.
+_header_fields_list() {
+	local fields
+	fields="$(printf '%s, ' "$@")"
+	printf '%s' "${fields%, }"
+}
+readonly HEADER_FIELDS="$(_header_fields_list "${TEMPLATE_HEADER_FIELDS[@]}")"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
@@ -97,10 +105,11 @@ valid_task_id() {
 # template defines (see the task-files skill's Task File Template). A near
 # miss like "StatusReason" must be rejected, not inserted as a new field.
 valid_header_key() {
-	case "$1" in
-		"Created"|"Status"|"Status Reason"|"Priority"|"Progress"|"Owner"|"Checkpoint Gating"|"Updated"|"Completed"|"Duration"|"Latest Update") return 0 ;;
-		*) return 1 ;;
-	esac
+	local candidate
+	for candidate in "${TEMPLATE_HEADER_FIELDS[@]}"; do
+		[[ "$1" == "$candidate" ]] && return 0
+	done
+	return 1
 }
 
 # Report slugs become filename segments under reports/; strict kebab-case
