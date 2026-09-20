@@ -1,0 +1,24 @@
+name: corpus
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    name: Corpus lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run corpus lint
+        run: make lint-corpus
+
+  test:
+    name: Tasks suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tasks test suite
+        run: make test-tasks
