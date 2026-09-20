@@ -157,13 +157,20 @@ opencode() {
 alias oc='opencode'
 
 delay_opencode() {
+    local run_in_background=false
+    if [[ "${1:-}" == '-b' || "${1:-}" == '--background' ]]; then
+        run_in_background=true
+        shift
+    fi
+
     local mode="${1:-at}"
     local schedule_value="${2:-05:00}"
     local prompt="${3:-please continue}"
 
     if [[ $# -lt 2 || ( "$mode" != 'at' && "$mode" != 'in' ) ]]; then
-        printf 'Usage: delay_opencode at HH:MM [prompt...]\n'
-        printf '       delay_opencode in DURATION [prompt...]\n'
+        printf 'Usage: delay_opencode [-b] at HH:MM [prompt...]\n'
+        printf '       delay_opencode [-b] in DURATION [prompt...]\n'
+        printf 'Foreground by default; -b detaches and runs headless (opencode run).\n'
         return 2
     fi
 
@@ -171,27 +178,32 @@ delay_opencode() {
         prompt="${*:3}"
     fi
 
-    nohup bash -c '
-        mode=$1
-        schedule_value=$2
-        if [[ "$mode" == at ]]; then
-            target_epoch=$(date -d "$schedule_value" +%s) || exit 1
-            now_epoch=$(date +%s) || exit 1
-            if (( target_epoch <= now_epoch )); then
-                target_epoch=$((target_epoch + 86400))
-            fi
-            delay_seconds=$((target_epoch - now_epoch))
-        else
-            [[ "$schedule_value" =~ ^[0-9]+([smhd])?$ ]] || exit 1
-            delay_seconds=$schedule_value
+    local target_epoch now_epoch delay_seconds
+    if [[ "$mode" == 'at' ]]; then
+        target_epoch=$(date -d "$schedule_value" +%s) || return 1
+        now_epoch=$(date +%s) || return 1
+        if (( target_epoch <= now_epoch )); then
+            target_epoch=$((target_epoch + 86400))
         fi
-        sleep "$delay_seconds" || exit 1
-        command opencode run --continue --auto "$3"
-    ' delay_opencode "$mode" "$schedule_value" "$prompt" >/dev/null 2>&1 &
-    local process_id=$!
-    disown "$process_id"
-    printf 'OpenCode scheduled (%s %s, pid %s)\n' \
-        "$mode" "$schedule_value" "$process_id"
+        delay_seconds=$((target_epoch - now_epoch))
+    else
+        [[ "$schedule_value" =~ ^[0-9]+([smhd])?$ ]] || return 1
+        delay_seconds=$schedule_value
+    fi
+
+    if [[ "$run_in_background" == true ]]; then
+        nohup zsh -c 'sleep "$1" && command opencode run --continue --auto "$2"' \
+            delay_opencode "$delay_seconds" "$prompt" >/dev/null 2>&1 &
+        local process_id=$!
+        disown "$process_id" 2> /dev/null || true
+        printf 'OpenCode scheduled in background (%s %s, pid %s; kill %s to cancel)\n' \
+            "$mode" "$schedule_value" "$process_id" "$process_id"
+        return 0
+    fi
+
+    printf 'OpenCode continues in %s seconds (Ctrl+C to cancel)\n' "$delay_seconds"
+    sleep "$delay_seconds" || return 1
+    command opencode --auto --continue --prompt "$prompt"
 }
 
 # Modern ls replacement with eza
