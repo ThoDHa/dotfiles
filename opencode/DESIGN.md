@@ -79,6 +79,7 @@ The dispatch economy requirements and the dispatched-agent conduct rules
 the execution-standards rule's Dispatch Economy section, and the delegation
 skill's Dispatch by Reference section sanctions the pointer-form dispatch
 through a task file's Instructions Given entry.
+
 Dependent units resume the earlier worker's session (the delegation skill's
 Context Continuity section, extended batch-wide by rule 5 of the manager
 agent file): every fresh dispatch re-pays the prior session's exploration,
@@ -126,16 +127,17 @@ Worktree Teardown sections.
 ## Permissions posture
 
 Agent permission tiers mirror their prompts, defined in each agent file's
-frontmatter and the global opencode.json. The manager's edit denial is the
-single architectural line, confining its edits to `.tasks/**` while bash
-stays open; the worker holds everything except push, history reshaping, gh
-writes, and subagent spawning; the verifier's bash is intentionally open so
-it can run tests; the reviewer holds read-only git only; the planner pairs
-read-only git with the two `tasks` CLI channels and an edit map opening only
-`.tasks/**`. Prefix-based bash permissions are guardrails against
-uninstructed behavior, not security boundaries: a determined `sh -c` or
-`git -C` route slips past them, and hard enforcement would require hooks
-or credential separation.
+frontmatter and the global opencode.json; config and agent files load at
+session start, so permission edits take effect only in newly started
+sessions. The manager's edit denial is the single architectural line,
+confining its edits to `.tasks/**` while bash stays open; the worker holds
+everything except push, history reshaping, gh writes, and subagent spawning;
+the verifier's bash is intentionally open so it can run tests; the reviewer
+holds read-only git only; the planner pairs read-only git with the two
+`tasks` CLI channels and an edit map opening only `.tasks/**`. Prefix-based
+bash permissions are guardrails against uninstructed behavior, not security
+boundaries: a determined `sh -c` or `git -C` route slips past them, and hard
+enforcement would require hooks or credential separation.
 
 ## LRU context plugin
 

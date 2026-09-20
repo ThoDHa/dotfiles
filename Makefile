@@ -16,7 +16,7 @@ STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
 SKIPPED_PACKAGES  := $(filter-out $(STOW_PACKAGES),$(STOW_PACKAGES_ALL))
 CLAUDE_SYNC       := $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT))
 
-# Rules target path (after stow) — used by tests
+# Rules target path (after stow): used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 
 # Claude Code paths
@@ -31,7 +31,7 @@ CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 all: help
 
 # ── Loop macro ────────────────────────────────────────────────────────────────
-# $(call stow_all, PKGS, STOW_FLAGS, VERB) — iterate PKGS with given flags
+# $(call stow_all, PKGS, STOW_FLAGS, VERB): iterate PKGS with given flags
 define stow_all
 @for pkg in $(1); do \
     echo "  $(3)ing $$pkg..."; \
@@ -109,7 +109,7 @@ dry-run:
 #   tmux-sessionizer/windowizer: may exist from a prior manual install
 #   isort config: may exist from a prior isort install
 #   .config/opencode: may exist from a prior opencode install
-#   .claude/{...}: targeted removal: ~/.claude also holds runtime data
+#   .claude/{...}: targeted removal (~/.claude also holds runtime data)
 #   .agents: whole tree is stow-owned; drops links to a moved repo
 #   DESIGN/GATEWAY/PII-SAFE.md: legacy links from before these docs were ignored
 clean-stow:
