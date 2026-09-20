@@ -361,14 +361,15 @@ render() {
 # they write, so this carries their shared single-pass rewrite. Atomic:
 # output is staged into a temp file and a single mv commits it, so a
 # failure mid-pass leaves the original file untouched. Only the header
-# region is touched.
+# region is touched. The composed line travels via ENVIRON (not awk -v) so
+# backslashes in user values survive verbatim.
 write_header_field() {
 	local file="$1" key="$2" line="$3"
 	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" awk -v key="$key" -v line="$line" '
+	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" LINE="$line" awk -v key="$key" '
 		function emit_field() { print line; done = 1 }
 		BEGIN {
-			inhdr = 1; done = 0
+			inhdr = 1; done = 0; line = ENVIRON["LINE"]
 			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
 			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
 		}

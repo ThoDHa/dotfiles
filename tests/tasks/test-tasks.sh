@@ -391,6 +391,16 @@ assert_eq "re-set Latest Update falls back to end of header" "$POS_CANONICAL_ORD
 rm -f "$f_pos"
 t render >/dev/null
 
+echo "== set: backslash values survive verbatim =="
+f_bs="$(t new --id BS-1 --name "Backslash Target")"
+t set "$f_bs" 'Priority=c\\d' 'Duration=e\tf' >/dev/null
+assert_contains "double backslash in a set value survives verbatim" \
+	"$(grep -m1 '^\*\*Priority:' "$f_bs")" 'Priority:** c\\d'
+assert_contains "backslash-t in a set value survives verbatim" \
+	"$(grep -m1 '^\*\*Duration:' "$f_bs")" 'Duration:** e\tf'
+rm -f "$f_bs"
+t render >/dev/null
+
 echo "== malformed header resilience =="
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"
 cat >"$malformed" <<'EOF'
