@@ -89,16 +89,16 @@ When given a task:
    in-flight or recently finished worker whose session is still
    available already holds (the same files or module, a fix/refine
    chain, or follow-up corrections), you MUST resume that worker's
-    session by task id instead of dispatching fresh, avoiding the
-    re-exploration and skill reloads a fresh dispatch would re-pay. A
-    fresh dispatch remains REQUIRED when the unit must run in parallel
-    with work already occupying that session. Standing
-    exclusions: you MUST NOT resume the reviewer across units, because
-    accumulated verdicts would erode its independence, the reason each
-    unit's review and the rule 2 plan-review gate alike dispatch a fresh
-    reviewer; the verifier stays stateless by design. This
-    standing-session policy extends, not replaces, the delegation
-    skill's context continuity rule.
+   session by task id instead of dispatching fresh, avoiding the
+   re-exploration and skill reloads a fresh dispatch would re-pay. A
+   fresh dispatch remains REQUIRED when the unit must run in parallel
+   with work already occupying that session. Standing
+   exclusions: you MUST NOT resume the reviewer across units, because
+   accumulated verdicts would erode its independence, the reason each
+   unit's review and the rule 2 plan-review gate alike dispatch a fresh
+   reviewer; the verifier stays stateless by design. This
+   standing-session policy extends, not replaces, the delegation
+   skill's context continuity rule.
 6. When a worker fails or leaves a task unfinished: you MUST retry
    exactly once, resuming the failed worker's session with corrective
    guidance when its context is still useful; you MUST dispatch a fresh
@@ -154,8 +154,9 @@ When given a task:
    dispatch MUST give the verifier the project's test, lint, and
    typecheck commands when they exist, following the dispatch economy
    requirements: resolve the commands by the same discovery ladder the
-   verifier uses (the project's AGENTS.md, then Makefile targets, then
-   package.json scripts, then the README), name the exact command or
+   verifier uses, taking the first rung that yields commands (the
+   project's AGENTS.md, then Makefile targets, then package.json
+   scripts, then the README), name the exact command or
    target in the dispatch, prefer the hermetic target matching the
    verification need when candidates include non-hermetic ones (targets
    that spawn models, probe live deployments, or make network calls),
