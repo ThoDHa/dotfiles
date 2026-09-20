@@ -146,7 +146,53 @@ elif command -v xclip &> /dev/null; then
 else
     CLIP_CMD='cat > /dev/null'
 fi
+# Launch the TUI in auto mode by default; subcommands pass through untouched.
+opencode() {
+    if [[ $# -eq 0 || $1 == -* ]]; then
+        command opencode --auto "$@"
+    else
+        command opencode "$@"
+    fi
+}
 alias oc='opencode'
+
+delay_opencode() {
+    local mode="${1:-at}"
+    local schedule_value="${2:-05:00}"
+    local prompt="${3:-please continue}"
+
+    if [[ $# -lt 2 || ( "$mode" != 'at' && "$mode" != 'in' ) ]]; then
+        printf 'Usage: delay_opencode at HH:MM [prompt...]\n'
+        printf '       delay_opencode in DURATION [prompt...]\n'
+        return 2
+    fi
+
+    if [[ $# -gt 3 ]]; then
+        prompt="${*:3}"
+    fi
+
+    nohup bash -c '
+        mode=$1
+        schedule_value=$2
+        if [[ "$mode" == at ]]; then
+            target_epoch=$(date -d "$schedule_value" +%s) || exit 1
+            now_epoch=$(date +%s) || exit 1
+            if (( target_epoch <= now_epoch )); then
+                target_epoch=$((target_epoch + 86400))
+            fi
+            delay_seconds=$((target_epoch - now_epoch))
+        else
+            [[ "$schedule_value" =~ ^[0-9]+([smhd])?$ ]] || exit 1
+            delay_seconds=$schedule_value
+        fi
+        sleep "$delay_seconds" || exit 1
+        command opencode run --continue --auto "$3"
+    ' delay_opencode "$mode" "$schedule_value" "$prompt" >/dev/null 2>&1 &
+    local process_id=$!
+    disown "$process_id"
+    printf 'OpenCode scheduled (%s %s, pid %s)\n' \
+        "$mode" "$schedule_value" "$process_id"
+}
 
 # Modern ls replacement with eza
 if command -v eza &> /dev/null; then
