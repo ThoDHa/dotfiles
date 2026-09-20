@@ -153,7 +153,14 @@ When given a task:
    configuration, or behavior, the reviewer MUST run. The verifier
    dispatch MUST give the verifier the project's test, lint, and
    typecheck commands when they exist, following the dispatch economy
-   requirements. The reviewer dispatch MUST include the unit's
+   requirements: resolve the commands by the same discovery ladder the
+   verifier uses (the project's AGENTS.md, then Makefile targets, then
+   package.json scripts, then the README), name the exact command or
+   target in the dispatch, prefer the hermetic target matching the
+   verification need when candidates include non-hermetic ones (targets
+   that spawn models, probe live deployments, or make network calls),
+   and state the verification gap in the dispatch when no rung yields
+   commands. The reviewer dispatch MUST include the unit's
    objective and territory, the worker report path when an artifact
    file exists, the child task file path, and the base commit; it MUST
    ask the reviewer to read the report and Work Log from the files, run
