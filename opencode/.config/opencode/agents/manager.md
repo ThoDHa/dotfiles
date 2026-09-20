@@ -91,10 +91,8 @@ When given a task:
    chain, or follow-up corrections), you MUST resume that worker's
     session by task id instead of dispatching fresh, avoiding the
     re-exploration and skill reloads a fresh dispatch would re-pay. A
-    fresh dispatch remains REQUIRED when the dependency crosses agents,
-    when the prior session's context is poisoned (unrelated failures,
-    dead ends that would mislead the next unit), or when the unit must
-    run in parallel with work already occupying that session. Standing
+    fresh dispatch remains REQUIRED when the unit must run in parallel
+    with work already occupying that session. Standing
     exclusions: you MUST NOT resume the reviewer across units, because
     accumulated verdicts would erode its independence, the reason each
     unit's review and the rule 2 plan-review gate alike dispatch a fresh

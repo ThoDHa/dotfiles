@@ -119,7 +119,7 @@ These requirements bind every dispatch prompt for a delegated agent or subagent,
 - **Pointers, not prose**: name the files, entry points, and an existing pattern to follow; narrative is reserved for the objective and its success criteria, and the dispatched agent explores the territory itself.
 - **No standards restatement**: dispatch prompts MUST NOT restate global standards (the core, coding, and execution rules, the comment policy, and the like); every agent already receives them in its system prompt. A brief reminder of one specific rule the task is likely to violate is acceptable.
 - **Verification by reference**: when a dispatch must convey how to verify work, it SHOULD reference the project's AGENTS.md where it documents the commands.
-- **Dispatch by reference**: when work is tracked in task files, the dispatch prompt MAY be a pointer instead of a duplicated payload: the manager writes the complete instructions verbatim into the task file's Work Log (**Instructions Given**, per the `task-files` skill) before making the Task call, and that entry is the authoritative instruction record; the Task call carries only a minimal bootstrap frame (the agent's role, the task file to read, and the report-back expectation). Steering issued while the agent runs goes through the dispatch channel and MUST NOT live only in the file, since the agent cannot be assumed to re-read it mid-flight. The full protocol lives in the `delegation` skill's Dispatch by Reference subsection.
+- **Dispatch by reference**: when work is tracked in task files, the dispatch prompt follows the `delegation` skill's Dispatch by Reference subsection.
 
 The dispatched agent receiving the prompt is bound by three conduct requirements of its own:
 
