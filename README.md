@@ -121,7 +121,7 @@ OpenCode and Claude Code are optional: the script asks whether to install
 the tool is present (override with `FORCE_OPENCODE=1` / `FORCE_CLAUDECODE=1`).
 Non-interactive runs take the default answer for both prompts.
 
-The script is idempotent — safe to run multiple times.
+The script is idempotent: safe to run multiple times.
 
 ## Reference Templates
 
@@ -165,7 +165,7 @@ make stow        # Create fresh symlinks
 
 **Bootstrap issues:**
 - **Permission denied**: Run bootstrap with appropriate permissions for system packages
-- **NeoVim plugins don't install**: Open nvim manually after bootstrap — Lazy will prompt to install plugins  
+- **NeoVim plugins don't install**: Open nvim manually after bootstrap. Lazy will prompt to install plugins  
 - **Zsh not default shell**: Log out and back in, or run `exec zsh`
 
 ## Dependencies
