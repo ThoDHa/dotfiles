@@ -80,7 +80,7 @@ Users SHOULD add `.tasks/` to their global gitignore, or MAY commit it selective
 | Description | Kebab-case, 3-5 words maximum |
 | Example | `AUTH-1-20241222-0710-api-auth-refactor.md` |
 
-The kebab-case rule governs the **description component of the filename** only; the Task ID component keeps its canonical uppercase form. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title, the dashboard link text, and prose references) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles, coordinating conjunctions, and prepositions of three letters or fewer when mid-title. Example: filename `AUTH-1-20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`.
+The kebab-case rule governs the **description component of the filename** only; the Task ID component keeps its canonical uppercase form. The task's human-readable **descriptive name** (the `# Task: [Descriptive Name]` title and prose references) MUST use headline / AP-style title case: capitalize the first and last word and every noun, pronoun, verb, adjective, and adverb; lowercase only articles, coordinating conjunctions, and prepositions of three letters or fewer when mid-title. The dashboard's Task cell link text is the ID-prefixed form `ID: Descriptive Name` (see [Master Index Requirements](#master-index-requirements)); only its descriptive-name component follows this title-case rule. Example: filename `AUTH-1-20241222-0710-api-auth-refactor.md`, descriptive name `Refactor the API Auth Flow`, Task cell `AUTH-1: Refactor the API Auth Flow`.
 
 ### Reports Namespace
 
@@ -101,6 +101,7 @@ Verbatim agent reports live as files under `.tasks/reports/`, not inline in task
 - **Exempt from task-file rules.** Report files are not task files: they carry no canonical header fields, are never registered in the dashboard, follow the layout above rather than the [File Naming Convention](#file-naming-convention), and have no lifecycle states. The rules that bind them are the layout, the [Report File Template](#report-file-template), and permanence.
 - **Referenced, never inlined.** Task files reference reports only by that relative link plus a digest, per [Agent Report Entries](#agent-report-entries) and [Cross-Reference Convention](#cross-reference-convention).
 - **Recon reports.** Exploration agents deposit their findings as a `01-recon` report (slug `recon`) under the parent task's directory via the same command; child tasks then reference that report from their **Files to Review** lists, keeping reconnaissance a shared artifact instead of per-child duplication. When planning fans the breakdown out into parallel children with overlapping territory, depositing this artifact is the default, with the exceptions defined in [Triage to Ready Planning Phase](#triage-to-ready-planning-phase).
+- **Research deposits.** Research agents dispatched without a task file deposit under the reserved `research/` key, the sole exception to `<taskfile-basename>` keying (collision-proof because the [File Naming Convention](#file-naming-convention) reserves the leading Task ID component, so no task file can be named `research.md`): the file lands at `.tasks/reports/research/<NN>-<slug>.md`. `NN` is assigned in deposit order within `research/`, one past the highest existing `NN` and never reused, mirroring the `tasks report` sequence semantics so future CLI support reuses the rule unchanged. The [Report File Template](#report-file-template) applies, with the title's key segment and the **Task:** line naming the research subject in place of the task-file basename. Because `tasks report` requires a resolvable task file, the deposit is a direct file write that MUST NOT overwrite an existing file.
 
 Each report file follows the [Report File Template](#report-file-template).
 
@@ -163,7 +164,7 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 | Task | Progress | Updated | Priority |
 |------|----------|---------|----------|
-| [Task Name](./current/AUTH-1-20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
+| [AUTH-1: Task Name](./current/AUTH-1-20241222-0710-task-name.md) | 45% | 2024-12-31 19:45 | High |
 
 **Note:** Details of what was done and what remains live in the task file itself, not on the board.
 
@@ -189,7 +190,7 @@ The master index MUST be located at `.tasks/dashboard.md`.
 
 Cell rules:
 
-- In every lane, the `Task` cell MUST be a markdown link whose text is the task's descriptive name (title case, see [File Naming Convention](#file-naming-convention)) and whose target is `./current/<file>.md` while active or `./archive/<file>.md` once archived.
+- In every lane, the `Task` cell MUST be a markdown link whose text follows the `ID: Descriptive Name` form: the ID is the filename's leading Task ID component (e.g. `AUTH-1`), and the descriptive name is the task's `# Task:` title, filename-derived when the title is missing, in title case per [File Naming Convention](#file-naming-convention). When the filename carries no leading Task ID component, the text falls back to the bare descriptive name. The target is `./current/<file>.md` while active or `./archive/<file>.md` once archived.
 - In Triage, Ready, and Blocked/Cancelled tables, `Created` and `Updated` MUST each hold only a `YYYY-MM-DD HH:MM` timestamp, drawn from the task file's **Created** and **Updated** header fields. `Created` is set once and MUST NOT change; `Updated` moves with every change, so a waiting task's age stays visible. Use `N/A` when no creation timestamp is derivable.
 - In Progress: `Progress` MUST be only a completion percentage (`10%`, `45%`), never a summary or status phrase. The at-a-glance summary lives in the task file's [Latest Update field](#latest-update-field).
 - Completed/Archive: `Duration` MUST be only an active working time value (`3h 20m`, `2d 4h`, `45m`) or `N/A`. It is the accumulated working time from the task's logs (including Triage → Ready planning work), excluding Blocked periods and idle waits. Never a date, description, or placeholder like `-` or `TBD`.

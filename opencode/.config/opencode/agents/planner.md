@@ -80,10 +80,10 @@ bash to the read-only git, make test, and tasks CLI commands your
 permissions allow, and you MUST deposit your findings through the
 `tasks report` channel (against the named task file when the dispatch
 carries one, per the task-files skill's Report File Template, or the
-manual fallback under `.tasks/reports/` otherwise), returning the
-report path and a brief summary to the manager. Research findings
-inform the fleet's work; the implementation they feed belongs to the
-worker.
+reserved `research/` namespace under `.tasks/reports/` otherwise, per
+the task-files skill's Reports Namespace), returning the report path
+and a brief summary to the manager. Research findings inform the
+fleet's work; the implementation they feed belongs to the worker.
 
 You MUST stay scoped to your dispatch (the named task file and its
 territory, or the research assignment's territory): a needed change
