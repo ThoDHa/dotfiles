@@ -103,15 +103,15 @@ dry-run:
 	done
 
 # Clean up files that external tools are known to clobber before stowing.
-# Each entry is intentional — do not remove without understanding the conflict:
-#   .zshrc                     — overwritten by oh-my-zsh --unattended installer
-#   .tmux.conf                 — may exist from a prior manual tmux setup
-#   tmux-sessionizer/windowizer — may exist from a prior manual install
-#   isort config               — may exist from a prior isort install
-#   .config/opencode           — may exist from a prior opencode install
-#   .claude/{...}              — targeted removal: ~/.claude also holds runtime data
-#   .agents                    — whole tree is stow-owned; drops links to a moved repo
-#   DESIGN/GATEWAY/PII-SAFE.md — legacy links from before these docs were ignored
+# Each entry is intentional. Do not remove without understanding the conflict:
+#   .zshrc: overwritten by oh-my-zsh --unattended installer
+#   .tmux.conf: may exist from a prior manual tmux setup
+#   tmux-sessionizer/windowizer: may exist from a prior manual install
+#   isort config: may exist from a prior isort install
+#   .config/opencode: may exist from a prior opencode install
+#   .claude/{...}: targeted removal: ~/.claude also holds runtime data
+#   .agents: whole tree is stow-owned; drops links to a moved repo
+#   DESIGN/GATEWAY/PII-SAFE.md: legacy links from before these docs were ignored
 clean-stow:
 	@echo "Cleaning up conflicting files for stowing..."
 	@rm -f \

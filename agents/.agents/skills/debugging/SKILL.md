@@ -12,7 +12,7 @@ This specification defines requirements for investigating and fixing defects: re
 ### Related Specifications
 
 - The `core` rule (always loaded): failure as information; prohibited failure responses
-- The `coding-standards` rule (always loaded): error handling and test standards
+- The `coding-standards` rule (always loaded): the Error Handling Requirements and Test Coverage and Standards sections
 - The `simplify-review` skill: final verification failures load this skill; completed fixes pass through its loop
 - The `git-protocol` skill: a fix commits together with its regression test; root-cause history belongs in the commit message
 
