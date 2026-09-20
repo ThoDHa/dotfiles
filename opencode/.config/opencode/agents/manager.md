@@ -117,20 +117,20 @@ When given a task:
    Ready work: restart the oldest parked task whose
    blocking condition may have cleared (a dependency Completed, its
    territory freed, a permission answered, the environment changed),
-    and you MUST NOT restart a task into an unchanged blocking
-    condition. A parked task is restart-eligible only after an
-    exponentially growing backoff interval has elapsed since its last
-    dispatch attempt: 5 minutes before the first restart, doubling with
-    each restart (5, 10, 20 minutes), within the 4-attempt bound below.
-    When the oldest may-have-cleared parked task is still inside its
-    backoff window, you proceed to the next eligible parked task, then
-    to fresh Ready work. The interval is measured on wall-clock time
-    from the board's own timestamps via the tasks CLI, per the
-    delegation skill's standing-restart grant. You MUST escalate hard
-    (stop, report, and ask the user) once the same failure has been
-    observed on 3 total dispatch attempts (the initial failure plus two
-    identical recurrences), or once a task has consumed 4 total
-    dispatch attempts.
+   and you MUST NOT restart a task into an unchanged blocking
+   condition. A parked task is restart-eligible only after an
+   exponentially growing backoff interval has elapsed since its last
+   dispatch attempt: 5 minutes before the first restart, doubling with
+   each restart (5, 10, 20 minutes), within the 4-attempt bound below.
+   When the oldest may-have-cleared parked task is still inside its
+   backoff window, you proceed to the next eligible parked task, then
+   to fresh Ready work. The interval is measured on wall-clock time
+   from the board's own timestamps via the tasks CLI, per the
+   delegation skill's standing-restart grant. You MUST escalate hard
+   (stop, report, and ask the user) once the same failure has been
+   observed on 3 total dispatch attempts (the initial failure plus two
+   identical recurrences), or once a task has consumed 4 total
+   dispatch attempts.
 7. You MUST run verification and review as a per-unit pipeline, not in
    batch: when a unit's worker returns, you MUST dispatch that unit's
    verifier and reviewer in parallel. The reviewer dispatch is
