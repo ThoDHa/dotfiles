@@ -53,7 +53,7 @@ When dispatched:
 5. You MUST implement the change, following existing code conventions.
 6. When the task-files protocol is active and your dispatch names a
    child task file, you MUST record progress in real time as you work
-   (interim findings, obstacles, checkpoints) via
+   (interim findings, obstacles, commit checkpoints) via
    `tasks log <child-task-file> --from <your-agent-id>`; these interim
    entries and your final report deposit (step 9) are your only
    `.tasks/` writes, per the task-files skill's Agent Write Path. You

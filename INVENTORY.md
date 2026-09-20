@@ -2,8 +2,8 @@
 
 Machine-checkable manifest of the enumerable corpus surfaces: one path
 per line per class, every list complete against its source directory so
-a lint (planned as CORPUS-16) can diff each class against the filesystem
-mechanically. Source directories are named in the class headings, with
+the corpus lint (tests/corpus/lint-corpus.sh) can diff each class against
+the filesystem mechanically. Source directories are named in the class headings, with
 entry counts beside them for a quick sanity check. Paths are repository
 relative. This manifest does not list itself: it is the measurement, not
 part of the corpus it measures.
