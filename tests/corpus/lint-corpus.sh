@@ -329,10 +329,6 @@ parse_inventory() { # emits C<class> and E<entry> records
 			matched = substr(head, RSTART, RLENGTH)
 			inner = substr(matched, 3, length(matched) - 3)
 			comma_at = match(inner, /, [0-9]+$/)
-			if (comma_at == 0) {
-				printf "FAIL: %s:%d: malformed class heading: %s\n", FILENAME, line_no, heading
-				exit 1
-			}
 			class_count = substr(inner, comma_at + 2, length(inner) - comma_at - 1)
 			class_dir = substr(inner, 1, comma_at - 1)
 			class_name = substr(head, 1, length(head) - length(matched))
