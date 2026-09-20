@@ -67,7 +67,7 @@ Planning labor (exploration, analysis, drafting task documentation, proposing a 
 | **Allies** | Independent judgment, specialized skills, full capabilities | Any task of moderate complexity or above: exploration and reconnaissance, architecture review, complex implementation, anything requiring judgment |
 | **Agents** | No judgment, simple execution | Trivial bulk operations (renames, identical commands), simple parallel tasks requiring no decisions |
 
-Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally.
+Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally. The table scopes fleets that have allies: in a fleet whose members are all agents (for example a fixed permission-mapped opencode fleet of worker, verifier, reviewer, and planner), every member takes the table's agent-row semantics and the prefer-allies tie-break rule is inapplicable.
 
 ### Dispatched Agent Conduct
 
