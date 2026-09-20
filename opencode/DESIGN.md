@@ -12,21 +12,28 @@ section heading or rule number).
 | Agent | Mode | Model | Duties |
 |-------|------|-------|--------|
 | manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
-| worker | subagent | glm-5.3-flash | Implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
+| worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | session | simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git |
-| planner | subagent | session | Planning labor: reconnaissance, drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
+| planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no implementation
 duty (it never authors implementation content), and its file edits are
 limited to `.tasks/**`. Integration commits and pushing are coordination
 duties, not implementation work; unit workers make their own commit
-checkpoints on the branches the manager assigned them. The architect grant
+checkpoints on the branches the manager assigned them. The division of
+labor between the two dispatch targets is explicit: the worker is the
+code-writing agent, and the planner is the destination for research
+and planning dispatches (planning labor, dedicated exploration,
+investigation, and findings reports), so research-grade context
+building concentrates in one session-model agent instead of eroding
+the flash worker's focus. The architect grant
 follows the same line: the manager delegates as much work as the fleet can
 take, and the command freedom exists to unblock and steer the fleet
 (scouting a dispatch, unblocking a worker, checking a unit's result); any
 duty that grows into sustained work of its own is dispatched to a fleet
-agent rather than absorbed, since capability never reduces the delegation
+agent rather than absorbed (research-grade exploration to the planner,
+code writing to the worker), since capability never reduces the delegation
 duty.
 
 The verifier and reviewer split verification along the judgment line:
@@ -134,9 +141,11 @@ confining its edits to `.tasks/**` while bash stays open; the worker holds
 everything except push, history reshaping, gh writes, and subagent spawning;
 the verifier's bash is intentionally open so it can run tests; the reviewer
 holds read-only git only; the planner pairs read-only git with the two
-`tasks` CLI channels and an edit map opening only `.tasks/**`. Prefix-based
-bash permissions are guardrails against uninstructed behavior, not security
-boundaries: a determined `sh -c` or `git -C` route slips past them, and hard
+`tasks` CLI channels and an edit map opening only `.tasks/**`, the
+channels its research role runs on, so the prompt-level routing added
+no permission changes. Prefix-based bash permissions are
+guardrails against uninstructed behavior, not security boundaries: a
+determined `sh -c` or `git -C` route slips past them, and hard
 enforcement would require hooks or credential separation.
 
 ## LRU context plugin
