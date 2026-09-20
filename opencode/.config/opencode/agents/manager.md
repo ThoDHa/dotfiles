@@ -126,7 +126,7 @@ When given a task:
    backoff window, you proceed to the next eligible parked task, then
    to fresh Ready work. The interval is measured on wall-clock time
    from the board's own timestamps via the tasks CLI, per the
-   delegation skill's standing-restart grant. You MUST escalate hard
+   delegation skill's Failure Semantics. You MUST escalate hard
    (stop, report, and ask the user) once the same failure has been
    observed on 3 total dispatch attempts (the initial failure plus two
    identical recurrences), or once a task has consumed 4 total
