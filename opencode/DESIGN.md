@@ -171,7 +171,10 @@ planner) aggregated by agent type; the option is off by default upstream.
   checks. The planner's restraint inside its planning-section carve-out
   is likewise prompt-soft, and the planner runs on the session model,
   not flash: the manager's planning review of the filled-out task file
-  is its backstop. The plan-review gate on high-cost plans is advisory
+  is its backstop. The no-implementation and territory-scoping
+  restraints on research dispatches routed to the same planner are
+  likewise prompt-soft, and the manager's review of the findings is
+  their backstop. The plan-review gate on high-cost plans is advisory
   by construction: the reviewer's critique is one more input to that
   planning review, and it enforces nothing.
 - The manager cannot resolve merge conflicts, since it edits nothing
