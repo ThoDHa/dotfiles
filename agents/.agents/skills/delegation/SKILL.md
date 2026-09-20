@@ -162,6 +162,6 @@ The design's backoff interval is measured on wall-clock time taken from the boar
 
 No failure is hidden or minimized, under either mode. Without a standing restart grant, no failure gets a third attempt. Implementations remain ultimately responsible.
 
-## Conformance
+---
 
-All requirements are mandatory. Executing directly when delegation is required (outside Direct Execution Exceptions, outside Solo mode, and outside the Delegation as Default architecture carve-out for duties the orchestration design in force allocates to the manager directly), failing to report progress, operating Solo without maintaining Manager Mode requirements, or altering the decision-making process in Solo mode are conformance failures.
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.

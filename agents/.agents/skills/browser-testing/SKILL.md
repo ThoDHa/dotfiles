@@ -42,6 +42,6 @@ docker run --rm --init \
 - Local Playwright MUST exist only as a repository devDependency locked by the repo's lockfile. Global host installs (`npm i -g playwright`) MUST NOT be created.
 - Environments without Docker fall back to the local-install leg for every scenario above.
 
-## Conformance
+---
 
-Violations of MUST or MUST NOT requirements constitute conformance failures, notably: ad-hoc Playwright installs for interactive browsing while the MCP server is available; unpinned or floating Playwright image tags; host browser downloads outside the authoring loop; missing `--rm`/`--init` or use of `--privileged`; global Playwright installs.
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.

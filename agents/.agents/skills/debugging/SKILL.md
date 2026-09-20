@@ -7,8 +7,6 @@ description: Debugging protocol covering systematic defect investigation: reliab
 
 ## Scope
 
-This specification defines requirements for investigating and fixing defects: reported bugs, runtime errors, crashes, test failures, build failures, and intermittent (flaky) behavior.
-
 ### Related Specifications
 
 - The `core` rule (always loaded): failure as information; prohibited failure responses
@@ -68,6 +66,4 @@ Implementations MUST NOT continue past the escalation threshold without user dir
 
 ---
 
-## Conformance
-
-Violations of MUST requirements constitute conformance failures, notably: proposing or applying fixes without a reproduction (outside documented non-reproducible cases), presenting symptom mitigation as a root-cause fix, skipping the regression test when the bug is testable, leaving instrumentation in place, or continuing past the escalation threshold without user direction.
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.

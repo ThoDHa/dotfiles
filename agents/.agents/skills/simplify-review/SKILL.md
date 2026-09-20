@@ -7,7 +7,7 @@ description: Simplify and Review Loop covering the post-implementation convergen
 
 ## Scope
 
-This specification defines the convergence cycle that MUST run after a task's implementation work ends and before that task is reported complete. It applies to every completed unit of work: TodoWrite todos, task-file tasks (per the `task-files` skill), and standalone user requests, whenever the task modified files. Research-only tasks that produced no changes skip the loop.
+This specification defines the convergence cycle that MUST run after a task's implementation work ends and before that task is reported complete. Research-only tasks that produced no changes skip the loop.
 
 ### Related Specifications
 
@@ -71,6 +71,4 @@ When working under task files, each iteration MUST be recorded in the Work Log u
 
 ---
 
-## Conformance
-
-Violations of MUST requirements constitute conformance failures, notably: reporting a task complete without running the loop, reporting complete before convergence without documented findings and user acceptance of the cap, skipping test re-runs after applied fixes, or reporting complete without final verification of intended behavior.
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.
