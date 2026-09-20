@@ -158,6 +158,8 @@ When a delegated agent fails to complete its task, it gets exactly one retry. Wh
 
 **Standing restart grant.** When the user has granted standing restart authorization, recorded in the orchestration design in force, a pure coordinator parks the failed task instead of stopping the whole effort: the task carries a Blocked status whose reason states the failure summary and the attempt count, reported to the user without blocking the remaining work, and the coordinator re-dispatches it per the design's checkpoint-event rule (restart consideration rides backfill and checkpoint events, oldest-cleared-first, never into an unchanged blocking condition, restart-eligible only after the design's backoff interval has elapsed since the task's last dispatch attempt, with hard escalation per the manager agent file's escalation bounds). The stop-report-ask path above remains the default whenever no such grant is recorded.
 
+The design's backoff interval is measured on wall-clock time taken from the board's own timestamps: the tasks CLI stamps task file headers (Updated) and Work Log entries with real times, and the coordinator reads the current time by refreshing a header through the CLI and reading it back, never from a shell clock.
+
 No failure is hidden or minimized, under either mode. Without a standing restart grant, no failure gets a third attempt; under a recorded grant, re-dispatches of a parked task follow the design's checkpoint-event rule within its escalation bounds. Implementations remain ultimately responsible.
 
 ## Conformance
