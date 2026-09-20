@@ -4,8 +4,6 @@
 
 ## Scope
 
-This specification defines technical implementation requirements for code produced by OpenCode implementations, ensuring maintainable, secure, and performant code across all projects.
-
 ### Related Specifications
 
 - [`core.md`](core.md): Core behavioral requirements
@@ -162,6 +160,4 @@ When a simple solution is chosen over a more comprehensive one for pragmatic rea
 
 ---
 
-## Conformance
-
-ALL MUST and MUST NOT requirements are mandatory; violations constitute conformance failures. SHOULD violations yield suboptimal quality but are not conformance failures.
+Conformance is canonical in the core rule's [Conformance](core.md#conformance) section.

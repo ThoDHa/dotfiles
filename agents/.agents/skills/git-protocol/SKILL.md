@@ -9,8 +9,6 @@ description: Git protocol covering pre-commit analysis, logical unit grouping, d
 
 ## Scope
 
-This specification defines requirements for version control operations, including commit creation, message formatting, and branch management.
-
 ### Related Specifications
 
 - The `core` rule (always loaded): core behavioral requirements (formal output standards)
@@ -220,6 +218,6 @@ When a force push is unavoidable and approved per [Force Push Protection](#force
 
 ---
 
-## Conformance
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.
 
-All requirements are mandatory. Force pushing without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and an immediate conformance failure.
+Force pushing without the explicit user confirmation required by [Force Push Protection](#force-push-protection), or using `--no-verify` without the recorded justification footer and audit log entry required by [No-Verify Protection](#no-verify-protection), is a critical safety violation and an immediate conformance failure.

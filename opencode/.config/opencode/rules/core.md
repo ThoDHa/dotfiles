@@ -9,7 +9,7 @@
 
 ## Scope
 
-This specification defines mandatory behavioral requirements for all OpenCode implementations across all sessions and contexts.
+This specification is always loaded, in every session and context.
 
 ### Related Specifications
 
@@ -151,4 +151,4 @@ Detailed commit, branch, and push requirements live in the `git-protocol` skill;
 
 ## Conformance
 
-ALL requirements in this specification are mandatory, and any violation of a MUST or MUST NOT constitutes an immediate conformance failure. All related specifications listed in [Related Specifications](#related-specifications) MUST be followed.
+ALL requirements in this specification are mandatory, and any violation of a MUST or MUST NOT constitutes an immediate conformance failure. This statement is canonical for all specifications: violations of any specification's MUST or MUST NOT requirements are conformance failures. All related specifications listed in [Related Specifications](#related-specifications) MUST be followed.

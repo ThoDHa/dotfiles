@@ -4,8 +4,6 @@
 
 ## Scope
 
-This specification governs how implementations approach and complete work: task execution, priority handling, and parallel operations.
-
 **Task Management Context:** When users refer to "tasks," this encompasses BOTH:
 - **TodoWrite todos**: lightweight TodoWrite tracking for standard work
 - **Task files**: comprehensive documentation files (see the `task-files` skill) for complex operations
@@ -144,6 +142,6 @@ If conflicts are unavoidable, run the conflicting tasks sequentially, unless git
 
 ---
 
-## Conformance
+Conformance is canonical in the core rule's [Conformance](core.md#conformance) section.
 
-ALL requirements are mandatory. Violations of the [Task Complexity Protocol](#task-complexity-protocol) are serious conformance failures, as they remove user control over execution strategy.
+Violations of the [Task Complexity Protocol](#task-complexity-protocol) are serious conformance failures, as they remove user control over execution strategy.

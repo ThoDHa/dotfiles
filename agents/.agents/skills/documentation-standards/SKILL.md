@@ -9,8 +9,6 @@ description: Documentation standards covering prohibited vague bullet patterns, 
 
 ## Scope
 
-This specification defines requirements for documentation, README files, and prose written by implementations. These standards ensure clear, substantive writing without lazy shorthand patterns.
-
 ### Related Specifications
 
 - The `coding-standards` rule (always loaded): technical implementation requirements
@@ -101,6 +99,4 @@ Implementations MUST use specific, concrete language over vague generalities.
 
 ---
 
-## Conformance
-
-Violations of MUST requirements constitute conformance failures, including the writing patterns prohibited in [Prohibited Writing Patterns](#prohibited-writing-patterns), the punctuation prohibitions in [Punctuation Requirements](#punctuation-requirements), and the wrapping requirements in [Line-Wrapping Format](#line-wrapping-format).
+Conformance is canonical in the core rule's [Conformance](../../../../opencode/.config/opencode/rules/core.md#conformance) section.
