@@ -15,7 +15,7 @@ section heading or rule number).
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | session | simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git |
-| planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
+| planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no implementation
 duty (it never authors implementation content), and its file edits are
@@ -66,9 +66,11 @@ section for staging, history shaping, and push rules.
 Under the task-files protocol every `.tasks/` write has exactly one owner:
 the manager owns the task files and the dashboard, dispatched agents own the
 two `tasks` CLI channels (Work Log entries and report deposits, attributed
-via `--from`), and the planner's planning-section carve-out is the single
-exception (the task-files skill's Agent Write Path and Serialized Task-File
-Body Edits sections). Bulky output lives under `.tasks/reports/` (the
+via `--from`), and the two agent-owned write exceptions are the planner's
+planning-section carve-out and the research deposit, a task-file-less
+agent's direct file write into the reserved `research/` namespace (the
+task-files skill's Agent Write Path, Serialized Task-File Body Edits, and
+Reports Namespace sections). Bulky output lives under `.tasks/reports/` (the
 skill's Reports Namespace and Manual Fallback sections); closure work opens
 with a short digest and planning fan-out shares one reconnaissance artifact
 (the skill's Closure Digest and Triage to Ready Planning Phase sections, the
@@ -141,8 +143,9 @@ confining its edits to `.tasks/**` while bash stays open; the worker holds
 everything except push, history reshaping, gh writes, and subagent spawning;
 the verifier's bash is intentionally open so it can run tests; the reviewer
 holds read-only git only; the planner pairs read-only git with the two
-`tasks` CLI channels and an edit map opening only `.tasks/**`, the
-channels its research role runs on, so the prompt-level routing added
+`tasks` CLI channels and an edit map opening only `.tasks/**`, covering
+both the channels its research role runs on and the direct `research/`
+deposit write, so the prompt-level routing added
 no permission changes. Prefix-based bash permissions are
 guardrails against uninstructed behavior, not security boundaries: a
 determined `sh -c` or `git -C` route slips past them, and hard
