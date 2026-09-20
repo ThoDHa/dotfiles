@@ -14,7 +14,9 @@
 #                             http(s) out of scope; fence contents and
 #                             inline code spans excluded)
 #   3. heading structure      exactly one `# ` title per file, no level
-#                             jumps skipping a rung
+#                             jumps skipping a rung (YAML frontmatter
+#                             skipped; files with no headings, like the
+#                             prose-only agent files, pass vacuously)
 #   4. INVENTORY counts       class heading count equals list length
 #   5. INVENTORY membership   class list equals the tracked source set
 #                             (directory classes: git ls-files of the
@@ -156,7 +158,6 @@ heading_slugs() { # file; prints GitHub-style anchor slugs for its headings
 		text = $0
 		sub(/^#{1,6}[[:space:]]+/, "", text)
 		sub(/[[:space:]]*#+[[:space:]]*$/, "", text)
-		gsub(/`/, "", text)
 		text = tolower(text)
 		slug = ""
 		for (i = 1; i <= length(text); i++) {
@@ -267,7 +268,6 @@ scan_headings() { # file
 				exit 1
 			}
 			saw_any = 1
-			saw_title = 1
 			prev = 1
 			next
 		}
@@ -296,6 +296,8 @@ check_headings() {
 parse_inventory() { # emits C<class> and E<entry> records
 	awk -v inv="$INVENTORY" '
 	function flush_class() {
+		# Invoked only after parse_heading, so the guard skips the
+		# pre-heading intro paragraph region, never a real class.
 		if (have_class) printf "C\t%s\t%s\t%d\t%s\n", class_name, class_count, class_line, class_dir
 	}
 	function parse_heading(heading, line_no,    head, matched, inner, comma_at) {
@@ -329,6 +331,8 @@ parse_inventory() { # emits C<class> and E<entry> records
 		flush_class()
 		next
 	}
+	# Each class record is emitted at its heading so the E records that
+	# follow it in the stream land on the right class in read_inventory.
 	/^[[:space:]]*$/ { next }
 	/^#/ { next }
 	{
