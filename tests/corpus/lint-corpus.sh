@@ -33,7 +33,8 @@
 # Usage: lint-corpus.sh [--root DIR]
 #   --root DIR   lint the corpus copy at DIR instead of this repo
 #                (failure-fixture runs); the CORPUS_ROOT env var does
-#                the same
+#                the same. --root is accepted only as the first
+#                argument, exactly one flag exists.
 
 set -euo pipefail
 export LC_ALL=C
@@ -45,7 +46,24 @@ if [[ "${1:-}" == "--root" ]]; then
 		echo "FAIL: --root requires a directory argument" >&2
 		exit 1
 	fi
+	case "$2" in
+		-*) echo "FAIL: --root requires a directory argument, got '$2'" >&2; exit 1 ;;
+	esac
+	if [[ "${3:-}" != "" ]]; then
+		echo "FAIL: unexpected argument '$3'; only --root DIR is supported" >&2
+		exit 1
+	fi
 	CORPUS_ROOT="$2"
+elif [[ "${1:-}" == -* ]]; then
+	echo "FAIL: unknown option '$1'; only --root DIR is supported" >&2
+	exit 1
+elif [[ "${1:-}" != "" ]]; then
+	echo "FAIL: unexpected argument '$1'; only --root DIR is supported" >&2
+	exit 1
+fi
+if [[ ! -d "$CORPUS_ROOT" ]]; then
+	echo "FAIL: corpus root '$CORPUS_ROOT' is not a directory" >&2
+	exit 1
 fi
 CORPUS_ROOT="$(cd "$CORPUS_ROOT" && pwd -P)"
 cd "$CORPUS_ROOT"
@@ -346,9 +364,17 @@ parse_inventory() { # emits C<class> and E<entry> records
 declare -A INV_DIR=() INV_COUNT=() INV_LINE=() INV_ENTRIES=() INV_ENTRY_TOTAL=()
 INV_CLASS_ORDER=()
 read_inventory() {
-	local stream tag name count head_line dir last
+	local tag name count head_line dir last line
 	INV_CLASS_ORDER=()
-	stream="$(parse_inventory)"
+	# Pass 1: the parser emits its FAIL first and exits mid-stream, so a
+	# malformed heading surfaces as a FAIL line here; catch it before
+	# the field loop mangles the message with the record split.
+	while IFS= read -r line; do
+		case "$line" in
+			FAIL:*) printf '%s\n' "$line"; exit 1 ;;
+		esac
+	done < <(parse_inventory)
+	# Pass 2: split the well-formed records.
 	while IFS=$'\t' read -r tag name count head_line dir; do
 		case "$tag" in
 			C)
@@ -365,7 +391,7 @@ read_inventory() {
 				INV_ENTRY_TOTAL["$last"]=$((INV_ENTRY_TOTAL["$last"] + 1))
 				;;
 		esac
-	done <<<"$stream"
+	done < <(parse_inventory)
 }
 
 check_inventory_counts() {
@@ -441,11 +467,21 @@ check_line_budgets() {
 	echo "  6/6 line budgets: clean"
 }
 
+check_preflight() { # the structural basis every later check assumes
+	local file
+	assert_present "$INVENTORY"
+	while IFS= read -r file; do
+		assert_present "$file"
+	done < <(md_corpus_files)
+	assert_present "$MAKEFILE"
+}
+
 main() {
 	git rev-parse --show-toplevel >/dev/null 2>&1 \
 		|| fail_at "$CORPUS_ROOT" 1 "not a git work tree; the lint reads tracked files only"
 	load_tracked
 	echo "Linting the corpus at $CORPUS_ROOT"
+	check_preflight
 	check_em_dashes
 	check_links
 	check_headings
