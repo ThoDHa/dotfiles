@@ -334,7 +334,7 @@ t set "$f_kv" Status=Blocked "Status Reason=second block" >/dev/null
 t set "$f_kv" Status=Ready >/dev/null
 assert_not_contains "leaving Blocked without a reason pair drops it" "$(kv_hdr)" "**Status Reason:**"
 kv_blocked_before="$(cat "$f_kv")"
-refuse "entering Blocked without a Status Reason is rejected" set "$f_kv" Status=Blocked
+refuse "Blocked without a Status Reason is rejected" set "$f_kv" Status=Blocked
 assert_contains "Blocked refusal demands a reason" \
 	"$(t set "$f_kv" Status=Blocked 2>&1 >/dev/null || true)" "Status Reason"
 assert_eq "rejected Blocked transition leaves the file byte-identical" "$kv_blocked_before" "$(cat "$f_kv")"
@@ -344,7 +344,7 @@ assert_contains "Blocked with a same-call reason lands both fields" "$(kv_hdr)" 
 t set "$f_kv" Status=Blocked >/dev/null
 assert_contains "re-Blocking with the reason already on file keeps it" "$(kv_hdr)" \
 	"**Status Reason:** work stopped on dependency"
-refuse "entering Blocked with an emptied reason pair is rejected" set "$f_kv" Status=Blocked "Status Reason="
+refuse "Blocked with an emptied reason pair is rejected" set "$f_kv" Status=Blocked "Status Reason="
 kv_reason_before="$(cat "$f_kv")"
 refuse "an explicit reason on a non-Blocked status is rejected" set "$f_kv" Status=Ready "Status Reason=still stuck"
 assert_eq "reason-status mismatch refusal leaves the file byte-identical" "$kv_reason_before" "$(cat "$f_kv")"
@@ -361,6 +361,45 @@ kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
 [[ "$kv_updated" == "$(date '+%Y-%m-%d')"* ]] \
 	&& ok "an emptied Updated= pair refreshes instead of deleting" \
 	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
+
+echo "== set: re-inserted template fields land at their canonical slot =="
+# A field deleted with Key= must re-insert at its template position (the
+# new-task scaffold's order), never at end of header; the dashboard parser
+# and humans both key on that order.
+f_pos="$(t new --id POS-1 --name "Canonical Insert Target")"
+t set "$f_pos" "Checkpoint Gating=none" >/dev/null
+pos_order() {
+	awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_pos"
+}
+POS_CANONICAL_ORDER="$(printf '%s\n' Created Status Priority Progress Owner "Checkpoint Gating" Updated "Latest Update")"
+t set "$f_pos" Owner= >/dev/null
+assert_not_contains "Owner deletion removes the field" "$(awk '/^## /{exit}{print}' "$f_pos")" "**Owner:**"
+t set "$f_pos" Owner=worker-pos >/dev/null
+assert_eq "re-set Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t set "$f_pos" Owner= >/dev/null
+t claim "$f_pos" --owner claim-pos >/dev/null
+assert_eq "claimed Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t release "$f_pos" >/dev/null
+assert_eq "release keeps Owner in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+t set "$f_pos" Owner= >/dev/null
+t release "$f_pos" >/dev/null
+assert_eq "blank-path Owner insert lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
+assert_eq "blank-path Owner insert writes the bare field" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_pos")"
+t set "$f_pos" "Latest Update=" >/dev/null
+t set "$f_pos" "Latest Update=restored" >/dev/null
+assert_eq "re-set Latest Update falls back to end of header" "$POS_CANONICAL_ORDER" "$(pos_order)"
+rm -f "$f_pos"
+t render >/dev/null
+
+echo "== set: backslash values survive verbatim =="
+f_bs="$(t new --id BS-1 --name "Backslash Target")"
+t set "$f_bs" 'Priority=c\\d' 'Duration=e\tf' >/dev/null
+assert_contains "double backslash in a set value survives verbatim" \
+	"$(grep -m1 '^\*\*Priority:' "$f_bs")" 'Priority:** c\\d'
+assert_contains "backslash-t in a set value survives verbatim" \
+	"$(grep -m1 '^\*\*Duration:' "$f_bs")" 'Duration:** e\tf'
+rm -f "$f_bs"
+t render >/dev/null
 
 echo "== malformed header resilience =="
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"

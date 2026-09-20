@@ -66,7 +66,21 @@ readonly DEFAULT_FROM="Manager"
 readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
-readonly HEADER_FIELDS="Created, Status, Status Reason, Priority, Progress, Owner, Checkpoint Gating, Updated, Completed, Duration, Latest Update"
+# The header fields the task-file template defines, in the canonical order
+# the new-task scaffold lays them out in: valid_header_key checks membership
+# against this list, HEADER_FIELDS is derived from it for error messages,
+# and the header writers insert an absent field before the first present
+# field that canonically follows it, so delete/re-insert cycles keep the
+# header order stable.
+readonly -a TEMPLATE_HEADER_FIELDS=("Created" "Status" "$STATUS_REASON_KEY" "Priority" "Progress" "Owner" "Checkpoint Gating" "Updated" "Completed" "Duration" "Latest Update")
+
+# Comma-separated form of TEMPLATE_HEADER_FIELDS for error messages.
+_header_fields_list() {
+	local fields
+	fields="$(printf '%s, ' "$@")"
+	printf '%s' "${fields%, }"
+}
+readonly HEADER_FIELDS="$(_header_fields_list "${TEMPLATE_HEADER_FIELDS[@]}")"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
@@ -91,10 +105,11 @@ valid_task_id() {
 # template defines (see the task-files skill's Task File Template). A near
 # miss like "StatusReason" must be rejected, not inserted as a new field.
 valid_header_key() {
-	case "$1" in
-		"Created"|"Status"|"Status Reason"|"Priority"|"Progress"|"Owner"|"Checkpoint Gating"|"Updated"|"Completed"|"Duration"|"Latest Update") return 0 ;;
-		*) return 1 ;;
-	esac
+	local candidate
+	for candidate in "${TEMPLATE_HEADER_FIELDS[@]}"; do
+		[[ "$1" == "$candidate" ]] && return 0
+	done
+	return 1
 }
 
 # Report slugs become filename segments under reports/; strict kebab-case
@@ -336,32 +351,59 @@ render() {
 
 # --- header mutation -------------------------------------------------------
 
-# Replace a "**Key:** value" line within the header, or insert it just before
-# the Table of Contents if absent. An empty value removes the line instead:
-# a blank field is never written (a deleted reason must not survive as an
-# empty duplicate). Only the header region is touched.
+# Rewrite the header region placing one "**Key:** ..." line: an existing
+# "**Key:** ..." line is replaced in place (first occurrence wins, any
+# duplicate key line is dropped), an absent one inserts at its canonical
+# template slot (before the first present field that canonically follows
+# the key in TEMPLATE_HEADER_FIELDS), and end of header is the fallback
+# when no successor exists (also covering fields outside the template
+# order). set_header_field and blank_header_field differ only in the line
+# they write, so this carries their shared single-pass rewrite. Atomic:
+# output is staged into a temp file and a single mv commits it, so a
+# failure mid-pass leaves the original file untouched. Only the header
+# region is touched. The composed line travels via ENVIRON (not awk -v) so
+# backslashes in user values survive verbatim.
+write_header_field() {
+	local file="$1" key="$2" line="$3"
+	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
+	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" LINE="$line" awk -v key="$key" '
+		function emit_field() { print line; done = 1 }
+		BEGIN {
+			inhdr = 1; done = 0; line = ENVIRON["LINE"]
+			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
+			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
+		}
+		inhdr && /^## / {
+			if (!done) emit_field()
+			inhdr = 0
+		}
+		{
+			if (inhdr && !done && match($0, /^\*\*[^*:]+:\*\*/)) {
+				field = substr($0, RSTART + 2, RLENGTH - 5)
+				if ((field in pos) && (key in pos) && pos[field] > pos[key]) emit_field()
+			}
+			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
+				if (!done) emit_field()
+				next
+			}
+			print
+		}
+		END { if (!done) emit_field() }
+	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+}
+
+# Replace a "**Key:** value" line within the header, or insert it at its
+# canonical template slot when absent (see write_header_field). An empty
+# value removes the line instead: a blank field is never written (a
+# deleted reason must not survive as an empty duplicate).
 set_header_field() {
 	local file="$1" key="$2" value="$3"
 	if [[ -z "$value" ]]; then
 		delete_header_field "$file" "$key"
 		return
 	fi
-	local tmp; tmp="$(mktemp "$file.XXXXXX")"
-	awk -v key="$key" -v value="$value" '
-		BEGIN { inhdr = 1; done = 0 }
-		inhdr && /^## / {
-			if (!done) { print "**" key ":** " value; done = 1 }
-			inhdr = 0
-		}
-		{
-			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				print "**" key ":** " value; done = 1; next
-			}
-			print
-		}
-		END { if (!done) print "**" key ":** " value }
-	' "$file" >"$tmp"
-	mv -f "$tmp" "$file"
+	write_header_field "$file" "$key" "**$key:** $value"
 }
 
 # Remove a "**Key:** value" line from the header region (before the first
@@ -383,31 +425,13 @@ delete_header_field() {
 }
 
 # Write a bare "**Key:**" line (no value, no trailing space) into the
-# header, replacing any existing "**Key:** ..." line in place, or inserting
-# the field before the Table of Contents when absent. Unlike
+# header (see write_header_field for the placement rules). Unlike
 # set_header_field's empty-value branch (which deletes), this keeps the
 # field present: the template header carries **Owner:** even when no claim
 # is held, so clearing the owner must blank the value, not remove the
-# scaffolded line. Atomic like its siblings; only the header region is
-# touched.
+# scaffolded line.
 blank_header_field() {
-	local file="$1" key="$2"
-	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	awk -v key="$key" '
-		BEGIN { inhdr = 1; done = 0 }
-		inhdr && /^## / {
-			if (!done) { print "**" key ":**"; done = 1 }
-			inhdr = 0
-		}
-		{
-			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				print "**" key ":**"; done = 1; next
-			}
-			print
-		}
-		END { if (!done) print "**" key ":**" }
-	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
-	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+	write_header_field "$1" "$2" "**$2:**"
 }
 
 # Append a Work Log entry at the end of the "## Work Log" section and
