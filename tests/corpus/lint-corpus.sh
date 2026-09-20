@@ -97,6 +97,10 @@ fail_at() { # file line message
 	exit 1
 }
 
+assert_present() { # file; tracked files can still vanish from a worktree
+	[[ -f $1 ]] || fail_at "$1" 1 "tracked file missing from the worktree"
+}
+
 md_corpus_files() {
 	git ls-files -- "${CORPUS_SCOPES[@]}" | grep -E '\.md$'
 }
@@ -137,6 +141,7 @@ scan_em_dashes() { # file
 check_em_dashes() {
 	local file
 	while IFS= read -r file; do
+		assert_present "$file"
 		scan_em_dashes "$file"
 	done < <(md_corpus_files; printf '%s\n' "$MAKEFILE")
 	echo "  1/6 em-dash sweep: clean"
@@ -231,6 +236,7 @@ check_links() {
 			if ! is_tracked "$resolved"; then
 				fail_at "$file" "$ln" "dead link target '$target' (no tracked file at '$resolved')"
 			fi
+			assert_present "$resolved"
 			if [[ -n "$anchor" ]]; then
 				load_anchors "$resolved"
 				[[ -n "${ANCHORS[$anchor]+x}" ]] \
@@ -275,14 +281,13 @@ scan_headings() { # file
 		}
 		prev = level
 	}
-	END {
-		if (saw_title) exit 0
-	}' "$1"
+	' "$1"
 }
 
 check_headings() {
 	local file
 	while IFS= read -r file; do
+		assert_present "$file"
 		scan_headings "$file"
 	done < <(md_corpus_files)
 	echo "  3/6 heading structure: clean"
@@ -416,6 +421,7 @@ check_line_budgets() {
 			README.md | opencode/DESIGN.md) budget=$BUDGET_CORPUS_DOC_LINES ;;
 		esac
 		[[ -n "$budget" ]] || continue
+		assert_present "$file"
 		lines="$(wc -l < "$file")"
 		case "$file" in
 			README.md | opencode/DESIGN.md)
