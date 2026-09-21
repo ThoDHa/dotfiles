@@ -511,87 +511,118 @@ render() {
 
 # --- header mutation -------------------------------------------------------
 
-# Rewrite the header region placing one "**Key:** ..." line: an existing
-# "**Key:** ..." line is replaced in place (first occurrence wins, any
-# duplicate key line is dropped), an absent one inserts at its canonical
-# template slot (before the first present field that canonically follows
-# the key in TEMPLATE_HEADER_FIELDS), and end of header is the fallback
-# when no successor exists (also covering fields outside the template
-# order). set_header_field and blank_header_field differ only in the line
-# they write, so this carries their shared single-pass rewrite. Atomic:
-# output is staged into a temp file and a single mv commits it, so a
-# failure mid-pass leaves the original file untouched. Only the header
-# region is touched. The composed line travels via ENVIRON (not awk -v) so
-# backslashes in user values survive verbatim.
-write_header_field() {
-	local file="$1" key="$2" line="$3"
+# Rewrite the header region placing every "**Key:** ..." line given as
+# arguments "<key>\034<line>" in ONE pass: an existing "**Key:** ..." line
+# is replaced in place (first occurrence wins, any duplicate key line is
+# dropped), an absent one inserts at its canonical template slot (before
+# the first present field that canonically follows the key in
+# TEMPLATE_HEADER_FIELDS), and end of header is the fallback when no
+# successor exists (also covering fields outside the template order).
+# Keys emit in canonical template order: at every emission point the
+# pending keys are visited sorted by their TEMPLATE_HEADER_FIELDS position
+# (stable, so keys outside the template keep command order), which is the
+# order the old sequential per-key passes produced when several missing
+# keys share one insertion anchor. An EMPTY line deletes the key's
+# lines instead of writing one. The per-key lines travel via per-key
+# environment variables (not awk -v) so backslashes in user values
+# survive verbatim. Atomic: output
+# is staged into a temp file and a single mv commits it, so a failure
+# mid-pass leaves the original file untouched. Only the header region is
+# touched.
+write_header_fields() {
+	local file="$1"; shift
+	# Nothing requested, nothing to write: no temp, no rewrite.
+	(($# > 0)) || return 0
 	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" LINE="$line" awk -v key="$key" '
-		function emit_field() { print line; done = 1 }
+	# The per-key values export under generated names (KEY_1, LINE_1, ...):
+	# export, like env, parses each argument as an assignment itself, while
+	# a shell env-prefix built from an array would arrive quoted and stop
+	# being assignments. Every variable is unset again on every exit path,
+	# exported state must never leak to later commands' children.
+	local i=0 pair key rc=0
+	export TEMPLATE_ORDER="$(printf '%s\034' "${TEMPLATE_HEADER_FIELDS[@]}")" NKEYS="$#"
+	for pair in "$@"; do
+		((i += 1))
+		key="${pair%%$'\034'*}"
+		export "KEY_$i=$key" "LINE_$i=${pair#*$'\034'}"
+	done
+	awk '
 		BEGIN {
-			inhdr = 1; done = 0; line = ENVIRON["LINE"]
+			inhdr = 1
+			nkeys = ENVIRON["NKEYS"] + 0
+			for (i = 1; i <= nkeys; i++) {
+				k = ENVIRON["KEY_" i]
+				keyseq[i] = k
+				line_of[k] = ENVIRON["LINE_" i]
+				have[k] = 0
+			}
 			n = split(ENVIRON["TEMPLATE_ORDER"], order, SUBSEP)
 			for (i = 1; i <= n; i++) if (order[i] != "") pos[order[i]] = i
+			for (i = 1; i <= nkeys; i++) {
+				k = ENVIRON["KEY_" i]
+				if (k in pos) orderpos[i] = pos[k] + 0
+				else orderpos[i] = 1e9 + i
+			}
+			# Stable insertion sort of the key sequence by canonical
+			# position: ties (non-template keys) keep command order.
+			for (i = 1; i <= nkeys; i++) emseq[i] = keyseq[i]
+			for (i = 2; i <= nkeys; i++) {
+				k = emseq[i]
+				p = orderpos[i]
+				for (j = i - 1; j >= 1 && orderpos[j] > p; j--) {
+					emseq[j + 1] = emseq[j]
+					orderpos[j + 1] = orderpos[j]
+				}
+				emseq[j + 1] = k
+				orderpos[j + 1] = p
+			}
+		}
+		function emit_key(k) { if (line_of[k] != "") print line_of[k]; have[k] = 1 }
+		function pending_emit() {
+			for (i = 1; i <= nkeys; i++) if (!have[emseq[i]]) emit_key(emseq[i])
 		}
 		inhdr && /^## / {
-			if (!done) emit_field()
+			pending_emit()
 			inhdr = 0
 		}
 		{
-			if (inhdr && !done && match($0, /^\*\*[^*:]+:\*\*/)) {
-				field = substr($0, RSTART + 2, RLENGTH - 5)
-				if ((field in pos) && (key in pos) && pos[field] > pos[key]) emit_field()
-			}
-			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) {
-				if (!done) emit_field()
-				next
+			if (inhdr) {
+				if (match($0, /^\*\*[^*:]+:\*\*/)) {
+					field = substr($0, RSTART + 2, RLENGTH - 5)
+					if (field in pos)
+						for (i = 1; i <= nkeys; i++) {
+							k = emseq[i]
+							if (!have[k] && (k in pos) && pos[field] > pos[k]) emit_key(k)
+						}
+				}
+				for (i = 1; i <= nkeys; i++) {
+					k = emseq[i]
+					if ($0 ~ ("^\\*\\*" k ":\\*\\*")) {
+						if (!have[k]) emit_key(k)
+						next
+					}
+				}
 			}
 			print
 		}
-		END { if (!done) emit_field() }
-	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
-	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
+		END { pending_emit() }
+	' "$file" >"$tmp" || rc=1
+	if ((rc == 0)); then
+		mv -f "$tmp" "$file" || rc=1
+	fi
+	unset TEMPLATE_ORDER NKEYS
+	for ((key = 1; key <= i; key++)); do unset "KEY_$key" "LINE_$key"; done
+	((rc != 0)) && rm -f "$tmp"
+	return "$rc"
 }
 
 # Replace a "**Key:** value" line within the header, or insert it at its
-# canonical template slot when absent (see write_header_field). An empty
+# canonical template slot when absent (see write_header_fields). An empty
 # value removes the line instead: a blank field is never written (a
 # deleted reason must not survive as an empty duplicate).
 set_header_field() {
 	local file="$1" key="$2" value="$3"
-	if [[ -z "$value" ]]; then
-		delete_header_field "$file" "$key"
-		return
-	fi
-	write_header_field "$file" "$key" "**$key:** $value"
-}
-
-# Remove a "**Key:** value" line from the header region (before the first
-# "## " heading). Deleting an absent key is a no-op. Atomic like
-# set_header_field: output is staged into a temp file and a single mv
-# commits it. Only the header region is touched.
-delete_header_field() {
-	local file="$1" key="$2"
-	local tmp; tmp="$(mktemp "$file.XXXXXX")" || return 1
-	awk -v key="$key" '
-		BEGIN { inhdr = 1 }
-		inhdr && /^## / { inhdr = 0 }
-		{
-			if (inhdr && $0 ~ ("^\\*\\*" key ":\\*\\*")) next
-			print
-		}
-	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
-	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-}
-
-# Write a bare "**Key:**" line (no value, no trailing space) into the
-# header (see write_header_field for the placement rules). Unlike
-# set_header_field's empty-value branch (which deletes), this keeps the
-# field present: the template header carries **Owner:** even when no claim
-# is held, so clearing the owner must blank the value, not remove the
-# scaffolded line.
-blank_header_field() {
-	write_header_field "$1" "$2" "**$2:**"
+	write_header_fields "$file" "$key"$'\034'"**$key:** $value"
 }
 
 # Append a Work Log entry at the end of the "## Work Log" section and
@@ -985,14 +1016,33 @@ cmd_set() {
 	# anywhere else with a non-empty reason is a contradiction and is refused
 	# rather than silently leaving a stale field behind. A call without a
 	# Status pair keeps the file's current status as the target, so clearing
-	# the reason on a Blocked task is refused instead of unexplained.
-	local target_status current_reason
-	if [[ -n "$new_status" ]]; then
-		target_status="$new_status"
-	else
-		target_status="$(header_field "Status" < <(header_of <"$file"))"
-	fi
-	current_reason="$(header_field "$STATUS_REASON_KEY" < <(header_of <"$file"))"
+	# the reason on a Blocked task is refused instead of unexplained. The
+	# two lookups read the header region directly in bash with the same
+	# first-match, whitespace-run semantics as the extraction greps, so a
+	# validation-only command spawns nothing here. The read's || guard
+	# processes a file whose header lacks the trailing newline, exactly
+	# where awk's header_of stops.
+	local target_status="$new_status" current_reason=""
+	local hline
+	local re_status='^\*\*Status:\*\*[[:space:]]+(.*)$'
+	local re_reason='^\*\*'"$STATUS_REASON_KEY"':\*\*[[:space:]]+(.*)$'
+	local have_status=0 have_reason=0
+	# An explicit Status pair already fixed the transition target; only an
+	# absent one is read from the file.
+	[[ -n "$new_status" ]] && have_status=1
+	while IFS= read -r hline || [[ -n "$hline" ]]; do
+		[[ "$hline" == "## "* ]] && break
+		# First match wins per key even when the value is empty, so the
+		# flags - not the variables - gate the capture.
+		if ((have_status == 0)) && [[ "$hline" =~ $re_status ]]; then
+			target_status="${BASH_REMATCH[1]}"
+			have_status=1
+		elif ((have_reason == 0)) && [[ "$hline" =~ $re_reason ]]; then
+			current_reason="${BASH_REMATCH[1]}"
+			have_reason=1
+		fi
+		((have_status == 1 && have_reason == 1)) && break
+	done <"$file"
 	if [[ "$target_status" == "$STATUS_BLOCKED" || "$target_status" == "$STATUS_CANCELLED" ]]; then
 		if ((status_reason_given == 0)); then
 			[[ -n "$current_reason" ]] \
@@ -1008,6 +1058,15 @@ cmd_set() {
 		fi
 	fi
 
+	# All pairs land in one whole-file rewrite: composed lines (or empty
+	# ones for deletions) ride as "<key>\034<line>" entries so a mid-crash
+	# can never strand half the pairs, and the Updated refresh joins the
+	# same commit. Leaving Blocked/Cancelled drops the reason with the
+	# transition (the header contract omits it under any other status),
+	# unless this call already manages the pair explicitly; deleting an
+	# absent key writes nothing for it, so a task that never carried a
+	# reason is not rewritten for nothing beyond the pairs themselves.
+	local -a writes=()
 	local touched_updated=0
 	for ((i = 1; i < ${#args[@]}; i++)); do
 		pair="${args[$i]}"
@@ -1019,18 +1078,19 @@ cmd_set() {
 		if [[ "$key" == "Updated" && -z "$value" ]]; then
 			value="$(now)"
 		fi
-		set_header_field "$file" "$key" "$value"
+		if [[ -z "$value" ]]; then
+			writes+=("$key"$'\034')
+		else
+			writes+=("$key"$'\034'"**$key:** $value")
+		fi
 		[[ "$key" == "Updated" ]] && touched_updated=1
 	done
-	# Leaving Blocked/Cancelled drops the reason with the transition (the
-	# header contract omits it under any other status), unless this call
-	# already manages the pair explicitly. Nothing to drop on a task that
-	# never carried one, so the file is not rewritten for nothing.
+	((touched_updated == 0)) && writes+=("Updated"$'\034'"**Updated:** $(now)")
 	if [[ "$target_status" != "$STATUS_BLOCKED" && "$target_status" != "$STATUS_CANCELLED" ]] \
 		&& ((status_reason_given == 0)) && [[ -n "$current_reason" ]]; then
-		delete_header_field "$file" "$STATUS_REASON_KEY"
+		writes+=("$STATUS_REASON_KEY"$'\034')
 	fi
-	((touched_updated == 0)) && set_header_field "$file" "Updated" "$(now)"
+	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
 	render_unlocked "$tasks_dir"
 }
 
@@ -1056,8 +1116,9 @@ cmd_claim() {
 
 	# O_EXCL create: exactly one racer wins. noclobber makes '>' fail if it exists.
 	if (set -o noclobber; printf '%s\n' "$owner" >"$claim") 2>/dev/null; then
-		set_header_field "$file" "Owner" "$owner"
-		set_header_field "$file" "Updated" "$(now)"
+		write_header_fields "$file" \
+			"Owner"$'\034'"**Owner:** $owner" \
+			"Updated"$'\034'"**Updated:** $(now)"
 		render_unlocked "$tasks_dir"
 		printf 'claimed %s by %s\n' "$(basename "$file")" "$owner"
 	elif [[ -e "$claim" ]]; then
@@ -1083,8 +1144,9 @@ cmd_release() {
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	rm -f "$file$CLAIM_SUFFIX"
-	blank_header_field "$file" "Owner"
-	set_header_field "$file" "Updated" "$(now)"
+	write_header_fields "$file" \
+		"Owner"$'\034'"**Owner:**" \
+		"Updated"$'\034'"**Updated:** $(now)"
 	render_unlocked "$tasks_dir"
 	printf 'released %s\n' "$(basename "$file")"
 }

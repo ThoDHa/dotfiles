@@ -605,6 +605,42 @@ else
 fi
 assert_eq "failed render leaves the board file untouched" "$board_before" "$(cat "$fail_dir/dashboard.md")"
 
+echo "== multi-key header writes commit in one pass =="
+mk_dir="$ROOT/mk-board"
+t init --dir "$mk_dir" >/dev/null
+t new --dir "$mk_dir" --id MKW-1 --name "Multi Key Target" --status Ready >/dev/null
+mkfile="$(ls "$mk_dir/current" | grep MKW-1)"
+mk_shim="$ROOT/mk-shim"
+mk_counts="$ROOT/mk-counts"
+mkdir -p "$mk_shim" "$mk_counts"
+# write_spawn_shim writes into the spawn section's shim_dir global; point
+# it at this section's shim directory before reusing it.
+shim_dir="$mk_shim"
+write_spawn_shim awk "$(command -v awk)" "$mk_counts/awk"
+count_reset() { rm -f "$mk_counts/awk"; }
+count_awks() { count_spawns "$mk_counts/awk"; }
+# Composition per command: set = one whole-file header rewrite awk + one
+# render assembler awk (the Status/Reason prelookups read the header in
+# pure bash, spawning nothing); claim and release = one rewrite awk + one
+# render assembler awk. At N+1 per-key passes these counts are strictly
+# higher, so the exact totals pin the single-pass writer.
+PATH="$mk_shim:$PATH" "$TASKS_BIN" set --dir "$mk_dir" "$mkfile" \
+	"Status=In Progress" Priority=High Progress=25% >/dev/null
+assert_eq "multi-pair set runs one rewrite awk" "2" "$(count_awks)"
+count_reset
+PATH="$mk_shim:$PATH" "$TASKS_BIN" claim --dir "$mk_dir" "$mkfile" --owner alice >/dev/null
+assert_eq "claim runs one rewrite awk" "2" "$(count_awks)"
+count_reset
+PATH="$mk_shim:$PATH" "$TASKS_BIN" release --dir "$mk_dir" "$mkfile" >/dev/null
+assert_eq "release runs one rewrite awk" "2" "$(count_awks)"
+# Simultaneously-missing keys must land in canonical template order at
+# their shared insertion anchor, exactly as the old sequential per-key
+# passes did (Completed precedes Duration in TEMPLATE_HEADER_FIELDS).
+t set --dir "$mk_dir" "$mkfile" "Duration=1h" "Completed=2026-09-21 10:00" >/dev/null
+mk_fields="$(grep -oP '^\*\*(?:Completed|Duration):' "$mk_dir/current/$mkfile" | tr -d '*:')"
+assert_eq "simultaneously-missing keys insert in canonical order" \
+	"$(printf 'Completed\nDuration')" "$mk_fields"
+
 echo "== report: deposit path, numbering, Work Log entry =="
 f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"
 rpbase="$(basename "$f_rp")"
