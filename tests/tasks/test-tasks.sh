@@ -438,6 +438,40 @@ assert_eq "render is byte-identical with escaped content on the board" "$esc_bef
 rm -f "$f_pipe"
 t render >/dev/null
 
+echo "== backslash names and numeric slugs keep task ID parity =="
+f_bs="$(t new --id API-7 --name "Back\\slash Name")"
+printf '%s\n' \
+	"# Task: Twelve Factor" \
+	"" \
+	"**Created:** 2020-05-01 12:00" \
+	"**Status:** Ready" \
+	"**Priority:** Low" \
+	"**Updated:** 2020-05-02 13:00" \
+	"" \
+	"## Work Log" \
+	> "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md"
+printf '%s\n' \
+	"# Task: Three Body" \
+	"" \
+	"**Created:** 2019-04-01 09:00" \
+	"**Status:** Ready" \
+	"**Priority:** Low" \
+	"**Updated:** 2019-04-02 09:00" \
+	"" \
+	"## Work Log" \
+	> "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
+t render >/dev/null
+bs_row="$(grep -F 'API-7' "$DASH")"
+assert_contains "backslash in name is doubled in the cell" "$bs_row" 'Back\\slash Name'
+assert_not_contains "single backslash does not survive in the cell" "$bs_row" "Back\slash Name"
+nsf_rows="$(grep -F 'NSF-5: ' "$DASH" | cut -d'|' -f2)"
+assert_contains "numeric-inner slug keeps its ID prefix" "$nsf_rows" "NSF-5: Twelve Factor"
+assert_eq "numeric slugs sort chronologically in their lane" \
+	"$(printf '%s\n' "$nsf_rows" | head -1)" \
+	"$(printf '%s\n' "$nsf_rows" | grep -F 'Three Body')"
+rm -f "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md" "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
+t render >/dev/null
+
 echo "== claim/release with a stale sidecar =="
 printf '%s\n' "stale-session" >"$f_cs.claim"
 refuse "claim under a stale sidecar is rejected" claim "$f_cs" --owner newcomer

@@ -21,10 +21,28 @@ readonly ARCHIVE_DIR="archive"
 readonly REPORTS_DIR="reports"
 readonly CLAIM_SUFFIX=".claim"
 
-# Keyed rows travel through the lane arrays as
-# "<sortkey><SORT_SEP><idkey><SORT_SEP><row>"; print_sorted orders the
-# lines with LC_ALL=C byte order and strips both keys on emit.
+# Keyed rows travel from the assembler through one LC_ALL=C sort as
+# "<ordinal><SORT_SEP><sortkey><SORT_SEP><idkey><SORT_SEP><row>"; the
+# ordinal is the lane's dashboard position, so byte order groups lanes in
+# board order and orders rows within a lane by their keys.
 readonly SORT_SEP=$'\034'
+
+# Section headers for the six dashboard lanes, indexed by the lane ordinal
+# the row assembler emits (lane 7 is the latest-updated tag and has none).
+# Each string carries the exact bytes of the old per-lane printf block,
+# including the blank separator line ahead of lanes 2-6, so the render can
+# print them straight through before each lane's first row.
+readonly -a LANE_HEADERS=("" \
+	$'## Triage\n\n| Task | Priority | Created | Updated |\n|------|----------|---------|---------|\n' \
+	$'\n## Ready\n\n| Task | Priority | Created | Updated |\n|------|----------|---------|---------|\n' \
+	$'\n## In Progress\n\n| Task | Progress | Updated | Priority |\n|------|----------|---------|----------|\n' \
+	$'\n## Blocked/Cancelled\n\n| Task | Status | Created | Updated |\n|------|--------|---------|---------|\n' \
+	$'\n## Completed\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n' \
+	$'\n## Archive\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n')
+# The assembler's trailing line carries the newest-Updated value, not a
+# lane row; this is its ordinal.
+readonly LANE_LATEST=7
+
 # Rows without a derivable date sort after every dated row in their
 # lane. Relies on header dates arriving in canonical
 # "YYYY-MM-DD HH:MM" form, which byte-sorts chronologically, so the
@@ -201,108 +219,178 @@ header_field() {
 	grep -m1 -oP "^\\*\\*${key}:\\*\\*[[:space:]]+\\K.*" || true
 }
 
-# Print, for each task file named as an argument, one block of eight
-# newline-separated values: the title and the Status, Priority, Progress,
-# Created, Updated, Completed, and Duration fields. All files are read by a
-# single awk process (each file exactly once, ending at its first "## "
-# heading, an empty file yielding the eight defaults), so rendering never
-# spawns per file. Each value is the first matching line's remainder after
-# its leading whitespace, verbatim; Created falls back to the decorative
-# "*Created: ...*" line (value ends at the first "*") and then N/A when
-# neither form is present.
-header_fields() {
-	awk -v na="$NA" '
+# Assemble each task file's dashboard row in one batched awk process: for
+# every file named as an argument, emit one line
+# "<lane><SORT_SEP><sortkey><SORT_SEP><idkey><SORT_SEP><row>", where <lane>
+# is the dashboard ordinal (1 Triage, 2 Ready, 3 In Progress, 4
+# Blocked/Cancelled, 5 Completed, 6 Archive). Paths are relative to the
+# board ("<subdir>/<name>.md"), which both fixes the lane subdir and
+# identifies the file across the two subdirs; the caller's tasks_dir is
+# prefixed back on for reading. This performs
+# the whole per-file assembly the render loop used to do in bash: header
+# extraction (first occurrence wins, the decorative "*Created: ...*" line
+# as the Created fallback), cell escaping (backslash first, then pipes
+# and brackets, whitespace collapsed), Task ID derivation from the
+# filename's leading ID component, segment-numeric ID sort keys, progress
+# normalization, lane selection, and the newest-Updated maximum, which is
+# emitted as the final line "7<SORT_SEP><newest>" (ordinal 7 is the
+# latest-updated tag, not a lane). Each file is read up to its first
+# "## " heading, an empty file yielding the bare defaults.
+# Explicit character classes and capture-free matching throughout: mawk
+# lacks [[:space:]] and capture arrays, so the program stays inside the
+# gawk/mawk intersection.
+assemble_rows() {
+	# Values travel via the environment (not awk -v) so backslash-bearing
+	# paths survive verbatim; the AWK_ prefix avoids the shell's own
+	# readonly constant names.
+	AWK_NA="$NA" AWK_DEFAULT_PRIORITY="$DEFAULT_PRIORITY" AWK_UNDATED="$UNDATED_SORT_KEY" \
+		AWK_TASKS_DIR="$tasks_dir" AWK_CURRENT_DIR="$CURRENT_DIR" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
+		AWK_ID_KEY_WIDTH="$ID_KEY_SEGMENT_WIDTH" \
+		AWK_READY="$STATUS_READY" AWK_IN_PROGRESS="$STATUS_IN_PROGRESS" \
+		AWK_BLOCKED="$STATUS_BLOCKED" AWK_CANCELLED="$STATUS_CANCELLED" \
+		AWK_COMPLETED="$STATUS_COMPLETED" \
+		awk '
+		function mdescape(s) {
+			gsub(/\\/, "&&", s)
+			gsub(/\n/, " ", s)
+			gsub(/\r/, " ", s)
+			gsub(/\|/, "\\|", s)
+			gsub(/\[/, "\\[", s)
+			gsub(/\]/, "\\]", s)
+			return s
+		}
+		function normprog(p) {
+			sub(/%$/, "", p)
+			gsub("[" wsp "]", "", p)
+			if (p == "") p = "0"
+			return p "%"
+		}
+		# The Task ID mirrors the greedy capture of the bash render regex
+		# with backtracking: walk the filename numeric -N segments from the
+		# rightmost backward; the ID is the longest segment-terminated
+		# prefix whose remainder is exactly ".md" or matches the stamp form
+		# "-YYYYMMDD-HHMM" plus an optional slug, so a numeric-only slug
+		# segment (TASK-5-20260101-1200-12-factor.md -> TASK-5) lands in
+		# the stamp role only when nothing right of it qualifies. Empty
+		# when no segment boundary qualifies.
+		function taskid(filename,  fb, p, rest, segend, cand, remainder) {
+			fb = filename
+			sub(/.*\//, "", fb)
+			for (p = length(fb) - 1; p > 1; p--) {
+				if (substr(fb, p, 1) != "-") continue
+				rest = substr(fb, p)
+				if (!match(rest, "^-[0-9]+")) continue
+				segend = p + RLENGTH
+				cand = substr(fb, 1, segend - 1)
+				if (cand !~ segmentre) continue
+				remainder = substr(fb, segend)
+				if (remainder == ".md" || remainder ~ stampre) return cand
+			}
+			return ""
+		}
+		function idkeyof(id,  rest, key, seg) {
+			rest = id
+			sub(/^[A-Za-z]+/, "", rest)
+			key = ""
+			while (match(rest, /^-[0-9]+/)) {
+				seg = substr(rest, 2, RLENGTH - 1) + 0
+				key = key "-" sprintf("%0" idw "d", seg)
+				rest = substr(rest, RLENGTH + 1)
+			}
+			sub(/^-/, "", key)
+			return key
+		}
 		BEGIN {
+			sep = "\034"
+			wsp = " \t\r\v\f"
+			ws = "[" wsp "]+"
+			na = ENVIRON["AWK_NA"]
+			dp = ENVIRON["AWK_DEFAULT_PRIORITY"]
+			undated = ENVIRON["AWK_UNDATED"]
+			td = ENVIRON["AWK_TASKS_DIR"] "/"
+			cd = ENVIRON["AWK_CURRENT_DIR"]
+			ad = ENVIRON["AWK_ARCHIVE_DIR"]
+			idw = ENVIRON["AWK_ID_KEY_WIDTH"]
+			st_ready = ENVIRON["AWK_READY"]
+			st_ip = ENVIRON["AWK_IN_PROGRESS"]
+			st_blocked = ENVIRON["AWK_BLOCKED"]
+			st_cancelled = ENVIRON["AWK_CANCELLED"]
+			st_completed = ENVIRON["AWK_COMPLETED"]
+			d8 = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]"
+			d4 = "[0-9][0-9][0-9][0-9]"
+			segmentre = "^[A-Za-z]+(-[0-9]+)+$"
+			stampre = "^-" d8 "-" d4 "(-.*)?\\.md$"
+			newest_acc = ""
 			for (argi = 1; argi < ARGC; argi++) {
+				file = ARGV[argi]
+				fb = file
+				sub(/.*\//, "", fb)
+				subdir = file
+				arch = 0
+				if (subdir ~ "^" cd "/") {
+					subdir = cd
+				} else if (subdir ~ "^" ad "/") {
+					subdir = ad
+					arch = 1
+				}
 				name = status = priority = progress = ""
 				created = updated = completed = duration = deco = ""
 				have_name = have_status = have_priority = have_progress = 0
 				have_created = have_deco = have_updated = have_completed = have_duration = 0
-				while ((getline line < ARGV[argi]) > 0) {
+				while ((getline line < (td file)) > 0) {
 					if (line ~ /^## /) break
-					if (!have_name && match(line, /^# Task:[[:space:]]+/)) { name = substr(line, RSTART + RLENGTH); have_name = 1 }
-					if (!have_status && match(line, /^\*\*Status:\*\*[[:space:]]+/)) { status = substr(line, RSTART + RLENGTH); have_status = 1 }
-					if (!have_priority && match(line, /^\*\*Priority:\*\*[[:space:]]+/)) { priority = substr(line, RSTART + RLENGTH); have_priority = 1 }
-					if (!have_progress && match(line, /^\*\*Progress:\*\*[[:space:]]+/)) { progress = substr(line, RSTART + RLENGTH); have_progress = 1 }
-					if (!have_created && match(line, /^\*\*Created:\*\*[[:space:]]+/)) { created = substr(line, RSTART + RLENGTH); have_created = 1 }
-					if (!have_deco && match(line, /^\*Created:[[:space:]]+/)) { deco = substr(line, RSTART + RLENGTH); sub(/\*.*/, "", deco); have_deco = 1 }
-					if (!have_updated && match(line, /^\*\*Updated:\*\*[[:space:]]+/)) { updated = substr(line, RSTART + RLENGTH); have_updated = 1 }
-					if (!have_completed && match(line, /^\*\*Completed:\*\*[[:space:]]+/)) { completed = substr(line, RSTART + RLENGTH); have_completed = 1 }
-					if (!have_duration && match(line, /^\*\*Duration:\*\*[[:space:]]+/)) { duration = substr(line, RSTART + RLENGTH); have_duration = 1 }
+					if (!have_name && match(line, "^# Task:" ws)) { name = substr(line, RSTART + RLENGTH); have_name = 1 }
+					if (!have_status && match(line, "^\\*\\*Status:\\*\\*" ws)) { status = substr(line, RSTART + RLENGTH); have_status = 1 }
+					if (!have_priority && match(line, "^\\*\\*Priority:\\*\\*" ws)) { priority = substr(line, RSTART + RLENGTH); have_priority = 1 }
+					if (!have_progress && match(line, "^\\*\\*Progress:\\*\\*" ws)) { progress = substr(line, RSTART + RLENGTH); have_progress = 1 }
+					if (!have_created && match(line, "^\\*\\*Created:\\*\\*" ws)) { created = substr(line, RSTART + RLENGTH); have_created = 1 }
+					if (!have_deco && match(line, "^\\*Created:" ws)) { deco = substr(line, RSTART + RLENGTH); sub(/\*.*/, "", deco); have_deco = 1 }
+					if (!have_updated && match(line, "^\\*\\*Updated:\\*\\*" ws)) { updated = substr(line, RSTART + RLENGTH); have_updated = 1 }
+					if (!have_completed && match(line, "^\\*\\*Completed:\\*\\*" ws)) { completed = substr(line, RSTART + RLENGTH); have_completed = 1 }
+					if (!have_duration && match(line, "^\\*\\*Duration:\\*\\*" ws)) { duration = substr(line, RSTART + RLENGTH); have_duration = 1 }
 				}
-				close(ARGV[argi])
+				close(td file)
 				if (created == "") created = deco
 				if (created == "") created = na
-				print name "\n" status "\n" priority "\n" progress "\n" created "\n" updated "\n" completed "\n" duration
+				nb = fb
+				sub(/\.md$/, "", nb)
+				if (name == "") name = nb
+				id = taskid(file)
+				idkey = idkeyof(id)
+				if (id != "") name = id ": " name
+				if (priority == "") priority = dp
+				if (duration == "") duration = na
+				link = "[" mdescape(name) "](./" subdir "/" mdescape(fb) ")"
+				if (updated != "" && updated > newest_acc) newest_acc = updated
+				if (arch) {
+					sortkey = (completed == "" ? undated : completed)
+					row = "| " link " | " mdescape(completed == "" ? na : completed) " | " mdescape(duration) " |"
+					print "6" sep sortkey sep idkey sep row
+					continue
+				}
+				sortkey = (created == na ? undated : created)
+				if (status == st_ready) {
+					row = "| " link " | " mdescape(priority) " | " mdescape(created) " | " mdescape(updated) " |"
+					print "2" sep sortkey sep idkey sep row
+				} else if (status == st_ip) {
+					row = "| " link " | " mdescape(normprog(progress)) " | " mdescape(updated) " | " mdescape(priority) " |"
+					print "3" sep sortkey sep idkey sep row
+				} else if (status == st_blocked || status == st_cancelled) {
+					row = "| " link " | " mdescape(status) " | " mdescape(created) " | " mdescape(updated) " |"
+					print "4" sep sortkey sep idkey sep row
+				} else if (status == st_completed) {
+					sortkey = (completed == "" ? undated : completed)
+					row = "| " link " | " mdescape(completed == "" ? updated : completed) " | " mdescape(duration) " |"
+					print "5" sep sortkey sep idkey sep row
+				} else {
+					row = "| " link " | " mdescape(priority) " | " mdescape(created) " | " mdescape(updated) " |"
+					print "1" sep sortkey sep idkey sep row
+				}
 			}
+			print "7" sep newest_acc
+			exit
 		}
 	' "$@"
-}
-
-# Make a value safe inside a dashboard table cell: escape the backslash first,
-# then pipes and brackets (table and link syntax), and collapse newlines so a
-# row stays a single line. Writes the result into the variable named by the
-# first argument (printf -v), so rendering a cell never forks a subshell.
-md_escape() {
-	local s="${2:-}"
-	local nl=$'\n' cr=$'\r'
-	s="${s//\\/\\\\}"
-	s="${s//"$nl"/ }"
-	s="${s//"$cr"/ }"
-	s="${s//|/\\|}"
-	s="${s//[/\\[}"
-	s="${s//]/\\]}"
-	printf -v "$1" '%s' "$s"
-}
-
-# Markdown-link a task's name to its file, relative to the dashboard. Writes
-# the result into the variable named by the first argument (printf -v), so
-# rendering a row never forks a subshell.
-task_link() {
-	local outvar="$1" subdir="$2" file="$3" name="$4"
-	local esc_name esc_file
-	md_escape esc_name "$name"
-	md_escape esc_file "${file##*/}"
-	printf -v "$outvar" '[%s](./%s/%s)' "$esc_name" "$subdir" "$esc_file"
-}
-
-# Write the Task ID a task filename leads with into the variable named by
-# the first argument, per the task-files skill's File Naming Convention:
-# PREFIX-N(-N)* either alone or ahead of the -YYYYMMDD-HHMM stamp. Empty
-# when the filename carries no leading ID component, so such files fall
-# back to the bare name.
-task_id_of() {
-	local outvar="$1" base="${2##*/}"
-	printf -v "$outvar" '%s' ""
-	if [[ "$base" =~ ^([A-Za-z]+(-[0-9]+)+)(-[0-9]{8}-[0-9]{4}(-.*)?)?\.md$ ]]; then
-		printf -v "$outvar" '%s' "${BASH_REMATCH[1]}"
-	fi
-}
-
-# Write the segment-numeric sort key for a Task ID into the variable named
-# by the first argument (TASK-2 < TASK-2-1 < TASK-10 < TASK-1231): every -N
-# segment zero-padded to ID_KEY_SEGMENT_WIDTH, so byte order equals numeric
-# order and a parent, whose key is a strict prefix of its children's, sorts
-# before them. Empty for an empty ID.
-task_id_key() {
-	local outvar="$1" rest="$2" key="" seg
-	[[ "$rest" =~ ^[A-Za-z]+ ]] && rest="${rest#"${BASH_REMATCH[0]}"}"
-	while [[ "$rest" =~ ^-([0-9]+) ]]; do
-		printf -v seg '%0*d' "$ID_KEY_SEGMENT_WIDTH" "$((10#${BASH_REMATCH[1]}))"
-		key="${key}-${seg}"
-		rest="${rest#"${BASH_REMATCH[0]}"}"
-	done
-	printf -v "$outvar" '%s' "${key#-}"
-}
-
-# Write a progress value normalized to "<n>"%" into the variable named by
-# the first argument; empty becomes 0%.
-normalize_progress() {
-	local outvar="$1" p="${2:-}"
-	p="${p%\%}"
-	p="${p//[[:space:]]/}"
-	[[ -z "$p" ]] && p=0
-	printf -v "$outvar" '%s%%' "$p"
 }
 
 slugify() {
@@ -323,113 +411,65 @@ render_unlocked() {
 	local dash="$tasks_dir/$DASHBOARD_NAME"
 	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
 
-	local triage=() ready=() inprogress=() blocked=() completed=() archive=()
-	local newest=""
-
-	local subdir file name status priority progress created updated completed_at duration link prog fields
-	local id idkey datekey row
-	local shard_files shard_fields shard_i
-	local esc_priority esc_created esc_updated esc_status esc_prog esc_completed_at esc_duration
+	local -a files=()
+	local subdir file
 	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
 		[[ -d "$tasks_dir/$subdir" ]] || continue
-		shard_files=()
 		for file in "$tasks_dir/$subdir"/*.md; do
 			[[ -e "$file" ]] || continue
-			shard_files+=("$file")
-		done
-		((${#shard_files[@]} > 0)) || continue
-		mapfile -t shard_fields < <(header_fields "${shard_files[@]}")
-		shard_i=0
-		for file in "${shard_files[@]}"; do
-			fields=("${shard_fields[@]:shard_i * 8:8}")
-			((shard_i += 1))
-			name="${fields[0]}"
-			status="${fields[1]}"
-			priority="${fields[2]}"
-			progress="${fields[3]}"
-			created="${fields[4]}"
-			updated="${fields[5]}"
-			completed_at="${fields[6]}"
-			duration="${fields[7]}"
-			[[ -z "$name" ]] && { name="${file##*/}"; name="${name%.md}"; }
-			task_id_of id "$file"
-			task_id_key idkey "$id"
-			[[ -n "$id" ]] && name="$id: $name"
-			[[ -z "$priority" ]] && priority="$DEFAULT_PRIORITY"
-			[[ -z "$duration" ]] && duration="$NA"
-			task_link link "$subdir" "$file" "$name"
-
-			if [[ -n "$updated" && "$updated" > "$newest" ]]; then newest="$updated"; fi
-
-			if [[ "$subdir" == "$ARCHIVE_DIR" ]]; then
-				md_escape esc_completed_at "${completed_at:-$NA}"
-				md_escape esc_duration "$duration"
-				row="| $link | $esc_completed_at | $esc_duration |"
-				archive+=("${completed_at:-$UNDATED_SORT_KEY}$SORT_SEP$idkey$SORT_SEP$row")
-				continue
-			fi
-			datekey="$created"
-			[[ "$created" == "$NA" ]] && datekey="$UNDATED_SORT_KEY"
-			md_escape esc_priority "$priority"
-			md_escape esc_created "$created"
-			md_escape esc_updated "$updated"
-			md_escape esc_status "$status"
-			case "$status" in
-				"$STATUS_TRIAGE")
-					row="| $link | $esc_priority | $esc_created | $esc_updated |"
-					triage+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
-				"$STATUS_READY")
-					row="| $link | $esc_priority | $esc_created | $esc_updated |"
-					ready+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
-				"$STATUS_IN_PROGRESS")
-					normalize_progress prog "$progress"
-					md_escape esc_prog "$prog"
-					row="| $link | $esc_prog | $esc_updated | $esc_priority |"
-					inprogress+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
-				"$STATUS_BLOCKED"|"$STATUS_CANCELLED")
-					row="| $link | $esc_status | $esc_created | $esc_updated |"
-					blocked+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
-				"$STATUS_COMPLETED")
-					md_escape esc_completed_at "${completed_at:-$updated}"
-					md_escape esc_duration "$duration"
-					row="| $link | $esc_completed_at | $esc_duration |"
-					completed+=("${completed_at:-$UNDATED_SORT_KEY}$SORT_SEP$idkey$SORT_SEP$row") ;;
-				*)
-					row="| $link | $esc_priority | $esc_created | $esc_updated |"
-					triage+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
-			esac
+			files+=("${file#"$tasks_dir/"}")
 		done
 	done
 
+	local newest="" lane_entry ordinal key_row
+	local prev_lane=0 lane_i
+	# The assembled rows route through a temp file rather than a pipe:
+	# bash's mapfile consumes pipes with per-byte reads (the read builtin
+	# cannot push back surplus bytes), which at board size costs more in
+	# syscall churn than the extra mktemp and rm; reading a regular file
+	# is buffered. One LC_ALL=C sort orders every row at once: the leading
+	# lane ordinal groups the lanes in board order, the sort keys order
+	# rows within a lane, and byte order keeps ties deterministic. The
+	# walk then prints each lane's header exactly where the old per-lane
+	# printf block put it, including the header of a lane with no rows
+	# (printed when the stream jumps across it, or all of them on an
+	# empty board).
+	local -a sorted=()
+	local rows_file; rows_file="$(mktemp "$dash.XXXXXX")"
+	assemble_rows "${files[@]+"${files[@]}"}" >"$rows_file"
+	LC_ALL=C sort -o "$rows_file" "$rows_file"
+	mapfile -t sorted <"$rows_file"
+	rm -f "$rows_file"
 	{
 		printf '# Task Board Dashboard\n\n'
 		printf '*Jira-style task management board. Auto-generated by `tasks render`; do not edit by hand.*\n\n'
-		printf '## Triage\n\n| Task | Priority | Created | Updated |\n|------|----------|---------|---------|\n'
-		print_sorted "${triage[@]+"${triage[@]}"}"
-		printf '\n## Ready\n\n| Task | Priority | Created | Updated |\n|------|----------|---------|---------|\n'
-		print_sorted "${ready[@]+"${ready[@]}"}"
-		printf '\n## In Progress\n\n| Task | Progress | Updated | Priority |\n|------|----------|---------|----------|\n'
-		print_sorted "${inprogress[@]+"${inprogress[@]}"}"
-		printf '\n## Blocked/Cancelled\n\n| Task | Status | Created | Updated |\n|------|--------|---------|---------|\n'
-		print_sorted "${blocked[@]+"${blocked[@]}"}"
-		printf '\n## Completed\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n'
-		print_sorted "${completed[@]+"${completed[@]}"}"
-		printf '\n## Archive\n\n| Task | Completed | Duration |\n|------|-----------|----------|\n'
-		print_sorted "${archive[@]+"${archive[@]}"}"
+		for lane_entry in ${sorted[@]+"${sorted[@]}"}; do
+			ordinal="${lane_entry%%"$SORT_SEP"*}"
+			lane_entry="${lane_entry#*"$SORT_SEP"}"
+			if (( ordinal == LANE_LATEST )); then
+				[[ -n "$lane_entry" && "$lane_entry" > "$newest" ]] && newest="$lane_entry"
+				continue
+			fi
+			if (( ordinal != prev_lane )); then
+				lane_i=$(( prev_lane + 1 ))
+				while (( lane_i <= ordinal )); do
+					printf '%s' "${LANE_HEADERS[lane_i]}"
+					(( lane_i += 1 ))
+				done
+				prev_lane=$ordinal
+			fi
+			key_row="${lane_entry#*"$SORT_SEP"}"
+			printf '%s\n' "${key_row#*"$SORT_SEP"}"
+		done
+		lane_i=$(( prev_lane + 1 ))
+		while (( lane_i <= ${#LANE_HEADERS[@]} - 1 )); do
+			printf '%s' "${LANE_HEADERS[lane_i]}"
+			(( lane_i += 1 ))
+		done
 		printf '\n---\n\n*Last updated: %s*\n' "${newest:-$NA}"
 	} >"$tmp"
 
 	mv -f "$tmp" "$dash"
-}
-
-# Emit table rows ordered by their keyed prefix: LC_ALL=C byte order
-# over "<sortkey><SORT_SEP><idkey><SORT_SEP><row>" gives chronological
-# order, then segment-numeric task ID order on date ties, then the row
-# itself as the final deterministic tie-break, so repeated renders stay
-# byte-identical. Both keys are stripped on output.
-print_sorted() {
-	(($# == 0)) && return 0
-	printf '%s\n' "$@" | LC_ALL=C sort | cut -d"$SORT_SEP" -f3-
 }
 
 # Fail unless the .tasks directory exists.
