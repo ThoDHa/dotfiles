@@ -213,12 +213,6 @@ resolve_task_file() {
 # first "## " heading.
 header_of() { awk '/^## /{exit} {print}'; }
 
-# Extract a "**Key:** value" field from a header block supplied on stdin.
-header_field() {
-	local key="$1"
-	grep -m1 -oP "^\\*\\*${key}:\\*\\*[[:space:]]+\\K.*" || true
-}
-
 # Assemble each task file's dashboard row in one batched awk process: for
 # every file named as an argument, emit one line
 # "<lane><SORT_SEP><sortkey><SORT_SEP><idkey><SORT_SEP><row>", where <lane>
@@ -622,6 +616,10 @@ write_header_fields() {
 # deleted reason must not survive as an empty duplicate).
 set_header_field() {
 	local file="$1" key="$2" value="$3"
+	if [[ -z "$value" ]]; then
+		write_header_fields "$file" "$key"$'\034'
+		return
+	fi
 	write_header_fields "$file" "$key"$'\034'"**$key:** $value"
 }
 

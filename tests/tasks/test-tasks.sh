@@ -641,6 +641,30 @@ mk_fields="$(grep -oP '^\*\*(?:Completed|Duration):' "$mk_dir/current/$mkfile" |
 assert_eq "simultaneously-missing keys insert in canonical order" \
 	"$(printf 'Completed\nDuration')" "$mk_fields"
 
+echo "== set_header_field deletes on an empty value (internal seam) =="
+sf_dir="$ROOT/seam-board"
+t init --dir "$sf_dir" >/dev/null
+t new --dir "$sf_dir" --id SFH-1 --name "Seam Fix Probe" --status Ready >/dev/null
+sfname="$(ls "$sf_dir/current" | grep SFH-1)"
+sffile="$sf_dir/current/$sfname"
+grep -q '^\*\*Progress:\*\*' "$sffile" && ok "probe file carries the Progress field" \
+	|| bad "probe file carries the Progress field"
+(
+	# Sourcing the script runs main with the given arguments; help is the
+	# harmless no-op that leaves every function defined in this subshell,
+	# including the internal writer seam no CLI path drives with an empty
+	# value (cmd_edit's refresh always passes $(now)).
+	set -euo pipefail
+	source "$TASKS_BIN" help >/dev/null 2>&1
+	set_header_field "$sffile" "Progress" ""
+)
+if grep -q '^\*\*Progress:\*\*' "$sffile"; then
+	bad "empty-value set_header_field removes the field line"
+else
+	ok "empty-value set_header_field removes the field line"
+fi
+rm -rf "$sf_dir"
+
 echo "== report: deposit path, numbering, Work Log entry =="
 f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"
 rpbase="$(basename "$f_rp")"
