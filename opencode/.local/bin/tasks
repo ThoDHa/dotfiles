@@ -201,16 +201,42 @@ header_field() {
 	grep -m1 -oP "^\\*\\*${key}:\\*\\*[[:space:]]+\\K.*" || true
 }
 
-# Extract the descriptive name from the "# Task: NAME" title line.
-header_name() { grep -m1 -oP '^# Task:[[:space:]]+\K.*' || true; }
-
-# Creation timestamp from a header block: the canonical **Created:** field,
-# falling back to the decorative "*Created: ...*" line older task files carry.
-header_created() {
-	local hdr="$1" created
-	created="$(printf '%s\n' "$hdr" | header_field "Created")"
-	[[ -z "$created" ]] && created="$(printf '%s\n' "$hdr" | grep -m1 -oP '^\*Created:[[:space:]]+\K[^*]*' || true)"
-	printf '%s' "${created:-$NA}"
+# Print, for each task file named as an argument, one block of eight
+# newline-separated values: the title and the Status, Priority, Progress,
+# Created, Updated, Completed, and Duration fields. All files are read by a
+# single awk process (each file exactly once, ending at its first "## "
+# heading, an empty file yielding the eight defaults), so rendering never
+# spawns per file. Each value is the first matching line's remainder after
+# its leading whitespace, verbatim; Created falls back to the decorative
+# "*Created: ...*" line (value ends at the first "*") and then N/A when
+# neither form is present.
+header_fields() {
+	awk -v na="$NA" '
+		BEGIN {
+			for (argi = 1; argi < ARGC; argi++) {
+				name = status = priority = progress = ""
+				created = updated = completed = duration = deco = ""
+				have_name = have_status = have_priority = have_progress = 0
+				have_created = have_deco = have_updated = have_completed = have_duration = 0
+				while ((getline line < ARGV[argi]) > 0) {
+					if (line ~ /^## /) break
+					if (!have_name && match(line, /^# Task:[[:space:]]+/)) { name = substr(line, RSTART + RLENGTH); have_name = 1 }
+					if (!have_status && match(line, /^\*\*Status:\*\*[[:space:]]+/)) { status = substr(line, RSTART + RLENGTH); have_status = 1 }
+					if (!have_priority && match(line, /^\*\*Priority:\*\*[[:space:]]+/)) { priority = substr(line, RSTART + RLENGTH); have_priority = 1 }
+					if (!have_progress && match(line, /^\*\*Progress:\*\*[[:space:]]+/)) { progress = substr(line, RSTART + RLENGTH); have_progress = 1 }
+					if (!have_created && match(line, /^\*\*Created:\*\*[[:space:]]+/)) { created = substr(line, RSTART + RLENGTH); have_created = 1 }
+					if (!have_deco && match(line, /^\*Created:[[:space:]]+/)) { deco = substr(line, RSTART + RLENGTH); sub(/\*.*/, "", deco); have_deco = 1 }
+					if (!have_updated && match(line, /^\*\*Updated:\*\*[[:space:]]+/)) { updated = substr(line, RSTART + RLENGTH); have_updated = 1 }
+					if (!have_completed && match(line, /^\*\*Completed:\*\*[[:space:]]+/)) { completed = substr(line, RSTART + RLENGTH); have_completed = 1 }
+					if (!have_duration && match(line, /^\*\*Duration:\*\*[[:space:]]+/)) { duration = substr(line, RSTART + RLENGTH); have_duration = 1 }
+				}
+				close(ARGV[argi])
+				if (created == "") created = deco
+				if (created == "") created = na
+				print name "\n" status "\n" priority "\n" progress "\n" created "\n" updated "\n" completed "\n" duration
+			}
+		}
+	' "$@"
 }
 
 # Make a value safe inside a dashboard table cell: escape the backslash first,
@@ -229,48 +255,54 @@ md_escape() {
 	printf -v "$1" '%s' "$s"
 }
 
-# Markdown-link a task's name to its file, relative to the dashboard.
+# Markdown-link a task's name to its file, relative to the dashboard. Writes
+# the result into the variable named by the first argument (printf -v), so
+# rendering a row never forks a subshell.
 task_link() {
-	local subdir="$1" file="$2" name="$3"
+	local outvar="$1" subdir="$2" file="$3" name="$4"
 	local esc_name esc_file
 	md_escape esc_name "$name"
 	md_escape esc_file "${file##*/}"
-	printf '[%s](./%s/%s)' "$esc_name" "$subdir" "$esc_file"
+	printf -v "$outvar" '[%s](./%s/%s)' "$esc_name" "$subdir" "$esc_file"
 }
 
-# The Task ID a task filename leads with, per the task-files skill's
-# File Naming Convention: PREFIX-N(-N)* either alone or ahead of the
-# -YYYYMMDD-HHMM stamp. Prints nothing when the filename carries no
-# leading ID component, so such files fall back to the bare name.
+# Write the Task ID a task filename leads with into the variable named by
+# the first argument, per the task-files skill's File Naming Convention:
+# PREFIX-N(-N)* either alone or ahead of the -YYYYMMDD-HHMM stamp. Empty
+# when the filename carries no leading ID component, so such files fall
+# back to the bare name.
 task_id_of() {
-	local base="${1##*/}"
+	local outvar="$1" base="${2##*/}"
+	printf -v "$outvar" '%s' ""
 	if [[ "$base" =~ ^([A-Za-z]+(-[0-9]+)+)(-[0-9]{8}-[0-9]{4}(-.*)?)?\.md$ ]]; then
-		printf '%s' "${BASH_REMATCH[1]}"
+		printf -v "$outvar" '%s' "${BASH_REMATCH[1]}"
 	fi
 }
 
-# Segment-numeric sort key for a Task ID (TASK-2 < TASK-2-1 < TASK-10 <
-# TASK-1231): every -N segment zero-padded to ID_KEY_SEGMENT_WIDTH, so
-# byte order equals numeric order and a parent, whose key is a strict
-# prefix of its children's, sorts before them. Empty for an empty ID.
+# Write the segment-numeric sort key for a Task ID into the variable named
+# by the first argument (TASK-2 < TASK-2-1 < TASK-10 < TASK-1231): every -N
+# segment zero-padded to ID_KEY_SEGMENT_WIDTH, so byte order equals numeric
+# order and a parent, whose key is a strict prefix of its children's, sorts
+# before them. Empty for an empty ID.
 task_id_key() {
-	local rest="$1" key="" seg
+	local outvar="$1" rest="$2" key="" seg
 	[[ "$rest" =~ ^[A-Za-z]+ ]] && rest="${rest#"${BASH_REMATCH[0]}"}"
 	while [[ "$rest" =~ ^-([0-9]+) ]]; do
 		printf -v seg '%0*d' "$ID_KEY_SEGMENT_WIDTH" "$((10#${BASH_REMATCH[1]}))"
 		key="${key}-${seg}"
 		rest="${rest#"${BASH_REMATCH[0]}"}"
 	done
-	printf '%s' "${key#-}"
+	printf -v "$outvar" '%s' "${key#-}"
 }
 
-# Normalize a progress value to "<n>%"; empty becomes 0%.
+# Write a progress value normalized to "<n>"%" into the variable named by
+# the first argument; empty becomes 0%.
 normalize_progress() {
-	local p="${1:-}"
+	local outvar="$1" p="${2:-}"
 	p="${p%\%}"
 	p="${p//[[:space:]]/}"
 	[[ -z "$p" ]] && p=0
-	printf '%s%%' "$p"
+	printf -v "$outvar" '%s%%' "$p"
 }
 
 slugify() {
@@ -285,35 +317,47 @@ slugify() {
 # line (the newest Updated timestamp, not wall-clock).
 render_unlocked() {
 	local tasks_dir="$1"
+	# A relative tasks_dir with a leading dash option-poisons the utilities
+	# the render spawns (mktemp, awk); "./" defuses the leading dash.
+	[[ "$tasks_dir" == -* ]] && tasks_dir="./$tasks_dir"
 	local dash="$tasks_dir/$DASHBOARD_NAME"
 	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
 
 	local triage=() ready=() inprogress=() blocked=() completed=() archive=()
 	local newest=""
 
-	local subdir file hdr name status priority progress created updated completed_at duration link prog
+	local subdir file name status priority progress created updated completed_at duration link prog fields
 	local id idkey datekey row
+	local shard_files shard_fields shard_i
 	local esc_priority esc_created esc_updated esc_status esc_prog esc_completed_at esc_duration
 	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
 		[[ -d "$tasks_dir/$subdir" ]] || continue
+		shard_files=()
 		for file in "$tasks_dir/$subdir"/*.md; do
 			[[ -e "$file" ]] || continue
-			hdr="$(header_of <"$file")"
-			name="$(printf '%s\n' "$hdr" | header_name)"
+			shard_files+=("$file")
+		done
+		((${#shard_files[@]} > 0)) || continue
+		mapfile -t shard_fields < <(header_fields "${shard_files[@]}")
+		shard_i=0
+		for file in "${shard_files[@]}"; do
+			fields=("${shard_fields[@]:shard_i * 8:8}")
+			((shard_i += 1))
+			name="${fields[0]}"
+			status="${fields[1]}"
+			priority="${fields[2]}"
+			progress="${fields[3]}"
+			created="${fields[4]}"
+			updated="${fields[5]}"
+			completed_at="${fields[6]}"
+			duration="${fields[7]}"
 			[[ -z "$name" ]] && { name="${file##*/}"; name="${name%.md}"; }
-			id="$(task_id_of "$file")"
-			idkey="$(task_id_key "$id")"
+			task_id_of id "$file"
+			task_id_key idkey "$id"
 			[[ -n "$id" ]] && name="$id: $name"
-			status="$(printf '%s\n' "$hdr" | header_field "Status")"
-			priority="$(printf '%s\n' "$hdr" | header_field "Priority")"
-			progress="$(printf '%s\n' "$hdr" | header_field "Progress")"
-			created="$(header_created "$hdr")"
-			updated="$(printf '%s\n' "$hdr" | header_field "Updated")"
-			completed_at="$(printf '%s\n' "$hdr" | header_field "Completed")"
-			duration="$(printf '%s\n' "$hdr" | header_field "Duration")"
 			[[ -z "$priority" ]] && priority="$DEFAULT_PRIORITY"
 			[[ -z "$duration" ]] && duration="$NA"
-			link="$(task_link "$subdir" "$file" "$name")"
+			task_link link "$subdir" "$file" "$name"
 
 			if [[ -n "$updated" && "$updated" > "$newest" ]]; then newest="$updated"; fi
 
@@ -338,7 +382,7 @@ render_unlocked() {
 					row="| $link | $esc_priority | $esc_created | $esc_updated |"
 					ready+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;
 				"$STATUS_IN_PROGRESS")
-					prog="$(normalize_progress "$progress")"
+					normalize_progress prog "$progress"
 					md_escape esc_prog "$prog"
 					row="| $link | $esc_prog | $esc_updated | $esc_priority |"
 					inprogress+=("$datekey$SORT_SEP$idkey$SORT_SEP$row") ;;

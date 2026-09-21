@@ -475,6 +475,67 @@ after="$(cat "$DASH")"
 assert_eq "repeated renders are byte-identical" "$before" "$after"
 assert_eq "render output is stable between runs" "$mid" "$after"
 
+echo "== render: one awk pass per file, zero grep spawns =="
+spawn_dir="$ROOT/spawn-board"
+t init --dir "$spawn_dir" >/dev/null
+t new --dir "$spawn_dir" --id SPW-1 --name "Spawn Count Ready" --status Ready >/dev/null
+t new --dir "$spawn_dir" --id SPW-2 --name "Spawn Count Wip" --status "In Progress" --priority High >/dev/null
+t new --dir "$spawn_dir" --id SPW-3 --name "Spawn Count Done" --status Completed >/dev/null
+printf '%s\n' \
+	"# Task: Spawn Count Legacy" \
+	"" \
+	"*Created: 2020-06-01 09:00*" \
+	"" \
+	"## Work Log" \
+	> "$spawn_dir/current/SPW-4-20200601-0900-spawn-count-legacy.md"
+shim_dir="$ROOT/spawn-shim"
+spawn_counts="$ROOT/spawn-counts"
+mkdir -p "$shim_dir" "$spawn_counts"
+write_spawn_shim() { # tool real_bin count_file; wrapper counts one invocation, then execs the real binary
+	cat >"$shim_dir/$1" <<EOF
+#!/bin/sh
+printf x >>'$3'
+exec '$2' "\$@"
+EOF
+	chmod +x "$shim_dir/$1"
+}
+write_spawn_shim awk "$(command -v awk)" "$spawn_counts/awk"
+write_spawn_shim grep "$(command -v grep)" "$spawn_counts/grep"
+count_spawns() { # count_file; shim invocation counter, zero when the tool never ran
+	local count_file="$1"
+	if [[ -f "$count_file" ]]; then wc -c <"$count_file"; else printf 0; fi
+}
+t render --dir "$spawn_dir" >/dev/null
+unshimmed_board="$(cat "$spawn_dir/dashboard.md")"
+PATH="$shim_dir:$PATH" "$TASKS_BIN" render --dir "$spawn_dir" >/dev/null
+awk_spawns="$(count_spawns "$spawn_counts/awk")"
+grep_spawns="$(count_spawns "$spawn_counts/grep")"
+spawn_files=4
+assert_eq "render spawns zero greps" "0" "$grep_spawns"
+if ((awk_spawns <= spawn_files)); then
+	ok "render spawns at most one awk per task file ($awk_spawns awk for $spawn_files files)"
+else
+	bad "render spawns at most one awk per task file ($awk_spawns awk for $spawn_files files)"
+fi
+assert_eq "shimmed render output equals the unshimmed render" "$unshimmed_board" "$(cat "$spawn_dir/dashboard.md")"
+
+echo "== render: dash-leading relative --dir is guarded =="
+dash_dir="$ROOT/-board"
+t init --dir "$dash_dir" >/dev/null
+t new --dir "$dash_dir" --id DSH-1 --name "Dash Leading Board" >/dev/null
+if (cd "$ROOT" && t render --dir "-board" >/dev/null); then
+	ok "render succeeds on a dash-leading relative dir"
+else
+	bad "render succeeds on a dash-leading relative dir"
+fi
+[[ -f "$dash_dir/dashboard.md" ]] && ok "dash-leading board renders its dashboard" \
+	|| bad "dash-leading board renders its dashboard"
+if compgen -G "$dash_dir/dashboard.md.*" >/dev/null; then
+	bad "dash-leading render leaves no dashboard temp behind"
+else
+	ok "dash-leading render leaves no dashboard temp behind"
+fi
+
 echo "== report: deposit path, numbering, Work Log entry =="
 f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"
 rpbase="$(basename "$f_rp")"
