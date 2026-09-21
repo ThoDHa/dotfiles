@@ -469,7 +469,7 @@ assert_contains "numeric-inner slug keeps its ID prefix" "$nsf_rows" "NSF-5: Twe
 assert_eq "numeric slugs sort chronologically in their lane" \
 	"$(printf '%s\n' "$nsf_rows" | head -1)" \
 	"$(printf '%s\n' "$nsf_rows" | grep -F 'Three Body')"
-rm -f "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md" "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
+rm -f "$f_bs" "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md" "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
 t render >/dev/null
 
 echo "== claim/release with a stale sidecar =="
@@ -569,6 +569,41 @@ if compgen -G "$dash_dir/dashboard.md.*" >/dev/null; then
 else
 	ok "dash-leading render leaves no dashboard temp behind"
 fi
+tilde_dir="$ROOT/~board"
+t init --dir "$tilde_dir" >/dev/null
+t new --dir "$tilde_dir" --id TLB-1 --name "Tilde Board" >/dev/null
+if (cd "$ROOT" && t render --dir "~board" >/dev/null); then
+	ok "render succeeds on a tilde-leading relative dir"
+else
+	bad "render succeeds on a tilde-leading relative dir"
+fi
+if compgen -G "$tilde_dir/dashboard.md.*" >/dev/null; then
+	bad "tilde-leading render leaves no dashboard temp behind"
+else
+	ok "tilde-leading render leaves no dashboard temp behind"
+fi
+
+echo "== render: mid-render failure leaves no temp residue =="
+fail_dir="$ROOT/fail-board"
+t init --dir "$fail_dir" >/dev/null
+t new --dir "$fail_dir" --id FRL-1 --name "Failure Residue" --status Ready >/dev/null
+t render --dir "$fail_dir" >/dev/null
+board_before="$(cat "$fail_dir/dashboard.md")"
+fail_shim="$ROOT/fail-shim"
+mkdir -p "$fail_shim"
+printf '#!/bin/sh\nexit 1\n' >"$fail_shim/sort"
+chmod +x "$fail_shim/sort"
+if PATH="$fail_shim:$PATH" "$TASKS_BIN" render --dir "$fail_dir" >/dev/null 2>&1; then
+	bad "render fails when sort fails"
+else
+	ok "render fails when sort fails"
+fi
+if compgen -G "$fail_dir/dashboard.md.*" >/dev/null; then
+	bad "failed render leaves no dashboard temp residue"
+else
+	ok "failed render leaves no dashboard temp residue"
+fi
+assert_eq "failed render leaves the board file untouched" "$board_before" "$(cat "$fail_dir/dashboard.md")"
 
 echo "== report: deposit path, numbering, Work Log entry =="
 f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"

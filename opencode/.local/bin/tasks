@@ -273,9 +273,7 @@ assemble_rows() {
 		# segment (TASK-5-20260101-1200-12-factor.md -> TASK-5) lands in
 		# the stamp role only when nothing right of it qualifies. Empty
 		# when no segment boundary qualifies.
-		function taskid(filename,  fb, p, rest, segend, cand, remainder) {
-			fb = filename
-			sub(/.*\//, "", fb)
+		function taskid(fb,  p, rest, segend, cand, remainder) {
 			for (p = length(fb) - 1; p > 1; p--) {
 				if (substr(fb, p, 1) != "-") continue
 				rest = substr(fb, p)
@@ -355,7 +353,7 @@ assemble_rows() {
 				nb = fb
 				sub(/\.md$/, "", nb)
 				if (name == "") name = nb
-				id = taskid(file)
+				id = taskid(fb)
 				idkey = idkeyof(id)
 				if (id != "") name = id ": " name
 				if (priority == "") priority = dp
@@ -405,11 +403,25 @@ slugify() {
 # line (the newest Updated timestamp, not wall-clock).
 render_unlocked() {
 	local tasks_dir="$1"
-	# A relative tasks_dir with a leading dash option-poisons the utilities
-	# the render spawns (mktemp, awk); "./" defuses the leading dash.
-	[[ "$tasks_dir" == -* ]] && tasks_dir="./$tasks_dir"
+	# A relative tasks_dir with a leading dash or tilde option-poisons or
+	# tilde-expands the utilities the render spawns and the re-parsed trap
+	# string; "./" defuses both.
+	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
 	local dash="$tasks_dir/$DASHBOARD_NAME"
 	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
+	# Both render temps die with the render span: an EXIT trap carrying
+	# the concrete temp paths (printf %q keeps arbitrary board paths
+	# byte-safe) runs on every abort set -e produces, where scattered rm
+	# calls never execute. Paths are baked in at set time because the
+	# trap fires after the function frame is gone; the script sets no
+	# other EXIT trap, so clearing it here restores the previous state.
+	# Cleared after the dashboard commit, when cleanup is moot, so the
+	# trap never spans other subcommands. That clear is also why the
+	# render span must never nest: the commit's trap - EXIT discards any
+	# outer render span's cleanup with it, so no code path may run one
+	# render span inside another (none does).
+	local render_cleanup; render_cleanup="rm -f -- $(printf '%q' "$tmp")"
+	trap "$render_cleanup" EXIT
 
 	local -a files=()
 	local subdir file
@@ -436,6 +448,8 @@ render_unlocked() {
 	# empty board).
 	local -a sorted=()
 	local rows_file; rows_file="$(mktemp "$dash.XXXXXX")"
+	render_cleanup+=" $(printf '%q' "$rows_file")"
+	trap "$render_cleanup" EXIT
 	assemble_rows "${files[@]+"${files[@]}"}" >"$rows_file"
 	LC_ALL=C sort -o "$rows_file" "$rows_file"
 	mapfile -t sorted <"$rows_file"
@@ -470,6 +484,7 @@ render_unlocked() {
 	} >"$tmp"
 
 	mv -f "$tmp" "$dash"
+	trap - EXIT
 }
 
 # Fail unless the .tasks directory exists.
