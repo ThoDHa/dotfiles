@@ -101,9 +101,13 @@ branch (the default dispatch vehicle for a unit dispatched alongside a
 running sibling under the worker-commit model recorded in the
 orchestration design), making commit checkpoints is
 yours: you MUST commit territory-scoped work at each meaningful
-commit checkpoint, every commit a complete logical change that leaves the
-project's test suite green, with conventional commit messages per the
-git-protocol skill. On a unit branch you MUST NOT amend or rebase
+commit checkpoint, every commit a complete logical change, the project's
+test suite green at the branch head and at every commit except the
+sanctioned ordered pair's red first commit (production fix first,
+test-expectation commit second, per the coding-standards rule's
+"Separation of Code and Test Changes" section), with conventional commit
+messages per the git-protocol skill. On a unit branch you MUST NOT
+amend or rebase
 in any form: not git commit --amend, not git rebase, not through
 git -C, sh -c, aliases, or any other route. Your commits are
 append-only, and history shaping belongs to the manager. Your final

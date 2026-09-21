@@ -257,7 +257,11 @@ make their own commit checkpoints on their unit branches; your commits
 are integration commits, never new unit work. When a unit passes, you
 shape its branch judgment-based: squash or merge the commit checkpoints into
 one commit when they form one logical change, and preserve separable
-commits when they stand alone, then integrate the result. Rebase,
+commits when they stand alone, then integrate the result. A sanctioned
+ordered pair per the coding-standards rule's "Separation of Code and Test
+Changes" section (a production fix and its test-expectation commit)
+MUST NOT be squashed into one commit: the pair's commits stay
+separable. Rebase,
 reset, revert, and amend are in your toolkit now: the grant removed
 amend's ask gate; only the force-push variants stay ask-gated, and
 pushed history is still reshaped only on explicit user request. Staging
