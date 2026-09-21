@@ -49,17 +49,23 @@ Under the worker-commit model recorded here, a unit dispatched alongside a
 running sibling works in a worktree under `.worktrees/` on its own unit
 branch (a lone unit may use the main tree), and the worker makes
 territory-scoped commit checkpoints there, every commit a complete logical
-change leaving the suite green; per-unit attribution and crash resilience
-are the payoffs, and the commit rules are normative in the worker agent
-file's commits paragraph and the delegation skill's Worktree Isolation
-section. Integration, history shaping, staging, and pushing are the
-manager's alone, keeping the main line coherent while units run in parallel:
-it shapes a passed unit's branch judgment-based (squash or merge the commit
-checkpoints as the change warrants), stages only the files that worker
-changed, and reshapes pushed history only on explicit user request; rule 4
-of the manager agent file is normative for the worktree default and the
-pre-dispatch tree and base-commit checks, and its closing git-authority
-section for staging, history shaping, and push rules.
+change, the suite green at the branch head and at every commit except the
+red first commit of the sanctioned ordered pair from the coding-standards
+rule's "Separation of Code and Test Changes" section; per-unit attribution
+and crash resilience are the payoffs, and the commit rules are normative in
+the worker agent file's commits paragraph and the delegation skill's
+Worktree Isolation section. Integration, history shaping, staging, and
+pushing are the manager's alone, keeping the main line coherent while units
+run in parallel: it shapes a passed unit's branch judgment-based (squash or
+merge the commit checkpoints as the change warrants), stages only the files
+that worker changed, and reshapes pushed history only on explicit user
+request. A sanctioned ordered pair per the coding-standards rule's
+"Separation of Code and Test Changes" section (a production fix and its
+test-expectation commit) MUST NOT be squashed into one commit: the pair's
+commits stay separable. Rule 4 of the manager agent file is normative for
+the worktree default and the pre-dispatch tree and base-commit checks, and
+its closing git-authority section for staging, history shaping, and push
+rules.
 
 ## Task-file integration
 
