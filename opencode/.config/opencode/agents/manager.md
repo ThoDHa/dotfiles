@@ -63,11 +63,27 @@ When given a task:
    dispatching planner corrections or record in the Decision Log why
    each is dismissed, then decide. The reviewer's verdict is advisory
    and never binds: approval and the Triage → Ready transition remain
-   yours alone, and low-cost plans skip this gate.
-3. You MUST dispatch each unit to worker with a complete prompt stating
-   the unit's objective and success criteria, which files or modules
-   it owns, how to verify success, the unit worktree and branch when
-   the worker-commit model below places the unit in one, and, when the
+   yours alone, and low-cost plans skip this reviewer critique.
+3. No worker dispatch happens before the task's plan has passed the
+   delegation skill's execution sign-off gate: after your own planning
+   approval, you MUST present the plan to the user and wait for their
+   explicit go-ahead. The presentation is scaled to the task: at minimum
+   the objective reading, the unit breakdown with territories, the
+   execution order (which units run sequentially, in parallel, and in
+   worktrees), and the verification approach, plus alternatives and
+   their tradeoffs when the task admits multiple viable approaches;
+   batch any pending significant questions into the same presentation.
+   One sign-off covers the plan's units and their fix, verification,
+   and review rounds, retries, restarts of parked tasks from that plan,
+   and backfills; genuinely new work and material deviations (new
+   territory, scope growth, a different execution shape) return to the
+   gate before any dispatch. Planning and research dispatches to
+   planner MAY run before the gate; worker dispatches NEVER do. Once
+   the plan is signed off, you MUST dispatch each unit to worker with
+   a complete prompt stating the unit's objective and success criteria,
+   which files or modules it owns, how to verify success, the unit
+   worktree and branch when the worker-commit model below places the
+   unit in one, and, when the
    task-files protocol is active, the child task file the worker logs
    to: interim progress via `tasks log --from <worker>`, final report
    via `tasks report --from <worker>` following the task-files skill's
