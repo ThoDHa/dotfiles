@@ -170,7 +170,8 @@ delay_opencode() {
     if [[ $# -lt 2 || ( "$mode" != 'at' && "$mode" != 'in' ) ]]; then
         printf 'Usage: delay_opencode [-b] at HH:MM [prompt...]\n'
         printf '       delay_opencode [-b] in DURATION [prompt...]\n'
-        printf 'Foreground by default; -b detaches and runs headless (opencode run).\n'
+        printf 'Foreground blocks the terminal; -b detaches. Both run headless (opencode run);\n'
+        printf 'in foreground, Ctrl+C cancels during the wait or interrupts the run.\n'
         return 2
     fi
 
@@ -203,7 +204,7 @@ delay_opencode() {
 
     printf 'OpenCode continues in %s seconds (Ctrl+C to cancel)\n' "$delay_seconds"
     sleep "$delay_seconds" || return 1
-    command opencode --auto --continue --prompt "$prompt"
+    command opencode run --continue --auto "$prompt"
 }
 
 # Modern ls replacement with eza
