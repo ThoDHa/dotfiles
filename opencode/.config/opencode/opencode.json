@@ -23,5 +23,14 @@
     },
     "doom_loop": "allow"
   },
-  "plugin": ["./plugin/lru-context.ts"]
+  "plugin": [
+    [
+      "./plugin/context-manager.ts",
+      {
+        "manualMode": true,
+        "watermarkTokens": 250000,
+        "agedReadEvictionMessages": 30
+      }
+    ]
+  ]
 }
