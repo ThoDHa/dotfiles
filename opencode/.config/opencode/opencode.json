@@ -3,18 +3,39 @@
   "instructions": [
     "~/.config/opencode/rules/core.md",
     "~/.config/opencode/rules/coding-standards.md",
-    "~/.config/opencode/rules/execution-standards.md"
+    "~/.config/opencode/rules/execution-standards.md",
+    "~/.config/opencode/rules/qhaway-memory.md"
   ],
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp"],
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp"
+      ],
       "enabled": true
     },
     "context7": {
       "type": "remote",
       "url": "https://mcp.context7.com/mcp",
       "enabled": true
+    },
+    "qhaway": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--python",
+        "3.14",
+        "--from",
+        "qhaway==0.7.2",
+        "qhaway",
+        "serve",
+        "--dir",
+        "/home/khave/.config/opencode/qhaway-memory"
+      ],
+      "enabled": true,
+      "timeout": 30000
     }
   },
   "permission": {
@@ -25,11 +46,12 @@
   },
   "plugin": [
     [
-      "./plugin/context-manager.ts",
+      "./context-manager/context-manager.ts",
       {
         "manualMode": true,
         "watermarkTokens": 250000,
-        "agedReadEvictionMessages": 30
+        "agedReadEvictionMessages": 30,
+        "reasoningRetentionMessages": 8
       }
     ]
   ]

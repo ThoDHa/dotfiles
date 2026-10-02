@@ -1,14 +1,14 @@
 {
   "$schema": "https://opencode.ai/tui.json",
-  "theme": "rosepine",
   "keybinds": {
     "leader": "ctrl+w"
   },
   "plugin": [
     [
-      "./plugin/lru-context.tui.tsx",
+      "./context-manager/context-manager.tui.tsx",
       {
-        "sidebarSubagents": true
+        "sidebarSubagents": true,
+        "sidebarMode": "context"
       }
     ]
   ]
