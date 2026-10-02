@@ -19,6 +19,11 @@ CLAUDE_SYNC       := $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT))
 # Rules target path (after stow): used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 
+# Top-level opencode config files that must stay symlinks: external tools
+# overwrite them in place, which silently breaks stow without failing
+# existence-only deployment checks
+OPENCODE_CONFIG := $(STOW_TARGET)/.config/opencode
+
 # Claude Code paths
 CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
@@ -108,7 +113,11 @@ dry-run:
 #   .tmux.conf: may exist from a prior manual tmux setup
 #   tmux-sessionizer/windowizer: may exist from a prior manual install
 #   isort config: may exist from a prior isort install
-#   .config/opencode: may exist from a prior opencode install
+#   .config/opencode/{opencode.json,tui.json,rules/*,agents/*}: stow-owned
+#     links that external tools overwrite in place; only these paths are
+#     removed so unmanaged runtime data (qhaway-memory DB, node_modules,
+#     scripts, *.bak) survives cleanup. A legacy folded dir symlink is
+#     dropped as a whole.
 #   .claude/{...}: targeted removal (~/.claude also holds runtime data)
 #   .agents: whole tree is stow-owned; drops links to a moved repo
 #   DESIGN/GATEWAY/PII-SAFE.md: legacy links from before these docs were ignored
@@ -126,7 +135,15 @@ clean-stow:
 		$(STOW_TARGET)/DESIGN.md \
 		$(STOW_TARGET)/GATEWAY.md \
 		$(STOW_TARGET)/PII-SAFE.md
-	@rm -rf $(STOW_TARGET)/.config/opencode $(STOW_TARGET)/.agents
+	@if [ -L $(STOW_TARGET)/.config/opencode ]; then \
+		rm -f $(STOW_TARGET)/.config/opencode; \
+	else \
+		rm -f $(STOW_TARGET)/.config/opencode/opencode.json \
+			$(STOW_TARGET)/.config/opencode/tui.json \
+			$(STOW_TARGET)/.config/opencode/rules/* \
+			$(STOW_TARGET)/.config/opencode/agents/*; \
+	fi
+	@rm -rf $(STOW_TARGET)/.agents
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
 # ── Claude Code Configuration ─────────────────────────────────────────────────
@@ -224,7 +241,12 @@ ifneq ($(OPENCODE_PRESENT),)
 	@test -d $(OPENCODE_RULES) || (echo "FAIL: $(OPENCODE_RULES) directory missing" && exit 1)
 	@echo "  Checking rules files..."
 	@for file in $(EXPECTED_RULES); do \
-		test -L $(OPENCODE_RULES)/$$file || (echo "FAIL: $$file symlink missing" && exit 1); \
+		test -L $(OPENCODE_RULES)/$$file || { echo "FAIL: $$file symlink missing"; exit 1; }; \
+		echo "    $$file OK"; \
+	done
+	@echo "  Checking opencode config symlinks..."
+	@for file in opencode.json tui.json; do \
+		test -L $(OPENCODE_CONFIG)/$$file || { echo "FAIL: $$file symlink missing"; exit 1; }; \
 		echo "    $$file OK"; \
 	done
 else
@@ -232,7 +254,7 @@ else
 endif
 	@echo "  Checking skills..."
 	@for skill in $(EXPECTED_SKILLS); do \
-		test -f $(STOW_TARGET)/.agents/skills/$$skill/SKILL.md || (echo "FAIL: $$skill skill missing" && exit 1); \
+		test -f $(STOW_TARGET)/.agents/skills/$$skill/SKILL.md || { echo "FAIL: $$skill skill missing"; exit 1; }; \
 		echo "    $$skill OK"; \
 	done
 ifneq ($(CLAUDE_PRESENT),)
