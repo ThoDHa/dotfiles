@@ -26,11 +26,12 @@ opencode/.config/opencode/agents/reviewer.md
 opencode/.config/opencode/agents/verifier.md
 opencode/.config/opencode/agents/worker.md
 
-## Rules files (opencode/.config/opencode/rules/, 3)
+## Rules files (opencode/.config/opencode/rules/, 4)
 
 opencode/.config/opencode/rules/coding-standards.md
 opencode/.config/opencode/rules/core.md
 opencode/.config/opencode/rules/execution-standards.md
+opencode/.config/opencode/rules/qhaway-memory.md
 
 ## Corpus docs (2)
 
