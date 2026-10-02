@@ -15,6 +15,7 @@ permission:
     "make test*": "allow"
     "tasks log*": "allow"
     "tasks report*": "allow"
+    "sqlite3 -readonly*": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"
