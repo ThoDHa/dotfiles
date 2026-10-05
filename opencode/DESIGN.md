@@ -85,7 +85,10 @@ the manager's Triage → Ready approval and the first worker dispatch sits the
 delegation skill's execution sign-off gate: the manager presents the plan to
 the user (objective reading, unit breakdown with territories, execution
 order, verification approach, plus alternatives when multiple viable
-approaches exist) and waits for explicit go-ahead; one sign-off covers the
+approaches exist) and waits for explicit go-ahead, a wait enforced as a
+turn boundary: the presenting response carries no dispatch or unit
+worktree creation, and only an explicit user reply after the
+presentation unlocks execution; one sign-off covers the
 plan's lifecycle (units, fix, verification, and review rounds, retries,
 restarts, backfills), and new work or material deviations return to the gate
 (rule 3 of the manager agent file; the delegation skill's Execution
