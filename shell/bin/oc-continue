@@ -1,0 +1,168 @@
+#!/usr/bin/env zsh
+# oc-continue: event-driven continuation for headless opencode runs that hit
+# provider quota windows. delay_opencode's `auto` mode is a thin wrapper.
+# Pure shell, no models. State: ~/.local/share/opencode/oc-continue/.
+#
+# Usage:
+#   oc-continue run [-n N] [prompt...]   N = session budget (default 2): each
+#                                        rate-limit hit ends a session; the run
+#                                        parks (waits out the window), resumes
+#                                        with `opencode run --continue --auto`,
+#                                        and quits when the Nth hit arrives.
+#   oc-continue stop                     Kill a running engine and its child.
+#   oc-continue status                   Running pid, sessions consumed, tail.
+#
+# Environment overrides:
+#   OC_BIN            opencode binary (default: opencode; tests use a fake)
+#   OC_WAIT_UNTIL     HH:MM known window-reset time; overrides the default
+#                     observed-hit + 4h52m park
+#   OC_WAIT_SECONDS   fixed park length (testing; bypasses window math)
+#   OC_STATE_DIR      state directory override (testing)
+
+set -u
+
+STATE_DIR="${OC_STATE_DIR:-$HOME/.local/share/opencode/oc-continue}"
+LOG_FILE="$STATE_DIR/engine.log"
+PID_FILE="$STATE_DIR/run.pid"
+OC_BIN="${OC_BIN:-opencode}"
+DEFAULT_SESSIONS=2
+PARK_SECONDS=17520   # 4h52m: observed-hit plus safety, under the 5h window
+TAIL_LINES=40
+# Anchored the way the A/B driver pins it: a bare 429 inside a number or a
+# timestamp must not read as a quota event.
+QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (exhausted|exceeded)|exceeded your'
+DEFAULT_PROMPT='please continue: resume where you left off'
+
+log_line() {
+    mkdir -p "$STATE_DIR"
+    printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$LOG_FILE"
+}
+
+running_pid() {
+    [[ -f "$PID_FILE" ]] || return 1
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    print -r -- "$pid"
+}
+
+epoch_of() { date -d "$1" +%s 2>/dev/null || return 1 }
+
+park_seconds() {
+    if [[ -n "${OC_WAIT_SECONDS:-}" ]]; then
+        print -r -- "$OC_WAIT_SECONDS"
+        return 0
+    fi
+    if [[ -n "${OC_WAIT_UNTIL:-}" ]]; then
+        local target now
+        target=$(epoch_of "$OC_WAIT_UNTIL") || return 1
+        now=$(date +%s)
+        if (( target > now )); then
+            print -r -- $(( target - now ))
+        else
+            print -r -- 60
+        fi
+        return 0
+    fi
+    print -r -- "$PARK_SECONDS"
+}
+
+looks_like_quota() {
+    tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -qiE "$QUOTA_REGEX"
+}
+
+cmd_run() {
+    local sessions="$DEFAULT_SESSIONS"
+    if [[ "${1:-}" == "-n" ]]; then
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || { printf 'oc-continue: -n needs a number\n' >&2; return 2; }
+        sessions="$2"
+        shift 2
+    fi
+    local prompt="${*:-$DEFAULT_PROMPT}"
+
+    local existing
+    if existing=$(running_pid); then
+        printf 'oc-continue: already running (pid %s); oc-continue stop first\n' "$existing" >&2
+        return 1
+    fi
+
+    mkdir -p "$STATE_DIR"
+    print -r -- $$ > "$PID_FILE"
+    trap 'rm -f "$PID_FILE"' EXIT INT TERM
+
+    local session=1 hits=0
+    log_line "run start (pid $$): budget $sessions session(s), oc=${OC_BIN}"
+    printf 'oc-continue: session 1 of %s\n' "$sessions"
+
+    local out_file rc is_quota wait_s
+    while :; do
+        out_file=$(mktemp "$STATE_DIR/oc-out.XXXXXX") || { log_line 'mktemp failed'; return 1; }
+        printf 'oc-continue: %s run --continue --auto %s\n' "$OC_BIN" "$prompt"
+        "$OC_BIN" run --continue --auto "$prompt" > "$out_file" 2>&1
+        rc=$?
+        is_quota=false
+        (( rc == 0 )) || if looks_like_quota "$out_file"; then is_quota=true; fi
+        rm -f "$out_file"
+
+        if (( rc == 0 )); then
+            log_line "session $session: run completed cleanly"
+            printf 'oc-continue: completed cleanly (session %s of %s)\n' "$session" "$sessions"
+            return 0
+        fi
+
+        hits=$(( hits + 1 ))
+        if [[ "$is_quota" != true ]]; then
+            log_line "session $session: non-quota failure rc=$rc; not retrying"
+            printf 'oc-continue: non-quota failure (rc %s); see %s\n' "$rc" "$LOG_FILE"
+            return "$rc"
+        fi
+
+        if (( session >= sessions )); then
+            log_line "session $session: quota hit $hits of budget $sessions; budget spent, quitting"
+            printf 'oc-continue: budget spent (%s session(s)); quitting after hit %s\n' "$sessions" "$hits"
+            return 0
+        fi
+
+        wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }
+        session=$(( session + 1 ))
+        log_line "session $(( session - 1 )): quota hit; parking ${wait_s}s until session $session of $sessions"
+        printf 'oc-continue: rate limit hit; parked %ss, then session %s of %s (oc-continue stop to cancel)\n' \
+            "$wait_s" "$session" "$sessions"
+        sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
+    done
+}
+
+cmd_stop() {
+    local pid
+    if ! pid=$(running_pid); then
+        printf 'oc-continue: not running\n'
+        rm -f "$PID_FILE" 2>/dev/null
+        return 0
+    fi
+    command pkill -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+    rm -f "$PID_FILE"
+    log_line "stopped by user (pid $pid)"
+    printf 'oc-continue: stopped (pid %s)\n' "$pid"
+    return 0
+}
+
+cmd_status() {
+    local pid
+    if ! pid=$(running_pid); then
+        printf 'oc-continue: not running\n'
+        [[ -f "$LOG_FILE" ]] && tail -n 3 "$LOG_FILE"
+        return 0
+    fi
+    printf 'oc-continue: running (pid %s)\n' "$pid"
+    [[ -f "$LOG_FILE" ]] && tail -n 5 "$LOG_FILE"
+    return 0
+}
+
+case "${1:-}" in
+    run)    shift; cmd_run "$@" ;;
+    stop)   cmd_stop ;;
+    status) cmd_status ;;
+    *) printf 'Usage: oc-continue run [-n N] [prompt...] | stop | status\n' >&2; exit 2 ;;
+esac
