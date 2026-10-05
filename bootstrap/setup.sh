@@ -418,6 +418,16 @@ step_claude_stow() {
     fi
 }
 
+# Clone the context-manager plugin directly into the opencode config dir,
+# where opencode.json/tui.json reference it. Floating on latest for now;
+# pin to a sha once the plugin API stabilizes. HTTPS (not SSH) so fresh
+# machines without keys can clone.
+step_context_manager() {
+    git_clone_or_pull "opencode-context-manager" \
+        "https://github.com/ThoDHa/opencode-context-manager.git" \
+        "$HOME/.config/opencode/opencode-context-manager"
+}
+
 step_docker() {
     . /etc/os-release
 
@@ -484,12 +494,17 @@ step_verify() {
     echo "  Configs:"
     _check_dir()  { [ -d "$1" ] && echo "    ✓ $2" || { echo "    ✗ $2 — NOT FOUND";     missing+=("$2"); }; }
     _check_link() { [ -L "$1" ] && echo "    ✓ $2" || { echo "    ✗ $2 — NOT A SYMLINK"; missing+=("$2"); }; }
+    _check_file() { [ -f "$1" ] && echo "    ✓ $2" || { echo "    ✗ $2 — NOT FOUND";     missing+=("$2"); }; }
 
     _check_dir  "$HOME/.config/nvim"           "nvim config"
     _check_dir  "$HOME/.oh-my-zsh"             "oh-my-zsh"
     _check_dir  "$HOME/.tmux/plugins/tpm"      "TPM"
     _check_dir  "$HOME/.local/share/nvim/venv" "nvim python venv"
     _check_link "$HOME/.zshrc"                 ".zshrc symlink"
+    if [ "$WANT_OPENCODE" = "1" ]; then
+        _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.ts"       "context-manager plugin"
+        _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.tui.tsx" "context-manager TUI plugin"
+    fi
 
     if [ ${#missing[@]} -gt 0 ]; then
         print_error "Missing: ${missing[*]}"
@@ -531,6 +546,7 @@ run_step "NVM + Node.js"         step_nvm
 run_step "NeoVim"                 step_neovim
 run_step "eza"                    step_eza
 if [ "$WANT_OPENCODE" = "1" ]; then run_step "OpenCode"           step_opencode; else echo "  Skipping OpenCode (not selected)"; fi
+if [ "$WANT_OPENCODE" = "1" ]; then run_step "Context manager plugin" step_context_manager; else echo "  Skipping context manager plugin (OpenCode not selected)"; fi
 if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code"        step_claude;    else echo "  Skipping Claude Code (not selected)"; fi
 if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code config" step_claude_stow; else echo "  Skipping Claude Code config (not selected)"; fi
 run_step "Docker"                 step_docker

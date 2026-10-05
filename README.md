@@ -112,6 +112,8 @@ The `bootstrap/setup.sh` script sets up a complete development environment:
 - NeoVim configuration from [ThoDHa/nvim](https://github.com/ThoDHa/nvim)
 - NVM with Node.js LTS
 - eza, Docker, and optional OpenCode / Claude Code installs
+  (the OpenCode install clones the context-manager plugin into
+  `~/.config/opencode/opencode-context-manager/`)
 
 Installer scripts fetch the latest upstream version on each run (oh-my-zsh
 master, the latest installer URLs, the latest font release).
