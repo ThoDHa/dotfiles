@@ -5,7 +5,7 @@
   },
   "plugin": [
     [
-      "./context-manager/context-manager.tui.tsx",
+      "./opencode-context-manager/plugin/context-manager.tui.tsx",
       {
         "sidebarSubagents": true,
         "sidebarMode": "context"

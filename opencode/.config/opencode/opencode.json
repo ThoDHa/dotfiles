@@ -44,15 +44,5 @@
     },
     "doom_loop": "allow"
   },
-  "plugin": [
-    [
-      "./context-manager/context-manager.ts",
-      {
-        "manualMode": true,
-        "watermarkTokens": 250000,
-        "agedReadEvictionMessages": 30,
-        "reasoningRetentionMessages": 8
-      }
-    ]
-  ]
+  "plugin": []
 }
