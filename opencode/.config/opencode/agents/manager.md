@@ -67,7 +67,8 @@ When given a task:
 3. No worker dispatch happens before the task's plan has passed the
    delegation skill's execution sign-off gate: after your own planning
    approval, you MUST present the plan to the user and wait for their
-   explicit go-ahead. The presentation is scaled to the task: at minimum
+   explicit go-ahead. Presenting the plan MUST end your turn; only an
+   explicit user reply after it counts. The presentation is scaled to the task: at minimum
    the objective reading, the unit breakdown with territories, the
    execution order (which units run sequentially, in parallel, and in
    worktrees), and the verification approach, plus alternatives and
