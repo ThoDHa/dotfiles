@@ -1,16 +1,55 @@
 #!/usr/bin/env zsh
-# oc-continue: event-driven continuation for headless opencode runs that hit
-# provider quota windows. delay_opencode's `auto` mode is a thin wrapper.
-# Pure shell, no models. State: ~/.local/share/opencode/oc-continue/.
+# oc-continue: scheduling and event-driven continuation for headless opencode
+# runs that hit provider quota windows. The old zshrc delay_opencode function
+# was folded into this CLI. Pure shell, no models.
+# State: ~/.local/share/opencode/oc-continue/.
 #
 # Usage:
-#   oc-continue run [-n N] [prompt...]   N = session budget (default 2): each
-#                                        rate-limit hit ends a session; the run
-#                                        parks (waits out the window), resumes
-#                                        with `opencode run --continue --auto`,
-#                                        and quits when the Nth hit arrives.
+#   oc-continue run [-n N] [ocflags] [prompt...]   N = session budget
+#                                        (default 2): each rate-limit hit ends
+#                                        a session; the run parks (waits out
+#                                        the window), resumes with `opencode
+#                                        run --continue --auto`, and quits
+#                                        when the Nth hit arrives. Detaches
+#                                        immediately: parks and sessions
+#                                        happen in the background.
+#   oc-continue at HH:MM [ocflags] [prompt...]     Run once at a wall-clock
+#                                        time (rolls to tomorrow if past).
+#                                        Detaches immediately: the countdown
+#                                        and run happen in the background.
+#   oc-continue in DURATION [ocflags] [prompt...]  Run once after DURATION
+#                                        (e.g. 90, 5m, 2h, 1d). One-shot: a
+#                                        rate-limit hit just fails; `run`
+#                                        rides windows. Detaches immediately.
 #   oc-continue stop                     Kill a running engine and its child.
 #   oc-continue status                   Running pid, sessions consumed, tail.
+#   oc-continue clean                    Remove state (log, output, stale
+#                                        pid); refuses while running.
+#   oc-continue follow                   tail -F the live run output; survives
+#                                        quota parks, and shows the last
+#                                        session's output once idle.
+#
+# Every launching command returns at once; watch with `oc-continue follow`,
+# check with `status`, cancel with `stop`. For a foreground run right now,
+# call `opencode run --continue --auto` directly.
+#
+# Dash-prefixed args before the prompt pass through to `opencode run`, so
+# `oc-continue run --session ID --dir PATH -m provider/model fix it` works.
+# Known value-taking flags consume their value token; others can use
+# --flag=value. A bare `--` forces everything after it to be prompt.
+# No prompt given: a re-orientation continuation prompt is used.
+#
+# Examples:
+#   oc-continue run                          continue this directory's last
+#                                            session in the background, ride
+#                                            up to 2 quota windows
+#   oc-continue run -n 4                     background, 4-session budget
+#   oc-continue run -m zhipu/glm-5.3 fix tui continue, model override passed
+#                                            through to opencode
+#   oc-continue at 22:30                     one-shot tonight at 22:30
+#   oc-continue in 45m "run the test suite"  one-shot after a 45m pause
+#   oc-continue follow                       tail live output from anywhere
+#   oc-continue status | stop | clean        inspect, cancel, wipe state
 #
 # Environment overrides:
 #   OC_BIN            opencode binary (default: opencode; tests use a fake)
@@ -24,14 +63,24 @@ set -u
 STATE_DIR="${OC_STATE_DIR:-$HOME/.local/share/opencode/oc-continue}"
 LOG_FILE="$STATE_DIR/engine.log"
 PID_FILE="$STATE_DIR/run.pid"
+OUT_FILE="$STATE_DIR/last.out"
+# Top level on purpose: inside a zsh function $0 is the function's name,
+# not this script's path.
+SCRIPT_PATH="$0"
 OC_BIN="${OC_BIN:-opencode}"
 DEFAULT_SESSIONS=2
+SECONDS_PER_DAY=86400
 PARK_SECONDS=17520   # 4h52m: observed-hit plus safety, under the 5h window
 TAIL_LINES=40
+READY_POLLS=20       # x READY_POLL_INTERVAL: how long launch waits for the
+READY_POLL_INTERVAL=0.1   # engine's pid file before reporting failure
 # Anchored the way the A/B driver pins it: a bare 429 inside a number or a
 # timestamp must not read as a quota event.
 QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (exhausted|exceeded)|exceeded your'
-DEFAULT_PROMPT='please continue: resume where you left off'
+DEFAULT_PROMPT='The provider rate-limit window has reset and your quota is fresh. Continue this session from where the rate limit interrupted it. First re-orient: reread the recent conversation, the todo list, and the current state of the files on disk. Then finish the remaining work without redoing steps already completed. If the work is already complete, verify that and report it instead of starting anything new.'
+# opencode run flags that consume a separate value token, for passthrough;
+# bare flags and --flag=value forms need no entry here.
+OC_VALUE_FLAGS=(--command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
 
 log_line() {
     mkdir -p "$STATE_DIR"
@@ -72,6 +121,50 @@ looks_like_quota() {
     tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -qiE "$QUOTA_REGEX"
 }
 
+# Split args into leading opencode flags (with their value tokens) and the
+# prompt words that follow. A bare `--` forces everything after it to be
+# prompt, so dash-leading prompts stay passable.
+split_run_args() {
+    oc_flags=()
+    prompt_words=()
+    while (( $# )); do
+        case "$1" in
+            --)
+                shift
+                prompt_words+=("$@")
+                return 0
+                ;;
+            -*)
+                if (( $# == 1 )) && (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
+                    printf 'oc-continue: %s needs a value\n' "$1" >&2
+                    return 2
+                fi
+                oc_flags+=("$1")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]] && \
+                   (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
+                    shift
+                    oc_flags+=("$1")
+                fi
+                shift
+                ;;
+            *)
+                prompt_words+=("$@")
+                return 0
+                ;;
+        esac
+    done
+}
+
+start_engine() {
+    local existing
+    if existing=$(running_pid); then
+        printf 'oc-continue: already running (pid %s); oc-continue stop first\n' "$existing" >&2
+        return 1
+    fi
+    mkdir -p "$STATE_DIR"
+    print -r -- $$ > "$PID_FILE"
+}
+
 cmd_run() {
     local sessions="$DEFAULT_SESSIONS"
     if [[ "${1:-}" == "-n" ]]; then
@@ -79,31 +172,23 @@ cmd_run() {
         sessions="$2"
         shift 2
     fi
-    local prompt="${*:-$DEFAULT_PROMPT}"
+    split_run_args "$@" || return 2
+    local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
 
-    local existing
-    if existing=$(running_pid); then
-        printf 'oc-continue: already running (pid %s); oc-continue stop first\n' "$existing" >&2
-        return 1
-    fi
-
-    mkdir -p "$STATE_DIR"
-    print -r -- $$ > "$PID_FILE"
-    trap 'rm -f "$PID_FILE"' EXIT INT TERM
+    start_engine || return 1
 
     local session=1 hits=0
-    log_line "run start (pid $$): budget $sessions session(s), oc=${OC_BIN}"
+    log_line "run start (pid $$): budget $sessions session(s), oc=${OC_BIN} ${oc_flags[*]}"
     printf 'oc-continue: session 1 of %s\n' "$sessions"
 
-    local out_file rc is_quota wait_s
+    local rc is_quota wait_s
     while :; do
-        out_file=$(mktemp "$STATE_DIR/oc-out.XXXXXX") || { log_line 'mktemp failed'; return 1; }
-        printf 'oc-continue: %s run --continue --auto %s\n' "$OC_BIN" "$prompt"
-        "$OC_BIN" run --continue --auto "$prompt" > "$out_file" 2>&1
+        : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+        printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
+        "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" 2>&1
         rc=$?
         is_quota=false
-        (( rc == 0 )) || if looks_like_quota "$out_file"; then is_quota=true; fi
-        rm -f "$out_file"
+        (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
 
         if (( rc == 0 )); then
             log_line "session $session: run completed cleanly"
@@ -114,7 +199,7 @@ cmd_run() {
         hits=$(( hits + 1 ))
         if [[ "$is_quota" != true ]]; then
             log_line "session $session: non-quota failure rc=$rc; not retrying"
-            printf 'oc-continue: non-quota failure (rc %s); see %s\n' "$rc" "$LOG_FILE"
+            printf 'oc-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
             return "$rc"
         fi
 
@@ -131,6 +216,52 @@ cmd_run() {
             "$wait_s" "$session" "$sessions"
         sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
     done
+}
+
+cmd_once() {
+    local sleep_for="$1"; shift
+    split_run_args "$@" || return 2
+    local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
+
+    start_engine || return 1
+
+    log_line "one-shot start (pid $$): oc=${OC_BIN} ${oc_flags[*]} after ${sleep_for}"
+    printf 'oc-continue: runs in %s (oc-continue stop to cancel)\n' "$sleep_for"
+    sleep "$sleep_for" || { log_line 'wait interrupted'; return 1; }
+
+    : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+    printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
+    "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" 2>&1
+    local rc=$?
+    if (( rc == 0 )); then
+        log_line 'one-shot: run completed cleanly'
+        printf 'oc-continue: completed cleanly\n'
+        return 0
+    fi
+    if looks_like_quota "$OUT_FILE"; then
+        log_line "one-shot: quota hit (rc $rc); not retrying"
+        printf 'oc-continue: rate limit hit; one-shot, not retrying (run rides windows); output: %s\n' "$OUT_FILE"
+    else
+        log_line "one-shot: non-quota failure rc=$rc"
+        printf 'oc-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
+    fi
+    return "$rc"
+}
+
+cmd_at() {
+    [[ -n "${1:-}" ]] || { printf 'oc-continue: at needs HH:MM\n' >&2; return 2; }
+    local schedule="$1"; shift
+    local target now
+    target=$(epoch_of "$schedule") || { printf 'oc-continue: bad time %s\n' "$schedule" >&2; return 2; }
+    now=$(date +%s)
+    (( target > now )) || target=$(( target + SECONDS_PER_DAY ))
+    cmd_once "$(( target - now ))" "$@"
+}
+
+cmd_in() {
+    [[ "${1:-}" =~ ^[0-9]+([smhd])?$ ]] || { printf 'oc-continue: in needs DURATION (e.g. 90, 5m, 2h, 1d)\n' >&2; return 2; }
+    local duration="$1"; shift
+    cmd_once "$duration" "$@"
 }
 
 cmd_stop() {
@@ -160,9 +291,104 @@ cmd_status() {
     return 0
 }
 
+cmd_follow() {
+    mkdir -p "$STATE_DIR"
+    [[ -f "$OUT_FILE" ]] || : > "$OUT_FILE"
+    exec tail -n "$TAIL_LINES" -F "$OUT_FILE"
+}
+
+cmd_clean() {
+    local pid
+    if pid=$(running_pid); then
+        printf 'oc-continue: running (pid %s); oc-continue stop first\n' "$pid" >&2
+        return 1
+    fi
+    rm -rf "$STATE_DIR"
+    printf 'oc-continue: cleaned %s\n' "$STATE_DIR"
+    return 0
+}
+
+# Preflight the user-facing errors in the caller's terminal: the detached
+# child's stderr goes to /dev/null, so anything the caller got wrong must be
+# reported here, before forking.
+validate_launch() {
+    local sub="$1"; shift
+    case "$sub" in
+        run)
+            if [[ "${1:-}" == "-n" ]]; then
+                [[ "${2:-}" =~ ^[0-9]+$ ]] || { printf 'oc-continue: -n needs a number\n' >&2; return 2; }
+                shift 2
+            fi
+            ;;
+        at)
+            [[ -n "${1:-}" ]] || { printf 'oc-continue: at needs HH:MM\n' >&2; return 2; }
+            epoch_of "$1" >/dev/null || { printf 'oc-continue: bad time %s\n' "$1" >&2; return 2; }
+            shift
+            ;;
+        in)
+            [[ "${1:-}" =~ ^[0-9]+([smhd])?$ ]] || { printf 'oc-continue: in needs DURATION (e.g. 90, 5m, 2h, 1d)\n' >&2; return 2; }
+            shift
+            ;;
+    esac
+    split_run_args "$@" || return 2
+}
+
+launch() {
+    validate_launch "$@" || return 2
+    local sub="$1"; shift
+    local existing
+    if existing=$(running_pid); then
+        printf 'oc-continue: already running (pid %s); oc-continue stop first\n' "$existing" >&2
+        return 1
+    fi
+    if command -v setsid >/dev/null 2>&1; then
+        OC_DETACHED=1 setsid nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+    else
+        OC_DETACHED=1 nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+    fi
+    # Report readiness, not just spawn: setsid may fork, so $! is not
+    # reliably the engine pid. Wait for the engine to arm its pid file and
+    # print that; a child that dies before arming surfaces as a failure.
+    local polls=0
+    while (( polls < READY_POLLS )); do
+        [[ -f "$PID_FILE" ]] && break
+        sleep "$READY_POLL_INTERVAL"
+        polls=$(( polls + 1 ))
+    done
+    if [[ -f "$PID_FILE" ]]; then
+        printf 'oc-continue: %s detached (pid %s; oc-continue follow to watch, oc-continue stop to cancel)\n' \
+            "$sub" "$(cat "$PID_FILE" 2>/dev/null)"
+    else
+        printf 'oc-continue: %s failed to start (engine never armed; waited %.1fs)\n' \
+            "$sub" $(( READY_POLLS * READY_POLL_INTERVAL )) >&2
+        return 1
+    fi
+    exit 0
+}
+
+# Armed only in the engine child, at true top level: zsh runs function-set
+# EXIT traps at function return and restores trap resets on function return,
+# either of which would delete the pid file while the engine lives. The
+# parent launcher arms no traps at all, so it can never disturb the engine's.
+if [[ -n "${OC_DETACHED:-}" ]]; then
+    trap 'rm -f "$PID_FILE"' EXIT INT TERM
+fi
+
 case "${1:-}" in
-    run)    shift; cmd_run "$@" ;;
+    run|at|in)
+            sub="$1"; shift
+            if [[ -n "${OC_DETACHED:-}" ]]; then
+                case "$sub" in
+                    run) cmd_run "$@" ;;
+                    at)  cmd_at "$@" ;;
+                    in)  cmd_in "$@" ;;
+                esac
+            else
+                launch "$sub" "$@"
+            fi ;;
     stop)   cmd_stop ;;
     status) cmd_status ;;
-    *) printf 'Usage: oc-continue run [-n N] [prompt...] | stop | status\n' >&2; exit 2 ;;
+    clean)  cmd_clean ;;
+    follow) cmd_follow ;;
+    *) printf 'Usage: oc-continue run [-n N] [prompt...] | at HH:MM [prompt...] | in DURATION [prompt...]\n       oc-continue stop | status | clean | follow\n' >&2; exit 2 ;;
 esac
