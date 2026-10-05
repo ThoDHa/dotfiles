@@ -28,7 +28,7 @@
         "--python",
         "3.14",
         "--from",
-        "qhaway==0.7.2",
+        "qhaway==0.7.3",
         "qhaway",
         "serve",
         "--dir",
