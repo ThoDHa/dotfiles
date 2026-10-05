@@ -156,6 +156,19 @@ opencode() {
 }
 alias oc='opencode'
 
+# delay_opencode: schedule, or auto-continue, a headless opencode run.
+#   at HH:MM [prompt...]      run once at a wall-clock time (original mode)
+#   in DURATION [prompt...]   run once after a delay
+#   auto [-n N] [prompt...]   run now; when the provider quota window trips
+#                              the run, park until the window resets, then
+#                              resume with --continue --auto. N = session
+#                              budget (default 2): each rate-limit hit ends
+#                              one session; the run quits when the Nth hit
+#                              arrives. Powered by shell/bin/oc-continue
+#                              (pure shell, no models; state under
+#                              ~/.local/share/opencode/oc-continue).
+#   delay_opencode_stop       stop the background auto run
+#   delay_opencode_status     show run state and recent log lines
 delay_opencode() {
     local run_in_background=false
     if [[ "${1:-}" == '-b' || "${1:-}" == '--background' ]]; then
@@ -163,15 +176,46 @@ delay_opencode() {
         shift
     fi
 
-    local mode="${1:-at}"
+    local sessions=2
+    if [[ "${1:-}" == '-n' ]]; then
+        if ! [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+            printf 'delay_opencode: -n needs a number (session budget)\n' >&2
+            return 2
+        fi
+        sessions="$2"
+        shift 2
+    fi
+
+    local mode="${1:-}"
+
+    if [[ "$mode" == 'auto' ]]; then
+        shift
+        local prompt="${*:-please continue: resume where you left off}"
+        local engine="$HOME/dev/.dotfiles/shell/bin/oc-continue"
+        if [[ ! -x "$engine" ]]; then
+            printf 'delay_opencode: engine missing at %s\n' "$engine" >&2
+            return 1
+        fi
+        if [[ "$run_in_background" == true ]]; then
+            nohup "$engine" run -n "$sessions" "$prompt" >/dev/null 2>&1 &
+            local process_id=$!
+            disown "$process_id" 2> /dev/null || true
+            printf 'OpenCode auto-continue in background (budget %s session(s), pid %s; delay_opencode_stop to cancel)\n'                 "$sessions" "$process_id"
+            return 0
+        fi
+        "$engine" run -n "$sessions" "$prompt"
+        return $?
+    fi
+
     local schedule_value="${2:-05:00}"
     local prompt="${3:-please continue}"
 
     if [[ $# -lt 2 || ( "$mode" != 'at' && "$mode" != 'in' ) ]]; then
         printf 'Usage: delay_opencode [-b] at HH:MM [prompt...]\n'
         printf '       delay_opencode [-b] in DURATION [prompt...]\n'
-        printf 'Foreground blocks the terminal; -b detaches. Both run headless (opencode run);\n'
-        printf 'in foreground, Ctrl+C cancels during the wait or interrupts the run.\n'
+        printf '       delay_opencode [-b] auto [-n N] [prompt...]\n'
+        printf 'Foreground blocks the terminal; -b detaches. at/in run headless once;\n'
+        printf 'auto runs now and rides quota-window resets (N sessions), resuming via --continue.\n'
         return 2
     fi
 
@@ -205,6 +249,14 @@ delay_opencode() {
     printf 'OpenCode continues in %s seconds (Ctrl+C to cancel)\n' "$delay_seconds"
     sleep "$delay_seconds" || return 1
     command opencode run --continue --auto "$prompt"
+}
+
+delay_opencode_stop() {
+    command "$HOME/dev/.dotfiles/shell/bin/oc-continue" stop
+}
+
+delay_opencode_status() {
+    command "$HOME/dev/.dotfiles/shell/bin/oc-continue" status
 }
 
 # Modern ls replacement with eza
