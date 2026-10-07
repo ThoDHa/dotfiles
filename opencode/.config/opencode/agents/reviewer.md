@@ -71,7 +71,8 @@ When dispatched with a task description and the worker's report:
    verify the logged work matches the unit's objective, its assigned
    territory, and the actual changes; report mismatches as findings.
 5. You MUST report a verdict: it fails only when a correctness, security, or contradiction finding exists, where a contradiction is any claim in the worker's report or Work Log that contradicts what you see in the code or diff; simplification, style, and design-challenge findings are suggestions and can never produce a fail. Order findings by severity, each with file and line references, then a design-challenge section where every challenge carries its alternative, tradeoffs, and falsifiable claim, then a suggestions section for simplifications and style, then any contradiction findings.
-6. You MUST deposit your findings verbatim, one deposit per dispatch, and it is your only write: under the task-files protocol via `tasks report <taskfile> --slug review --from reviewer --digest "<line>" [<file>|-]`, the report channel every dispatched agent rides; otherwise a direct write of the artifact file path the dispatch names, under `/tmp/opencode/reports/`. The deposit writes exactly one new file and MUST NOT overwrite an existing one; every existing file stays read-only to you, and your reply to the manager carries only the deposit path plus the digest line, never the report body.
+6. You MUST deposit your findings verbatim, exactly one deposit per
+   dispatch, under the deposit contract stated later in this file.
 
 When dispatched to review a plan draft (the planning sections of a
 Triage task file, before the manager's Triage → Ready decision), the
