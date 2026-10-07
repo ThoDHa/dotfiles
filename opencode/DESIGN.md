@@ -14,7 +14,7 @@ section heading or rule number).
 | manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
-| reviewer | subagent | session | simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
+| reviewer | subagent | session | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
 | planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no implementation
@@ -123,14 +123,29 @@ returns, its verifier and reviewer are dispatched in parallel and four
 independent sources are reconciled per unit (worker claims, verifier
 results, reviewer findings, git ground truth). The verifier reports raw
 results without interpretation, the reviewer runs the simplify-review loop
-in Analysis-Only Mode and nothing beyond read-only git plus its single
-findings deposit, with the reviewer's reply to the manager carrying only the
-deposit path and digest (normative in rule 7 of the manager agent file and
-the verifier and reviewer agent files). On a pass the manager backfills the
-freed slot immediately and gives every discrepancy, finding, and suggestion
-exactly one recorded disposition (fix, defer, or decline), because unbounded
-loops hide failures and unactioned suggestions get lost (rules 7 through 9
-of the manager agent file; one combined seam review closes the batch).
+in Analysis-Only Mode and nothing beyond read-only git plus exactly one
+findings-deposit write per dispatch, with the reviewer's reply to the
+manager carrying only the deposit path and digest (normative in rule 7 of
+the manager agent file and the verifier and reviewer agent files). On a pass
+the manager backfills the freed slot immediately and gives every
+discrepancy, finding, and suggestion exactly one recorded disposition (fix,
+defer, or decline), because unbounded loops hide failures and unactioned
+suggestions get lost (rules 7 through 9 of the manager agent file; one
+combined seam review closes the batch). Verified findings get fixed or
+dispatched; design arguments get answered or debated in search of the better
+design: the manager concedes (dispatching the fix or opening the deferred
+task) or delivers a position, and the reviewer concedes with recorded
+reasons or strengthens with new argument only for exactly one exchange.
+
+The debate protocol is bounded by construction: a design challenge states
+its alternative, tradeoffs, and a falsifiable claim, taste-only findings
+are labeled and not debatable, exactly one exchange ends the debate with
+the disagreement standing as recorded, no argument is re-litigated, and a
+disagreement still unresolved after the exchange escalates verbatim to the
+user rather than dropping silently; a declined design challenge requires
+either the reviewer's recorded concession from that exchange or that
+escalation record (normative in rules 2, 7, and 9 of the manager agent
+file and the reviewer agent file's debate paragraph).
 
 Failure handling parks instead of blocking: on the failure of the single
 mandated retry, the task is parked with a Blocked status whose reason

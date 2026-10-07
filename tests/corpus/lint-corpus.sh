@@ -22,7 +22,7 @@
 #                             (directory classes: git ls-files of the
 #                             heading's directory; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           agents 300, rules 190, SKILL.md 950,
+#   6. line budgets           agents 320, rules 190, SKILL.md 950,
 #                             README/DESIGN under 500
 #
 # Reads only tracked files (git ls-files basis), so the result is
@@ -91,8 +91,10 @@ ALLOWLIST_DOCSTAND_LINE="An en-dash"
 CORPUS_DOCS_DIR="."
 
 # Line budgets from the corpus review; sized to the current corpus with
-# headroom, binding only future drift.
-BUDGET_AGENT_LINES=300
+# headroom, binding only future drift. The agent budget was raised from
+# 300 to 320 when the reviewer contract grew the findings-deposit write
+# and the dual-mandate debate protocol.
+BUDGET_AGENT_LINES=320
 BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
