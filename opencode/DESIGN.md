@@ -131,21 +131,17 @@ the manager backfills the freed slot immediately and gives every
 discrepancy, finding, and suggestion exactly one recorded disposition (fix,
 defer, or decline), because unbounded loops hide failures and unactioned
 suggestions get lost (rules 7 through 9 of the manager agent file; one
-combined seam review closes the batch). Verified findings get fixed or
-dispatched; design arguments get answered or debated in search of the better
-design: the manager concedes (dispatching the fix or opening the deferred
-task) or delivers a position, and the reviewer concedes with recorded
-reasons or strengthens with new argument only for exactly one exchange.
+combined seam review closes the batch).
 
-The debate protocol is bounded by construction: a design challenge states
-its alternative, tradeoffs, and a falsifiable claim, taste-only findings
-are labeled and not debatable, exactly one exchange ends the debate with
-the disagreement standing as recorded, no argument is re-litigated, and a
-disagreement still unresolved after the exchange escalates verbatim to the
-user rather than dropping silently; a declined design challenge requires
-either the reviewer's recorded concession from that exchange or that
-escalation record (normative in rules 2, 7, and 9 of the manager agent
-file and the reviewer agent file's debate paragraph).
+Verified findings get fixed or dispatched; design arguments get answered
+or debated in search of the better design (taste-only findings labeled
+and not debatable): the manager answers before declining, the reviewer
+concedes promptly or strengthens with new argument only, exactly one
+exchange ends the debate, and a disagreement still unresolved after that
+exchange escalates verbatim to the user rather than dropping silently; a
+declined challenge requires the recorded concession or that escalation
+record (normative in rule 9 of the manager agent file and the reviewer
+agent file's debate paragraph).
 
 Failure handling parks instead of blocking: on the failure of the single
 mandated retry, the task is parked with a Blocked status whose reason
