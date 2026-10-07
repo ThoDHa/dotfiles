@@ -22,7 +22,9 @@
 #                             (directory classes: git ls-files of the
 #                             heading's directory; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           agents 320, rules 190, SKILL.md 950,
+#   6. line budgets           per-file agent budgets (manager 355,
+#                             worker 145, verifier 65, reviewer 135,
+#                             planner 105), rules 190, SKILL.md 950,
 #                             README/DESIGN under 500
 #
 # Reads only tracked files (git ls-files basis), so the result is
@@ -91,13 +93,23 @@ ALLOWLIST_DOCSTAND_LINE="An en-dash"
 CORPUS_DOCS_DIR="."
 
 # Line budgets from the corpus review; sized to the current corpus with
-# headroom, binding only future drift. The agent budget was raised from
-# 300 to 320 when the reviewer contract grew the findings-deposit write
-# and the dual-mandate debate protocol.
-BUDGET_AGENT_LINES=320
+# headroom, binding only future drift. Agent files budget per file, not
+# as a class: each entry equals that file's current line count plus
+# headroom of max(10 lines, ten percent), rounded up to a multiple of 5,
+# so one file's growth cannot spend another file's slack (manager.md sat
+# at 319 of the shared 320). The map is the only registry: a tracked
+# agent file without an entry, or an entry without a tracked file, fails
+# the budget check.
 BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
+declare -A BUDGET_AGENT_FILE_LINES=(
+	[opencode/.config/opencode/agents/manager.md]=355
+	[opencode/.config/opencode/agents/worker.md]=145
+	[opencode/.config/opencode/agents/verifier.md]=65
+	[opencode/.config/opencode/agents/reviewer.md]=135
+	[opencode/.config/opencode/agents/planner.md]=105
+)
 
 EM_DASH="$(printf '\xe2\x80\x94')"
 EN_DASH="$(printf '\xe2\x80\x93')"
@@ -443,7 +455,13 @@ check_line_budgets() {
 	while IFS= read -r file; do
 		budget=""
 		case "$file" in
-			"$AGENTS_SCOPE"/*.md) budget=$BUDGET_AGENT_LINES ;;
+			"$AGENTS_SCOPE"/*.md)
+				budget="${BUDGET_AGENT_FILE_LINES[$file]-}"
+				if [[ -z "$budget" ]]; then
+					fail_at "$file" 1 \
+						"agent file has no line budget; add '$file' to BUDGET_AGENT_FILE_LINES"
+				fi
+				;;
 			"$RULES_SCOPE"/*.md) budget=$BUDGET_RULE_LINES ;;
 			"$SKILL_SCOPE"/*/SKILL.md) budget=$BUDGET_SKILL_LINES ;;
 			README.md | opencode/DESIGN.md) budget=$BUDGET_CORPUS_DOC_LINES ;;
@@ -462,6 +480,12 @@ check_line_budgets() {
 				;;
 		esac
 	done < <(md_corpus_files)
+	# The map must stay truthful in the other direction too: an entry
+	# whose file is not tracked would otherwise age silently.
+	for file in "${!BUDGET_AGENT_FILE_LINES[@]}"; do
+		is_tracked "$file" || fail_at "$file" 1 \
+			"line budget mapped for a file that is not tracked; remove or rename the entry"
+	done
 	echo "  6/6 line budgets: clean"
 }
 
