@@ -155,18 +155,26 @@ READOPT_MSG   := chore: readopt opencode.json after runtime rewrite
 # real file and silently breaks the deployment. Adopt restores the link
 # and pulls any drift into the repo copy. Drift is committed for exactly
 # that one file (pathspec commit, so an unrelated staged change can
-# never ride along); with no drift, nothing is committed and the target
-# exits 0. Meant for the main checkout, which owns the live deployment;
-# from any other checkout, stow aborts with its not-owned error by design.
+# never ride along); with no drift, nothing is committed. Both branches
+# end by warning about any residual adopted drift left uncommitted
+# elsewhere in the package. Meant for the main checkout, which owns
+# the live deployment; from any other checkout, stow aborts with its
+# not-owned error by design.
 readopt:
 	@echo "Re-adopting opencode.json from $(STOW_TARGET)..."
 	stow --adopt --no-folding -v -t $(STOW_TARGET) opencode
 	@drift=$$(git status --porcelain -- $(OPENCODE_JSON)) || \
 	{ echo "ERROR: git status failed for $(OPENCODE_JSON); cannot check readopt drift" >&2; exit 1; }; \
 	if [ -n "$$drift" ]; then \
-		git commit -m "$(READOPT_MSG)" -- $(OPENCODE_JSON); \
+		git commit -m "$(READOPT_MSG)" -- $(OPENCODE_JSON) || exit $$?; \
 	else \
-		echo "No drift found: opencode.json matches the repo copy."; \
+		echo "No drift found in opencode.json: it matches the repo copy."; \
+	fi; \
+	residual=$$(git status --porcelain -- opencode/) || \
+	{ echo "ERROR: git status failed for opencode/; cannot check for adopted drift" >&2; exit 1; }; \
+	if [ -n "$$residual" ]; then \
+		echo "WARNING: adopted drift outside the one-file commit contract (left uncommitted):"; \
+		echo "$$residual"; \
 	fi
 
 # ── Claude Code Configuration ─────────────────────────────────────────────────
