@@ -52,9 +52,6 @@
         "watermarkTokens": 12000,
         "agedReadEvictionMessages": 30,
         "reasoningRetentionMessages": 16,
-        "cacheAwareHints": true,
-        "mutationBatchCadence": 3,
-        "evictionBatchMultiplier": 2,
         "metricsMinLineIntervalMs": 0
       }
     ]
