@@ -14,7 +14,7 @@ section heading or rule number).
 | manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
-| reviewer | subagent | session | simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git |
+| reviewer | subagent | session | simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
 | planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 
 The manager is a coordinator, not an implementer: it holds no implementation
@@ -72,27 +72,28 @@ rules.
 Under the task-files protocol every `.tasks/` write has exactly one owner:
 the manager owns the task files and the dashboard, dispatched agents own the
 two `tasks` CLI channels (Work Log entries and report deposits, attributed
-via `--from`), and the two agent-owned write exceptions are the planner's
-planning-section carve-out and the research deposit, a task-file-less
-agent's direct file write into the reserved `research/` namespace (the
-task-files skill's Agent Write Path, Serialized Task-File Body Edits, and
-Reports Namespace sections). Bulky output lives under `.tasks/reports/` (the
-skill's Reports Namespace and Manual Fallback sections); closure work opens
-with a short digest and planning fan-out shares one reconnaissance artifact
-(the skill's Closure Digest and Triage to Ready Planning Phase sections, the
-latter tied to the delegation skill's Planning Approval Authority). Between
-the manager's Triage → Ready approval and the first worker dispatch sits the
-delegation skill's execution sign-off gate: the manager presents the plan to
-the user (objective reading, unit breakdown with territories, execution
-order, verification approach, plus alternatives when multiple viable
-approaches exist) and waits for explicit go-ahead, a wait enforced as a
-turn boundary: the presenting response carries no dispatch or unit
-worktree creation, and only an explicit user reply after the
-presentation unlocks execution; one sign-off covers the
+via `--from`; the reviewer's findings deposit rides the report channel the
+same way, no third exception), and the two agent-owned write exceptions are
+the planner's planning-section carve-out and the research deposit, a
+task-file-less agent's direct file write into the reserved `research/`
+namespace (the task-files skill's Agent Write Path, Serialized Task-File
+Body Edits, and Reports Namespace sections). Bulky output lives under
+`.tasks/reports/` (the skill's Reports Namespace and Manual Fallback
+sections); closure work opens with a short digest and planning fan-out
+shares one reconnaissance artifact (the skill's Closure Digest and Triage to
+Ready Planning Phase sections, the latter tied to the delegation skill's
+Planning Approval Authority). Between the manager's Triage → Ready approval
+and the first worker dispatch sits the delegation skill's execution sign-off
+gate: the manager presents the plan to the user (objective reading, unit
+breakdown with territories, execution order, verification approach, plus
+alternatives when multiple viable approaches exist) and waits for explicit
+go-ahead, a wait enforced as a turn boundary: the presenting response
+carries no dispatch or unit worktree creation, and only an explicit user
+reply after the presentation unlocks execution; one sign-off covers the
 plan's lifecycle (units, fix, verification, and review rounds, retries,
 restarts, backfills), and new work or material deviations return to the gate
-(rule 3 of the manager agent file; the delegation skill's Execution
-Sign-off Gate section).
+(rule 3 of the manager agent file; the delegation skill's Execution Sign-off
+Gate section).
 High-cost plans (parallel fan-out, checkpoint slicing with a contract seam,
 user-flagged stakes) pass an advisory plan-review gate whose verdict never
 binds (rule 2 of the manager agent file; the reviewer agent file's
@@ -122,13 +123,14 @@ returns, its verifier and reviewer are dispatched in parallel and four
 independent sources are reconciled per unit (worker claims, verifier
 results, reviewer findings, git ground truth). The verifier reports raw
 results without interpretation, the reviewer runs the simplify-review loop
-in Analysis-Only Mode and nothing beyond read-only git (normative in rule 7
-of the manager agent file and the verifier and reviewer agent files). On a
-pass the manager backfills the freed slot immediately and gives every
-discrepancy, finding, and suggestion exactly one recorded disposition (fix,
-defer, or decline), because unbounded loops hide failures and unactioned
-suggestions get lost (rules 7 through 9 of the manager agent file; one
-combined seam review closes the batch).
+in Analysis-Only Mode and nothing beyond read-only git plus its single
+findings deposit, with the reviewer's reply to the manager carrying only the
+deposit path and digest (normative in rule 7 of the manager agent file and
+the verifier and reviewer agent files). On a pass the manager backfills the
+freed slot immediately and gives every discrepancy, finding, and suggestion
+exactly one recorded disposition (fix, defer, or decline), because unbounded
+loops hide failures and unactioned suggestions get lost (rules 7 through 9
+of the manager agent file; one combined seam review closes the batch).
 
 Failure handling parks instead of blocking: on the failure of the single
 mandated retry, the task is parked with a Blocked status whose reason
@@ -159,9 +161,11 @@ session start, so permission edits take effect only in newly started
 sessions. The manager's edit denial is the single architectural line,
 confining its edits to `.tasks/**` while bash stays open; the worker holds
 everything except push, history reshaping, gh writes, and subagent spawning;
-the verifier's bash is intentionally open so it can run tests; the reviewer
-holds read-only git only; the planner pairs read-only git with the two
-`tasks` CLI channels and an edit map opening only `.tasks/**`, covering
+the verifier's bash is intentionally open so it can run tests; the
+reviewer holds read-only git plus exactly one findings-deposit write: the
+`tasks report` channel under task files, a direct edit under
+`/tmp/opencode/reports/` otherwise; the planner pairs read-only git with the
+two `tasks` CLI channels and an edit map opening only `.tasks/**`, covering
 both the channels its research role runs on and the direct `research/`
 deposit write, so the prompt-level routing added
 no permission changes. Prefix-based bash permissions are
