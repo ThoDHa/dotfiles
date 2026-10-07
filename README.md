@@ -80,6 +80,7 @@ dotfiles/
 | `make restow` | Update symlinks (unstow + stow) |
 | `make dry-run` | Preview what would be stowed |
 | `make clean-stow` | Remove conflicting files before stowing |
+| `make readopt` | Re-adopt opencode.json after a runtime rewrite |
 | `make stow-PKG` | Stow a single package (e.g., `make stow-shell`) |
 | `make unstow-PKG` | Unstow a single package |
 | `make build` | Build the dev container |
