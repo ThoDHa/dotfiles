@@ -29,7 +29,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow test test-links test-rules test-tasks lint-corpus check
+.PHONY: clean-stow readopt test test-links test-rules test-tasks lint-corpus check
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -145,6 +145,29 @@ clean-stow:
 	fi
 	@rm -rf $(STOW_TARGET)/.agents
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
+
+# Repo-side opencode.json and the canned commit message for readopt
+OPENCODE_JSON := opencode/.config/opencode/opencode.json
+READOPT_MSG   := chore: readopt opencode.json after runtime rewrite
+
+# Re-adopt opencode.json after the running opencode process rewrites it:
+# the rewrite is a rename-replace, which swaps the stow symlink for a
+# real file and silently breaks the deployment. Adopt restores the link
+# and pulls any drift into the repo copy. Drift is committed for exactly
+# that one file (pathspec commit, so an unrelated staged change can
+# never ride along); with no drift, nothing is committed and the target
+# exits 0. Meant for the main checkout, which owns the live deployment;
+# from any other checkout, stow aborts with its not-owned error by design.
+readopt:
+	@echo "Re-adopting opencode.json from $(STOW_TARGET)..."
+	stow --adopt --no-folding -v -t $(STOW_TARGET) opencode
+	@drift=$$(git status --porcelain -- $(OPENCODE_JSON)) || \
+	{ echo "ERROR: git status failed for $(OPENCODE_JSON); cannot check readopt drift" >&2; exit 1; }; \
+	if [ -n "$$drift" ]; then \
+		git commit -m "$(READOPT_MSG)" -- $(OPENCODE_JSON); \
+	else \
+		echo "No drift found: opencode.json matches the repo copy."; \
+	fi
 
 # ── Claude Code Configuration ─────────────────────────────────────────────────
 
@@ -306,6 +329,7 @@ help:
 	@echo "  make restow      - Update symlinks (unstow + stow)"
 	@echo "  make dry-run     - Preview what would be stowed"
 	@echo "  make clean-stow  - Remove conflicting files before stowing"
+	@echo "  make readopt     - Re-adopt opencode.json after a runtime rewrite"
 	@echo "  make stow-PKG    - Stow a single package   (e.g., make stow-shell)"
 	@echo "  make unstow-PKG  - Unstow a single package (e.g., make unstow-shell)"
 	@echo "  make restow-PKG  - Restow a single package (e.g., make restow-shell)"
