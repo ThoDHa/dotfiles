@@ -6,21 +6,21 @@
 #
 # Usage:
 #   oc-continue run [-n N] [--follow] [ocflags] [prompt...]
-#                                        N = productive-session budget
-#                                        (default 2): a session that ran the
-#                                        model and then hit the rate limit
-#                                        spends one budget unit; the run
-#                                        parks (waits out the window),
-#                                        resumes with `opencode
-#                                        run --continue --auto`, and quits
-#                                        when the Nth productive session
-#                                        hits. A no-progress attempt
-#                                        (immediate quota fail: the window
-#                                        never reset) spends nothing; the
-#                                        engine re-parks with the same math
-#                                        and retries, and quits with a
-#                                        limit-never-reset report after 3
-#                                        consecutive no-progress attempts.
+#                                        N = productive-cycle cap; without
+#                                        it the ride is unbounded. Cycle 1
+#                                        sends the prompt (the caller's
+#                                        words, or a truthful default),
+#                                        later cycles a short resumption
+#                                        note, and every prompt asks the
+#                                        session to end its final message
+#                                        with the terminal line
+#                                        OC-CONTINUE: COMPLETE once nothing
+#                                        remains. The ride stops on that
+#                                        marker, a clean exit, a non-quota
+#                                        failure, or (with -n) the Nth
+#                                        productive cycle; three consecutive
+#                                        no-progress attempts always quit
+#                                        with a limit-never-reset report.
 #                                        Detaches immediately: parks and
 #                                        sessions happen in the background.
 #                                        --follow: stay in the foreground and
@@ -64,17 +64,17 @@
 # `opencode run` verbatim, so `oc-continue run --session ID --dir PATH -m
 # provider/model fix it` works. Known value-taking flags consume their
 # value token; others can use --flag=value. A bare `--` forces everything
-# after it to be prompt. No prompt given: a re-orientation continuation
-# prompt is used. Naming discipline: never adopt a declared name from
+# after it to be prompt. No prompt given: the resume-the-interrupted-turn
+# default is used. Naming discipline: never adopt a declared name from
 # `opencode run`'s documented flag set; on overlap oc-continue wins and
 # the flag never reaches opencode.
 #
 # Examples:
 #   oc-continue run                          continue this directory's last
 #                                            session in the background, ride
-#                                            up to 2 productive quota cycles
-#   oc-continue run -n 4                     background, 4 productive-session
-#                                            budget
+#                                            until it reports completion
+#   oc-continue run -n 4                     background, capped at 4
+#                                            productive cycles
 #   oc-continue run -n 3 --follow "ship it"  background, tailing live output
 #                                            in this terminal until Ctrl-C
 #   oc-continue run -m zhipu/glm-5.3 fix tui continue, model override passed
@@ -108,7 +108,6 @@ OUT_FILE="$STATE_DIR/last.out"
 # not this script's path.
 SCRIPT_PATH="$0"
 OC_BIN="${OC_BIN:-opencode}"
-DEFAULT_SESSIONS=2
 SECONDS_PER_DAY=86400
 PARK_SECONDS=17520   # 4h52m: observed-hit plus safety, under the 5h window
 TAIL_LINES=40
@@ -130,7 +129,22 @@ QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (ex
 # assistant-quoted blockquote without the separator survives as content.
 BANNER_REGEX='^> .*·'
 ANSI_ESC=$'\e'
-DEFAULT_PROMPT='The provider rate-limit window has reset and your quota is fresh. Continue this session from where the rate limit interrupted it. First re-orient: reread the recent conversation, the todo list, and the current state of the files on disk. Then finish the remaining work without redoing steps already completed. If the work is already complete, verify that and report it instead of starting anything new.'
+# The terminal line a ride session must end its final message with once
+# nothing remains; the engine stops the ride when this is the last
+# non-empty line of a session's output.
+COMPLETE_MARKER='OC-CONTINUE: COMPLETE'
+# The one-line completion instruction appended to a caller prompt (cycle 1
+# only, skipped when the prompt already carries the marker) and built into
+# the default and resumption prompts.
+MARKER_INSTRUCTION='When nothing remains, do a terse final verification (no new work) and end your final message with the single terminal line: OC-CONTINUE: COMPLETE'
+# The no-prompt default, sent verbatim as the cycle-1 ride default and by
+# the one-shot at/in commands: truthful about the interruption, no
+# re-orientation from scratch, no redoing of finished steps.
+DEFAULT_PROMPT='Your last turn was cut off by a provider rate limit, not by finished work. Resume the interrupted turn: check the todo list and the current state of the files on disk, then finish the remaining work without redoing completed steps. Do not claim the quota is fresh beyond that.'
+# Cycles 2 and up never re-send the original prompt, only this note (plus
+# the marker instruction).
+RESUME_NOTE='The quota window reset mid-work; resume from where your last turn stopped, do not re-orient from scratch, and do not repeat finished steps.'
+RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
 OC_VALUE_FLAGS=(--log-level --command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
@@ -201,6 +215,36 @@ made_progress() {
     (( elapsed >= MIN_PROGRESS_SECONDS ))
 }
 
+# The cycle-1 prompt of a ride: the caller's words verbatim when given,
+# plus the marker instruction unless the prompt already carries the
+# marker; otherwise the truthful default. It is re-sent after every
+# no-progress attempt, which spends no cycle, and cycles 2 and up never
+# re-send any of this, only the resumption prompt.
+cycle_one_prompt() {
+    local caller="${1:-}"
+    if [[ -z "$caller" ]]; then
+        print -r -- "$DEFAULT_PROMPT
+$MARKER_INSTRUCTION"
+    elif [[ "$caller" == *"$COMPLETE_MARKER"* ]]; then
+        print -r -- "$caller"
+    else
+        print -r -- "$caller
+$MARKER_INSTRUCTION"
+    fi
+}
+
+# True when the session's output ends with the exact completion marker:
+# the last non-empty line, ANSI-stripped and edge-whitespace-trimmed,
+# equals COMPLETE_MARKER. A marker mention mid-output does not match.
+session_completed() {
+    local session_out="$1" last
+    last="$(sed "s/${ANSI_ESC}\[[0-9;:?]*[A-Za-z]//g" "$session_out" 2>/dev/null \
+        | command grep -E '[^[:space:]]' | tail -n 1)"
+    last="${last#"${last%%[^[:space:]]*}"}"
+    last="${last%"${last##*[^[:space:]]}"}"
+    [[ "$last" == "$COMPLETE_MARKER" ]]
+}
+
 # Split a launching command's args into opencode flags (with their value
 # tokens) and the prompt words that follow. Declared flags (OC_RUN_*_FLAGS,
 # gated by oc_declared so only `run` consumes them) are stripped into
@@ -251,12 +295,13 @@ split_run_args() {
     done
 }
 
-# Give the declared flags split_run_args consumed their meaning: -n sets
-# the session budget, --follow requests launch-plus-tail. The single
-# place a declared name gains semantics; a new declared flag needs its
-# OC_RUN_* table entry and its case here.
+# Give the declared flags split_run_args consumed their meaning: -n caps
+# productive cycles (left unset the ride is unbounded, until the
+# completion marker or another stop condition), --follow requests
+# launch-plus-tail. The single place a declared name gains semantics; a
+# new declared flag needs its OC_RUN_* table entry and its case here.
 interpret_run_flags() {
-    run_sessions="$DEFAULT_SESSIONS"
+    run_sessions=""
     run_follow=false
     local i
     for (( i=1; i <= ${#oc_declared_args}; i++ )); do
@@ -292,21 +337,36 @@ cmd_run() {
     oc_declared=true
     split_run_args "$@" || return 2
     interpret_run_flags || return 2
+    # Empty means unbounded: the ride runs until the completion marker, a
+    # clean exit, a non-quota failure, or the never-reset bound.
     local sessions="$run_sessions"
-    local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
+    local caller_prompt="${prompt_words[*]:-}"
 
     start_engine || return 1
 
-    # cycles counts productive quota hits against the budget;
+    # cycles counts productive quota hits against the cap when one is set;
     # no_progress counts consecutive no-progress quota fails against
     # NO_PROGRESS_LIMIT and resets on any productive session.
     local session=1 cycles=0 no_progress=0
-    log_line "run start (pid $$): budget $sessions productive session(s), oc=${OC_BIN} ${oc_flags[*]}"
-    printf 'oc-continue: starting; budget %s productive session(s)\n' "$sessions"
+    if [[ -n "$sessions" ]]; then
+        log_line "run start (pid $$): budget $sessions productive cycle(s), oc=${OC_BIN} ${oc_flags[*]}"
+        printf 'oc-continue: starting; budget %s productive cycle(s)\n' "$sessions"
+    else
+        log_line "run start (pid $$): unbounded, until $COMPLETE_MARKER, oc=${OC_BIN} ${oc_flags[*]}"
+        printf 'oc-continue: starting; unbounded, until %s\n' "$COMPLETE_MARKER"
+    fi
 
-    local rc is_quota wait_s session_out start_s elapsed
+    local rc is_quota wait_s session_out start_s elapsed prompt
     while :; do
         session_out="$STATE_DIR/last.$session.out"
+        # Cycles count productive hits: until the first one lands, each
+        # invocation re-sends the cycle-1 prompt, because a no-progress
+        # attempt means the model may never have consumed those words.
+        if (( cycles == 0 )); then
+            prompt=$(cycle_one_prompt "$caller_prompt")
+        else
+            prompt="$RESUME_PROMPT"
+        fi
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
         printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
         start_s=$SECONDS
@@ -315,6 +375,12 @@ cmd_run() {
         elapsed=$(( SECONDS - start_s ))
         is_quota=false
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
+
+        if session_completed "$session_out"; then
+            log_line "session $session: work complete ($COMPLETE_MARKER, rc=$rc)"
+            printf 'oc-continue: work complete (%s)\n' "$COMPLETE_MARKER"
+            return 0
+        fi
 
         if (( rc == 0 )); then
             log_line "session $session: run completed cleanly"
@@ -347,17 +413,23 @@ cmd_run() {
 
         no_progress=0
         cycles=$(( cycles + 1 ))
-        if (( cycles >= sessions )); then
+        if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
             log_line "session $session: productive quota hit $cycles of budget $sessions; budget spent, quitting"
-            printf 'oc-continue: budget spent (%s productive session(s)); quitting after hit %s\n' "$sessions" "$cycles"
+            printf 'oc-continue: budget spent (%s productive cycle(s)); quitting after hit %s\n' "$sessions" "$cycles"
             return 0
         fi
 
         wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }
         session=$(( session + 1 ))
-        log_line "session $(( session - 1 )): productive quota hit $cycles of budget $sessions; parking ${wait_s}s until session $session"
-        printf 'oc-continue: rate limit hit after progress (cycle %s of %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
-            "$cycles" "$sessions" "$wait_s" "$session"
+        if [[ -n "$sessions" ]]; then
+            log_line "session $(( session - 1 )): productive quota hit $cycles of budget $sessions; parking ${wait_s}s until session $session"
+            printf 'oc-continue: rate limit hit after progress (cycle %s of %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
+                "$cycles" "$sessions" "$wait_s" "$session"
+        else
+            log_line "session $(( session - 1 )): productive quota hit $cycles; unbounded ride continues; parking ${wait_s}s until session $session"
+            printf 'oc-continue: rate limit hit after progress (cycle %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
+                "$cycles" "$wait_s" "$session"
+        fi
         sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
     done
 }
