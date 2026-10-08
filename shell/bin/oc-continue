@@ -5,7 +5,8 @@
 # State: ~/.local/share/opencode/oc-continue/.
 #
 # Usage:
-#   oc-continue run [-n N] [ocflags] [prompt...]   N = session budget
+#   oc-continue run [-n N] [--follow] [ocflags] [prompt...]
+#                                        N = session budget
 #                                        (default 2): each rate-limit hit ends
 #                                        a session; the run parks (waits out
 #                                        the window), resumes with `opencode
@@ -13,6 +14,10 @@
 #                                        when the Nth hit arrives. Detaches
 #                                        immediately: parks and sessions
 #                                        happen in the background.
+#                                        --follow: stay in the foreground and
+#                                        tail the live output after
+#                                        detaching; Ctrl-C stops the
+#                                        follower, the engine keeps running.
 #   oc-continue at HH:MM [ocflags] [prompt...]     Run once at a wall-clock
 #                                        time (rolls to tomorrow if past).
 #                                        Detaches immediately: the countdown
@@ -22,9 +27,12 @@
 #                                        rate-limit hit just fails; `run`
 #                                        rides windows. Detaches immediately.
 #   oc-continue stop                     Kill a running engine and its child.
-#   oc-continue status                   Running pid, sessions consumed, tail.
-#   oc-continue clean                    Remove state (log, output, stale
-#                                        pid); refuses while running.
+#   oc-continue status                   Running pid, sessions consumed, tail,
+#                                        and which per-session outputs are
+#                                        retained.
+#   oc-continue clean                    Remove state (log, live and retained
+#                                        output, stale pid); refuses while
+#                                        running.
 #   oc-continue follow                   tail -F the live run output; survives
 #                                        quota parks, and shows the last
 #                                        session's output once idle.
@@ -33,17 +41,31 @@
 # check with `status`, cancel with `stop`. For a foreground run right now,
 # call `opencode run --continue --auto` directly.
 #
-# Dash-prefixed args before the prompt pass through to `opencode run`, so
-# `oc-continue run --session ID --dir PATH -m provider/model fix it` works.
-# Known value-taking flags consume their value token; others can use
-# --flag=value. A bare `--` forces everything after it to be prompt.
-# No prompt given: a re-orientation continuation prompt is used.
+# Retention: each session's complete output is kept at
+# $STATE_DIR/last.N.out (N = the session's number across the budget);
+# last.out stays the live current-session file that `follow` tails,
+# truncated at each session boundary, never merged across sessions.
+#
+# Flag contract: oc-continue declares its own flags in the OC_RUN_* tables
+# (-n, --follow); they are parsed and consumed anywhere in the leading flag
+# zone and never forwarded to opencode. The declared table governs `run`
+# only: `at` and `in` declare none, so --follow there forwards verbatim
+# today. Every other dash-prefixed arg before the prompt passes through to
+# `opencode run` verbatim, so `oc-continue run --session ID --dir PATH -m
+# provider/model fix it` works. Known value-taking flags consume their
+# value token; others can use --flag=value. A bare `--` forces everything
+# after it to be prompt. No prompt given: a re-orientation continuation
+# prompt is used. Naming discipline: never adopt a declared name from
+# `opencode run`'s documented flag set; on overlap oc-continue wins and
+# the flag never reaches opencode.
 #
 # Examples:
 #   oc-continue run                          continue this directory's last
 #                                            session in the background, ride
 #                                            up to 2 quota windows
 #   oc-continue run -n 4                     background, 4-session budget
+#   oc-continue run -n 3 --follow "ship it"  background, tailing live output
+#                                            in this terminal until Ctrl-C
 #   oc-continue run -m zhipu/glm-5.3 fix tui continue, model override passed
 #                                            through to opencode
 #   oc-continue at 22:30                     one-shot tonight at 22:30
@@ -59,6 +81,9 @@
 #   OC_STATE_DIR      state directory override (testing)
 
 set -u
+# The per-session tee (last.out plus last.N.out) rides multios; an
+# inherited NO_MULTIOS would truncate last.out and never write it.
+setopt multios
 
 STATE_DIR="${OC_STATE_DIR:-$HOME/.local/share/opencode/oc-continue}"
 LOG_FILE="$STATE_DIR/engine.log"
@@ -81,6 +106,15 @@ DEFAULT_PROMPT='The provider rate-limit window has reset and your quota is fresh
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
 OC_VALUE_FLAGS=(--log-level --command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
+# oc-continue's declared flag table: names split_run_args parses and
+# consumes itself, never forwarding them to opencode. On a name overlap
+# with opencode run's documented flags oc-continue wins, so never adopt a
+# declared name from that set; tests/oc-continue/test-oc-continue.sh pins
+# both tables against live `opencode run --help`.
+OC_RUN_VALUE_FLAGS=(-n)
+OC_RUN_BOOL_FLAGS=(--follow)
+oc_declared=false
+run_follow=false
 
 log_line() {
     mkdir -p "$STATE_DIR"
@@ -121,12 +155,16 @@ looks_like_quota() {
     tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -qiE "$QUOTA_REGEX"
 }
 
-# Split args into leading opencode flags (with their value tokens) and the
-# prompt words that follow. A bare `--` forces everything after it to be
-# prompt, so dash-leading prompts stay passable.
+# Split a launching command's args into opencode flags (with their value
+# tokens) and the prompt words that follow. Declared flags (OC_RUN_*_FLAGS,
+# gated by oc_declared so only `run` consumes them) are stripped into
+# oc_declared_args with their value pairings and never forwarded. A bare
+# `--` forces everything after it to be prompt, so dash-leading prompts
+# stay passable.
 split_run_args() {
     oc_flags=()
     prompt_words=()
+    oc_declared_args=()
     while (( $# )); do
         case "$1" in
             --)
@@ -135,17 +173,29 @@ split_run_args() {
                 return 0
                 ;;
             -*)
-                if (( $# == 1 )) && (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
+                if [[ "$oc_declared" == true ]] && (( ${OC_RUN_VALUE_FLAGS[(Ie)$1]} )); then
+                    if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                        oc_declared_args+=("$1" "$2")
+                        shift 2
+                    else
+                        printf 'oc-continue: %s needs a value\n' "$1" >&2
+                        return 2
+                    fi
+                elif [[ "$oc_declared" == true ]] && (( ${OC_RUN_BOOL_FLAGS[(Ie)$1]} )); then
+                    oc_declared_args+=("$1")
+                    shift
+                elif (( $# == 1 )) && (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
                     printf 'oc-continue: %s needs a value\n' "$1" >&2
                     return 2
-                fi
-                oc_flags+=("$1")
-                if [[ -n "${2:-}" && "${2:-}" != -* ]] && \
-                   (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
-                    shift
+                else
                     oc_flags+=("$1")
+                    if [[ -n "${2:-}" && "${2:-}" != -* ]] && \
+                       (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
+                        shift
+                        oc_flags+=("$1")
+                    fi
+                    shift
                 fi
-                shift
                 ;;
             *)
                 prompt_words+=("$@")
@@ -155,6 +205,30 @@ split_run_args() {
     done
 }
 
+# Give the declared flags split_run_args consumed their meaning: -n sets
+# the session budget, --follow requests launch-plus-tail. The single
+# place a declared name gains semantics; a new declared flag needs its
+# OC_RUN_* table entry and its case here.
+interpret_run_flags() {
+    run_sessions="$DEFAULT_SESSIONS"
+    run_follow=false
+    local i
+    for (( i=1; i <= ${#oc_declared_args}; i++ )); do
+        case "${oc_declared_args[i]}" in
+            -n)
+                [[ "${oc_declared_args[i+1]}" =~ ^[0-9]+$ ]] || \
+                    { printf 'oc-continue: -n needs a number\n' >&2; return 2; }
+                run_sessions="${oc_declared_args[i+1]}"
+                (( i += 1 ))
+                ;;
+            --follow)
+                run_follow=true
+                ;;
+        esac
+    done
+    return 0
+}
+
 start_engine() {
     local existing
     if existing=$(running_pid); then
@@ -162,17 +236,17 @@ start_engine() {
         return 1
     fi
     mkdir -p "$STATE_DIR"
+    # Drop the previous run's retained sessions so status never presents a
+    # longer old run's tail as current; `clean` stays the explicit wipe.
+    rm -f "$STATE_DIR"/last.<->.out(N)
     print -r -- $$ > "$PID_FILE"
 }
 
 cmd_run() {
-    local sessions="$DEFAULT_SESSIONS"
-    if [[ "${1:-}" == "-n" ]]; then
-        [[ "${2:-}" =~ ^[0-9]+$ ]] || { printf 'oc-continue: -n needs a number\n' >&2; return 2; }
-        sessions="$2"
-        shift 2
-    fi
+    oc_declared=true
     split_run_args "$@" || return 2
+    interpret_run_flags || return 2
+    local sessions="$run_sessions"
     local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
 
     start_engine || return 1
@@ -181,11 +255,12 @@ cmd_run() {
     log_line "run start (pid $$): budget $sessions session(s), oc=${OC_BIN} ${oc_flags[*]}"
     printf 'oc-continue: session 1 of %s\n' "$sessions"
 
-    local rc is_quota wait_s
+    local rc is_quota wait_s session_out
     while :; do
+        session_out="$STATE_DIR/last.$session.out"
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
         printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
-        "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" 2>&1
+        "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$session_out" 2>&1
         rc=$?
         is_quota=false
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
@@ -220,6 +295,7 @@ cmd_run() {
 
 cmd_once() {
     local sleep_for="$1"; shift
+    oc_declared=false
     split_run_args "$@" || return 2
     local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
 
@@ -231,7 +307,7 @@ cmd_once() {
 
     : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
     printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
-    "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" 2>&1
+    "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$STATE_DIR/last.1.out" 2>&1
     local rc=$?
     if (( rc == 0 )); then
         log_line 'one-shot: run completed cleanly'
@@ -280,14 +356,22 @@ cmd_stop() {
 }
 
 cmd_status() {
-    local pid
+    local pid retained name names
+    retained=("$STATE_DIR"/last.<->.out(N))
     if ! pid=$(running_pid); then
         printf 'oc-continue: not running\n'
         [[ -f "$LOG_FILE" ]] && tail -n 3 "$LOG_FILE"
-        return 0
+    else
+        printf 'oc-continue: running (pid %s)\n' "$pid"
+        [[ -f "$LOG_FILE" ]] && tail -n 5 "$LOG_FILE"
     fi
-    printf 'oc-continue: running (pid %s)\n' "$pid"
-    [[ -f "$LOG_FILE" ]] && tail -n 5 "$LOG_FILE"
+    if (( ${#retained} )); then
+        names=''
+        for name in "${retained[@]}"; do
+            names="${names:+$names }${name:t}"
+        done
+        printf 'oc-continue: retained session output: %s\n' "$names"
+    fi
     return 0
 }
 
@@ -310,27 +394,28 @@ cmd_clean() {
 
 # Preflight the user-facing errors in the caller's terminal: the detached
 # child's stderr goes to /dev/null, so anything the caller got wrong must be
-# reported here, before forking.
+# reported here, before forking. For `run` this also computes run_follow so
+# the launcher knows whether to tail after spawning.
 validate_launch() {
     local sub="$1"; shift
     case "$sub" in
         run)
-            if [[ "${1:-}" == "-n" ]]; then
-                [[ "${2:-}" =~ ^[0-9]+$ ]] || { printf 'oc-continue: -n needs a number\n' >&2; return 2; }
-                shift 2
-            fi
+            oc_declared=true
             ;;
         at)
+            oc_declared=false
             [[ -n "${1:-}" ]] || { printf 'oc-continue: at needs HH:MM\n' >&2; return 2; }
             epoch_of "$1" >/dev/null || { printf 'oc-continue: bad time %s\n' "$1" >&2; return 2; }
             shift
             ;;
         in)
+            oc_declared=false
             [[ "${1:-}" =~ ^[0-9]+([smhd])?$ ]] || { printf 'oc-continue: in needs DURATION (e.g. 90, 5m, 2h, 1d)\n' >&2; return 2; }
             shift
             ;;
     esac
     split_run_args "$@" || return 2
+    [[ "$sub" != run ]] || interpret_run_flags || return 2
 }
 
 launch() {
@@ -356,6 +441,11 @@ launch() {
         polls=$(( polls + 1 ))
     done
     if [[ -f "$PID_FILE" ]]; then
+        if [[ "$run_follow" == true ]]; then
+            printf 'oc-continue: %s detached (pid %s); following live output, Ctrl-C stops following only (oc-continue stop cancels)\n' \
+                "$sub" "$(cat "$PID_FILE" 2>/dev/null)"
+            cmd_follow
+        fi
         printf 'oc-continue: %s detached (pid %s; oc-continue follow to watch, oc-continue stop to cancel)\n' \
             "$sub" "$(cat "$PID_FILE" 2>/dev/null)"
     else
@@ -390,5 +480,5 @@ case "${1:-}" in
     status) cmd_status ;;
     clean)  cmd_clean ;;
     follow) cmd_follow ;;
-    *) printf 'Usage: oc-continue run [-n N] [prompt...] | at HH:MM [prompt...] | in DURATION [prompt...]\n       oc-continue stop | status | clean | follow\n' >&2; exit 2 ;;
+    *) printf 'Usage: oc-continue run [-n N] [--follow] [prompt...] | at HH:MM [prompt...] | in DURATION [prompt...]\n       oc-continue stop | status | clean | follow\n' >&2; exit 2 ;;
 esac
