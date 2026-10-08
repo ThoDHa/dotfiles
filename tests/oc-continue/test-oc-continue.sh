@@ -2,12 +2,15 @@
 #
 # Tests for the oc-continue runner. Self-contained: a fake opencode binary
 # (invocation recorder with a scripted outcome plan) drives the engine
-# through the OC_BIN / OC_STATE_DIR / OC_WAIT_SECONDS seams, asserting
-# budget counting across quota hits, park math, per-session retention,
-# the --follow launch-plus-tail contract, and flag passthrough isolation.
-# When the real opencode is on PATH, OC_VALUE_FLAGS is additionally pinned
-# against live `opencode run --help` and the declared flag table checked
-# for overlap with the documented set; without it those checks skip.
+# through the OC_BIN / OC_STATE_DIR / OC_WAIT_SECONDS /
+# OC_MIN_PROGRESS_SECONDS seams, asserting productive-cycle budget
+# counting across quota hits (no-progress re-parks, the never-reset
+# bound, and the wall-time fallback included), park math, per-session
+# retention, the --follow launch-plus-tail contract, and flag passthrough
+# isolation. When the real opencode is on PATH, OC_VALUE_FLAGS is
+# additionally pinned against live `opencode run --help` and the declared
+# flag table checked for overlap with the documented set; without it
+# those checks skip.
 
 set -uo pipefail
 
@@ -60,16 +63,29 @@ cat >"$FAKE" <<'EOF'
 # Recorder fake: appends this invocation's argv to $FAKE_STATE/args
 # (tab-separated, one record per line), counts calls in
 # $FAKE_STATE/count, and follows $FAKE_STATE/plan line N for call N:
-# quota, fail, slow, or ok by default.
+# quota (noise prologue, then an immediate quota fail: no progress),
+# productive (the same noise prologue, then one blockquote-shaped
+# assistant line without the · separator, whose survival against the
+# banner exclusion pins its both-markers rule, then a quota fail),
+# slowquota (the noise prologue, a FAKE_SLOW wait, then a quota fail),
+# fail, slow, or ok by default. The noise prologue is the real
+# transcript's opening: an escape-only line, the run banner, and a
+# second escape-only line; none of it may read as progress.
 n=$(( $(cat "$FAKE_STATE/count" 2>/dev/null || echo 0) + 1 ))
 echo "$n" >"$FAKE_STATE/count"
 { printf '\t%s' "$@"; printf '\n'; } >>"$FAKE_STATE/args"
 mode="$(sed -n "${n}p" "$FAKE_STATE/plan" 2>/dev/null)"
+esc_reset=$'\e[0m'
+banner='> build · glm-5.3'
+quota_noise() { printf '%s\n' "$esc_reset" "$banner" "$esc_reset"; }
+quota_fail() { echo "Error 429: rate limit exceeded"; echo "stderr: quota window active" >&2; exit 1; }
 case "${mode:-ok}" in
-	quota) echo "fake session $n start"; echo "Error 429: rate limit exceeded"; echo "stderr: quota window active" >&2; exit 1 ;;
-	fail)  echo "fake session $n start"; echo "fatal: unrecoverable failure"; exit 3 ;;
-	slow)  echo "slow line one"; sleep "${FAKE_SLOW:-5}"; echo "slow line two"; exit 0 ;;
-	*)     echo "fake session $n start"; echo "fake session $n done"; exit 0 ;;
+	quota)      quota_noise; quota_fail ;;
+	productive) quota_noise; echo "> quoted remark"; quota_fail ;;
+	slowquota)  quota_noise; sleep "${FAKE_SLOW:-5}"; quota_fail ;;
+	fail)       echo "fake session $n start"; echo "fatal: unrecoverable failure"; exit 3 ;;
+	slow)       echo "slow line one"; sleep "${FAKE_SLOW:-5}"; echo "slow line two"; exit 0 ;;
+	*)          echo "fake session $n start"; echo "fake session $n done"; exit 0 ;;
 esac
 EOF
 chmod +x "$FAKE"
@@ -125,9 +141,9 @@ signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.execvp(sys.argv[1], sys.argv[1:])')
 fi
 
-echo "== budget counting across quota hits =="
+echo "== budget counting across productive quota cycles =="
 fresh budget
-printf 'quota\nquota\nok\n' >"$FAKE_STATE/plan"
+printf 'productive\nproductive\nok\n' >"$FAKE_STATE/plan"
 OC_ENV=(OC_WAIT_SECONDS=0.3)
 out="$(oc run -n 3 ship the feature)"
 OC_ENV=()
@@ -143,14 +159,17 @@ assert_invocation "every session resumes with --continue --auto" 3 \
 	run --continue --auto "ship the feature"
 
 fresh spent
-printf 'quota\nquota\nquota\n' >"$FAKE_STATE/plan"
+printf 'productive\nproductive\nproductive\n' >"$FAKE_STATE/plan"
 OC_ENV=(OC_WAIT_SECONDS=0.2)
 oc run -n 2 keep going >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "budget-spent run parks once then quits" \
 	|| bad "budget-spent run parks once then quits"
 assert_eq "budget spent stops at the second hit" "2" "$(fake_calls)"
-assert_contains "engine log records the spent budget" "$(cat "$STATE/engine.log")" "budget spent"
+log="$(cat "$STATE/engine.log")"
+assert_contains "engine log records the spent budget" "$log" "budget spent"
+assert_contains "the quit fires on the Nth productive hit" "$log" \
+	"productive quota hit 2 of budget 2; budget spent, quitting"
 
 fresh hardfail
 printf 'fail\n' >"$FAKE_STATE/plan"
@@ -172,6 +191,109 @@ assert_contains "one-shot quota hit is not retried" "$(cat "$STATE/engine.log")"
 	"one-shot: quota hit"
 [[ -f "$STATE/last.1.out" ]] && ok "one-shot run retains its session output" \
 	|| bad "one-shot run retains its session output"
+
+echo "== no-progress re-parks and the never-reset bound =="
+fresh budget_free
+# productive cycles count toward the budget while a no-progress attempt
+# leaves it untouched: the quit fires on the Nth productive hit, not the
+# Nth invocation
+printf 'quota\nproductive\nproductive\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run -n 2 try again >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a no-progress fail followed by two productive hits ends on the budget" \
+	|| bad "a no-progress fail followed by two productive hits ends on the budget"
+assert_eq "the no-progress attempt ran but spent no budget unit" "3" "$(fake_calls)"
+assert_contains "the fake's banner noise reached the retained session output" \
+	"$(cat "$STATE/last.1.out")" "> build · glm-5.3"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the banner-noise prologue alone classifies no progress" "$log" \
+	"no-progress quota hit 1 of 3 consecutive; no budget consumed"
+assert_contains "the budget still quits on the second productive hit" "$log" \
+	"productive quota hit 2 of budget 2; budget spent, quitting"
+
+fresh repark
+# an immediate quota fail right after a park means the reset never took:
+# the engine re-parks on the same math without consuming budget and can
+# still finish cleanly later
+printf 'quota\nquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run -n 2 keep trying >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "two no-progress fails re-park and a later session finishes cleanly" \
+	|| bad "two no-progress fails re-park and a later session finishes cleanly"
+assert_eq "both re-parks retried without spending the two-session budget" "3" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the run ends cleanly rather than on the budget" "$log" "run completed cleanly"
+assert_not_contains "no productive cycle was ever spent" "$log" "budget spent"
+for n in 1 2 3; do
+	[[ -f "$STATE/last.$n.out" ]] && ok "retry session $n keeps its own last.$n.out" \
+		|| bad "retry session $n keeps its own last.$n.out"
+done
+
+fresh neverreset
+# three consecutive no-progress attempts mean the window never opened:
+# the bound quit fires even though the budget is far from spent
+printf 'quota\nquota\nquota\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run -n 5 still trying >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "three consecutive no-progress attempts end the run" \
+	|| bad "three consecutive no-progress attempts end the run"
+assert_eq "the bound quit stops after the third attempt" "3" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the engine reports the limit never reset" "$log" \
+	"no-progress quota hit 3 consecutive; limit never reset, quitting"
+assert_not_contains "the bound quit stays distinct from budget exhaustion" "$log" "budget spent"
+
+fresh boundreset
+# a productive session resets the consecutive count, so no-progress
+# streaks on either side of it neither quit the run nor spend budget
+printf 'quota\nproductive\nquota\nquota\nproductive\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run -n 2 push through >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a productive session lets the run survive later no-progress streaks" \
+	|| bad "a productive session lets the run survive later no-progress streaks"
+assert_eq "the run reaches its fifth invocation before the budget quits" "5" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the consecutive count restarts after a productive session" "$log" \
+	"no-progress quota hit 2 of 3 consecutive; no budget consumed"
+assert_contains "the productive cycles still spend the budget" "$log" \
+	"productive quota hit 2 of budget 2; budget spent, quitting"
+assert_not_contains "the reset kept the bound from firing" "$log" "limit never reset"
+
+echo "== wall-time fallback for content-less quota hits =="
+fresh fallback_up
+# the time half of the conjunction: a quota fail whose whole output
+# matched the filter still counts as productive once it outlasted the
+# floor, which OC_MIN_PROGRESS_SECONDS pins low enough to test
+printf 'slowquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2 FAKE_SLOW=1.2 OC_MIN_PROGRESS_SECONDS=1)
+oc run -n 2 grind it out >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a slow quota fail at or over the floor counts as productive" \
+	|| bad "a slow quota fail at or over the floor counts as productive"
+assert_eq "the slow fail ran once and the run resumed past it" "2" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the at-floor slow fail spent a productive cycle" "$log" \
+	"productive quota hit 1 of budget 2; parking 0.2s"
+assert_contains "the run finished cleanly after the fallback hit" "$log" "run completed cleanly"
+
+fresh fallback_under
+# under the floor the same fail is no-progress: the engine re-parks
+# without spending budget and still finishes cleanly
+printf 'slowquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2 FAKE_SLOW=1.2 OC_MIN_PROGRESS_SECONDS=5)
+oc run -n 2 slow start >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a slow quota fail under the floor is no progress" \
+	|| bad "a slow quota fail under the floor is no progress"
+assert_eq "the sub-floor fail re-parked instead of spending budget" "2" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the sub-floor fail logged a no-progress re-park" "$log" \
+	"no-progress quota hit 1 of 3 consecutive; no budget consumed"
+assert_not_contains "no productive cycle was recorded" "$log" "productive quota hit"
 
 echo "== park math =="
 park_default="$(sed -n 's/^PARK_SECONDS=\([0-9]\+\).*/\1/p' "$OC")"
@@ -202,7 +324,7 @@ fi
 
 echo "== per-session retention =="
 fresh retain
-printf 'quota\nok\n' >"$FAKE_STATE/plan"
+printf 'productive\nok\n' >"$FAKE_STATE/plan"
 OC_ENV=(OC_WAIT_SECONDS=2)
 oc run -n 2 keep going >/dev/null 2>&1
 OC_ENV=()
@@ -309,7 +431,7 @@ fresh pass_after
 # tail -F and would hang the suite, so bool-after-passthrough coverage
 # lives in the backgrounded follower scenario above and this pins the
 # trailing declared value flag instead, through the same dispatch arm
-printf 'quota\nok\n' >"$FAKE_STATE/plan"
+printf 'productive\nok\n' >"$FAKE_STATE/plan"
 # timing invariant: the armed-pidfile window (park plus the two session
 # durations) must outlast the launcher's poll grid (READY_POLLS x
 # READY_POLL_INTERVAL in the script); a single-ok plan or a park under
