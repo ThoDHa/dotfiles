@@ -6,14 +6,23 @@
 #
 # Usage:
 #   oc-continue run [-n N] [--follow] [ocflags] [prompt...]
-#                                        N = session budget
-#                                        (default 2): each rate-limit hit ends
-#                                        a session; the run parks (waits out
-#                                        the window), resumes with `opencode
+#                                        N = productive-session budget
+#                                        (default 2): a session that ran the
+#                                        model and then hit the rate limit
+#                                        spends one budget unit; the run
+#                                        parks (waits out the window),
+#                                        resumes with `opencode
 #                                        run --continue --auto`, and quits
-#                                        when the Nth hit arrives. Detaches
-#                                        immediately: parks and sessions
-#                                        happen in the background.
+#                                        when the Nth productive session
+#                                        hits. A no-progress attempt
+#                                        (immediate quota fail: the window
+#                                        never reset) spends nothing; the
+#                                        engine re-parks with the same math
+#                                        and retries, and quits with a
+#                                        limit-never-reset report after 3
+#                                        consecutive no-progress attempts.
+#                                        Detaches immediately: parks and
+#                                        sessions happen in the background.
 #                                        --follow: stay in the foreground and
 #                                        tail the live output after
 #                                        detaching; Ctrl-C stops the
@@ -27,9 +36,9 @@
 #                                        rate-limit hit just fails; `run`
 #                                        rides windows. Detaches immediately.
 #   oc-continue stop                     Kill a running engine and its child.
-#   oc-continue status                   Running pid, sessions consumed, tail,
-#                                        and which per-session outputs are
-#                                        retained.
+#   oc-continue status                   Running pid, productive cycles spent,
+#                                        tail, and which per-session outputs
+#                                        are retained.
 #   oc-continue clean                    Remove state (log, live and retained
 #                                        output, stale pid); refuses while
 #                                        running.
@@ -41,10 +50,11 @@
 # check with `status`, cancel with `stop`. For a foreground run right now,
 # call `opencode run --continue --auto` directly.
 #
-# Retention: each session's complete output is kept at
-# $STATE_DIR/last.N.out (N = the session's number across the budget);
-# last.out stays the live current-session file that `follow` tails,
-# truncated at each session boundary, never merged across sessions.
+# Retention: each invocation's complete output is kept at
+# $STATE_DIR/last.N.out (N = the invocation's number across the run;
+# every opencode run invocation gets its own file, no-progress retries
+# included); last.out stays the live current-session file that `follow`
+# tails, truncated at each session boundary, never merged across sessions.
 #
 # Flag contract: oc-continue declares its own flags in the OC_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
@@ -62,8 +72,9 @@
 # Examples:
 #   oc-continue run                          continue this directory's last
 #                                            session in the background, ride
-#                                            up to 2 quota windows
-#   oc-continue run -n 4                     background, 4-session budget
+#                                            up to 2 productive quota cycles
+#   oc-continue run -n 4                     background, 4 productive-session
+#                                            budget
 #   oc-continue run -n 3 --follow "ship it"  background, tailing live output
 #                                            in this terminal until Ctrl-C
 #   oc-continue run -m zhipu/glm-5.3 fix tui continue, model override passed
@@ -78,6 +89,10 @@
 #   OC_WAIT_UNTIL     HH:MM known window-reset time; overrides the default
 #                     observed-hit + 4h52m park
 #   OC_WAIT_SECONDS   fixed park length (testing; bypasses window math)
+#   OC_MIN_PROGRESS_SECONDS  progress wall-time floor in seconds
+#                     (default 20; testing): a quota fail whose output
+#                     holds nothing beyond the error still counts as
+#                     productive once it outlasts this many seconds
 #   OC_STATE_DIR      state directory override (testing)
 
 set -u
@@ -99,9 +114,22 @@ PARK_SECONDS=17520   # 4h52m: observed-hit plus safety, under the 5h window
 TAIL_LINES=40
 READY_POLLS=20       # x READY_POLL_INTERVAL: how long launch waits for the
 READY_POLL_INTERVAL=0.1   # engine's pid file before reporting failure
+# Progress-fallback floor: governs only quota-hit sessions whose entire
+# output matched the exclusions, so no content line survived; such a
+# session still counts as productive once it outlasted this many seconds.
+MIN_PROGRESS_SECONDS="${OC_MIN_PROGRESS_SECONDS:-20}"
+# Consecutive no-progress quota fails tolerated before the engine
+# concludes the limit never reset and quits; a productive session or a
+# clean completion resets the count.
+NO_PROGRESS_LIMIT=3
 # Anchored the way the A/B driver pins it: a bare 429 inside a number or a
 # timestamp must not read as a quota event.
 QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (exhausted|exceeded)|exceeded your'
+# The run banner shape, excluded from progress classification: opens with
+# "> " and carries the · separator. Both markers required, so an
+# assistant-quoted blockquote without the separator survives as content.
+BANNER_REGEX='^> .*·'
+ANSI_ESC=$'\e'
 DEFAULT_PROMPT='The provider rate-limit window has reset and your quota is fresh. Continue this session from where the rate limit interrupted it. First re-orient: reread the recent conversation, the todo list, and the current state of the files on disk. Then finish the remaining work without redoing steps already completed. If the work is already complete, verify that and report it instead of starting anything new.'
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
@@ -153,6 +181,24 @@ park_seconds() {
 
 looks_like_quota() {
     tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -qiE "$QUOTA_REGEX"
+}
+
+# Classify a quota-hit session as productive or no-progress, from its
+# retained last.N.out ($1) and its elapsed seconds ($2). ANSI escape
+# sequences are stripped before every exclusion: they carry no content,
+# so an escape-only line must not read as progress. Primary signal: one
+# surviving line with non-whitespace content after the quota-filter and
+# banner exclusions. Fallback: elapsed wall time at or over
+# MIN_PROGRESS_SECONDS, reached only when the entire output matched the
+# exclusions.
+made_progress() {
+    local session_out="$1" elapsed="$2"
+    if sed "s/${ANSI_ESC}\[[0-9;:?]*[A-Za-z]//g" "$session_out" 2>/dev/null \
+        | command grep -ivE "${QUOTA_REGEX}|${BANNER_REGEX}" \
+        | command grep -qE '[^[:space:]]'; then
+        return 0
+    fi
+    (( elapsed >= MIN_PROGRESS_SECONDS ))
 }
 
 # Split a launching command's args into opencode flags (with their value
@@ -251,44 +297,67 @@ cmd_run() {
 
     start_engine || return 1
 
-    local session=1 hits=0
-    log_line "run start (pid $$): budget $sessions session(s), oc=${OC_BIN} ${oc_flags[*]}"
-    printf 'oc-continue: session 1 of %s\n' "$sessions"
+    # cycles counts productive quota hits against the budget;
+    # no_progress counts consecutive no-progress quota fails against
+    # NO_PROGRESS_LIMIT and resets on any productive session.
+    local session=1 cycles=0 no_progress=0
+    log_line "run start (pid $$): budget $sessions productive session(s), oc=${OC_BIN} ${oc_flags[*]}"
+    printf 'oc-continue: starting; budget %s productive session(s)\n' "$sessions"
 
-    local rc is_quota wait_s session_out
+    local rc is_quota wait_s session_out start_s elapsed
     while :; do
         session_out="$STATE_DIR/last.$session.out"
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
         printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
+        start_s=$SECONDS
         "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$session_out" 2>&1
         rc=$?
+        elapsed=$(( SECONDS - start_s ))
         is_quota=false
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
 
         if (( rc == 0 )); then
             log_line "session $session: run completed cleanly"
-            printf 'oc-continue: completed cleanly (session %s of %s)\n' "$session" "$sessions"
+            printf 'oc-continue: completed cleanly (session %s)\n' "$session"
             return 0
         fi
 
-        hits=$(( hits + 1 ))
         if [[ "$is_quota" != true ]]; then
             log_line "session $session: non-quota failure rc=$rc; not retrying"
             printf 'oc-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
             return "$rc"
         fi
 
-        if (( session >= sessions )); then
-            log_line "session $session: quota hit $hits of budget $sessions; budget spent, quitting"
-            printf 'oc-continue: budget spent (%s session(s)); quitting after hit %s\n' "$sessions" "$hits"
+        if ! made_progress "$session_out" "$elapsed"; then
+            no_progress=$(( no_progress + 1 ))
+            if (( no_progress >= NO_PROGRESS_LIMIT )); then
+                log_line "session $session: no-progress quota hit $no_progress consecutive; limit never reset, quitting"
+                printf 'oc-continue: limit never reset (%s consecutive no-progress attempts); quitting; output: %s, events: %s\n' \
+                    "$no_progress" "$OUT_FILE" "$LOG_FILE"
+                return 0
+            fi
+            wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }
+            session=$(( session + 1 ))
+            log_line "session $(( session - 1 )): no-progress quota hit $no_progress of $NO_PROGRESS_LIMIT consecutive; no budget consumed; re-parking ${wait_s}s until session $session"
+            printf 'oc-continue: quota window still up (no-progress attempt %s of %s); re-parked %ss, then session %s (oc-continue stop to cancel)\n' \
+                "$no_progress" "$NO_PROGRESS_LIMIT" "$wait_s" "$session"
+            sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
+            continue
+        fi
+
+        no_progress=0
+        cycles=$(( cycles + 1 ))
+        if (( cycles >= sessions )); then
+            log_line "session $session: productive quota hit $cycles of budget $sessions; budget spent, quitting"
+            printf 'oc-continue: budget spent (%s productive session(s)); quitting after hit %s\n' "$sessions" "$cycles"
             return 0
         fi
 
         wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }
         session=$(( session + 1 ))
-        log_line "session $(( session - 1 )): quota hit; parking ${wait_s}s until session $session of $sessions"
-        printf 'oc-continue: rate limit hit; parked %ss, then session %s of %s (oc-continue stop to cancel)\n' \
-            "$wait_s" "$session" "$sessions"
+        log_line "session $(( session - 1 )): productive quota hit $cycles of budget $sessions; parking ${wait_s}s until session $session"
+        printf 'oc-continue: rate limit hit after progress (cycle %s of %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
+            "$cycles" "$sessions" "$wait_s" "$session"
         sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
     done
 }
