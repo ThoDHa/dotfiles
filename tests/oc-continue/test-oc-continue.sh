@@ -5,7 +5,8 @@
 # through the OC_BIN / OC_STATE_DIR / OC_WAIT_SECONDS /
 # OC_MIN_PROGRESS_SECONDS seams, asserting productive-cycle budget
 # counting across quota hits (no-progress re-parks, the never-reset
-# bound, and the wall-time fallback included), park math, per-session
+# bound, and the wall-time fallback included), cycle-differentiated
+# prompts and the completion-marker stop, park math, per-session
 # retention, the --follow launch-plus-tail contract, and flag passthrough
 # isolation. When the real opencode is on PATH, OC_VALUE_FLAGS is
 # additionally pinned against live `opencode run --help` and the declared
@@ -16,6 +17,19 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OC="$REPO_ROOT/shell/bin/oc-continue"
+
+# Prompt constants extracted from the engine under test, so assertions
+# track the source instead of restating it; the marker rides to the fake
+# through the environment.
+complete_marker="$(sed -n "s/^COMPLETE_MARKER='\(.*\)'$/\1/p" "$OC")"
+marker_instruction="$(sed -n "s/^MARKER_INSTRUCTION='\(.*\)'$/\1/p" "$OC")"
+default_prompt="$(sed -n "s/^DEFAULT_PROMPT='\(.*\)'$/\1/p" "$OC")"
+resume_note="$(sed -n "s/^RESUME_NOTE='\(.*\)'$/\1/p" "$OC")"
+resume_prompt="${resume_note} ${marker_instruction}"
+export OC_FAKE_MARKER="$complete_marker"
+with_marker() { # first-line; the cycle-1 ride prompt with the marker line appended
+	printf '%s\n%s' "$1" "$marker_instruction"
+}
 
 pass=0
 fail=0
@@ -61,14 +75,21 @@ FAKE="$ROOT/fake-opencode"
 cat >"$FAKE" <<'EOF'
 #!/usr/bin/env bash
 # Recorder fake: appends this invocation's argv to $FAKE_STATE/args
-# (tab-separated, one record per line), counts calls in
-# $FAKE_STATE/count, and follows $FAKE_STATE/plan line N for call N:
+# (tab-separated, one record per invocation; a prompt carrying the
+# appended marker line spans physical lines, and every record starts
+# with a tab), counts calls in $FAKE_STATE/count, and follows
+# $FAKE_STATE/plan line N for call N:
 # quota (noise prologue, then an immediate quota fail: no progress),
 # productive (the same noise prologue, then one blockquote-shaped
 # assistant line without the · separator, whose survival against the
 # banner exclusion pins its both-markers rule, then a quota fail),
 # slowquota (the noise prologue, a FAKE_SLOW wait, then a quota fail),
-# fail, slow, or ok by default. The noise prologue is the real
+# complete (a work line, then the completion marker as the final line),
+# complete_ansi (the marker wrapped in ANSI escape sequences),
+# complete_quota (quota text with the marker still last, so the marker
+# stop has to fire before quota classification),
+# marker_mid_quota (a bare marker line mid-output, which must not stop
+# the ride), fail, slow, or ok by default. The noise prologue is the real
 # transcript's opening: an escape-only line, the run banner, and a
 # second escape-only line; none of it may read as progress.
 n=$(( $(cat "$FAKE_STATE/count" 2>/dev/null || echo 0) + 1 ))
@@ -83,6 +104,10 @@ case "${mode:-ok}" in
 	quota)      quota_noise; quota_fail ;;
 	productive) quota_noise; echo "> quoted remark"; quota_fail ;;
 	slowquota)  quota_noise; sleep "${FAKE_SLOW:-5}"; quota_fail ;;
+	complete)   quota_noise; echo "wrapped up the remaining work"; printf '%s\n' "$OC_FAKE_MARKER"; exit 0 ;;
+	complete_ansi) quota_noise; printf '\e[32m%s\e[0m\n' "$OC_FAKE_MARKER"; exit 0 ;;
+	complete_quota) quota_noise; echo "Error 429: rate limit exceeded"; printf '%s\n' "$OC_FAKE_MARKER"; exit 1 ;;
+	marker_mid_quota) quota_noise; printf '%s\n' "$OC_FAKE_MARKER"; echo "more work continues past the mention"; quota_fail ;;
 	fail)       echo "fake session $n start"; echo "fatal: unrecoverable failure"; exit 3 ;;
 	slow)       echo "slow line one"; sleep "${FAKE_SLOW:-5}"; echo "slow line two"; exit 0 ;;
 	*)          echo "fake session $n start"; echo "fake session $n done"; exit 0 ;;
@@ -120,7 +145,10 @@ engine_idle() { [[ ! -f "$STATE/run.pid" ]]; }
 proc_gone() { ! kill -0 "$1" 2>/dev/null; }
 fake_calls() { cat "$FAKE_STATE/count" 2>/dev/null || echo 0; }
 invocation_args() { # n; prints the nth recorded invocation, one arg per line
-	sed -n "${1}p" "$FAKE_STATE/args" | tr '\t' '\n' | sed '/^$/d'
+	# a ride prompt carries the appended marker line, so a record spans
+	# physical lines; records are delimited by their leading tab
+	awk -v n="$1" '/^\t/{rec++} rec==n' "$FAKE_STATE/args" \
+		| sed 's/^\t//' | tr '\t' '\n' | sed '/^$/d'
 }
 assert_invocation() { # label n expected-args...
 	local label="$1" n="$2"; shift 2
@@ -155,8 +183,8 @@ assert_contains "engine log records the clean completion" "$(cat "$STATE/engine.
 	"session 3: run completed cleanly"
 assert_contains "engine log records the OC_WAIT_SECONDS park" "$(cat "$STATE/engine.log")" \
 	"parking 0.3s"
-assert_invocation "every session resumes with --continue --auto" 3 \
-	run --continue --auto "ship the feature"
+assert_invocation "the final session resumes with only the resumption prompt" 3 \
+	run --continue --auto "$resume_prompt"
 
 fresh spent
 printf 'productive\nproductive\nproductive\n' >"$FAKE_STATE/plan"
@@ -262,6 +290,140 @@ assert_contains "the consecutive count restarts after a productive session" "$lo
 assert_contains "the productive cycles still spend the budget" "$log" \
 	"productive quota hit 2 of budget 2; budget spent, quitting"
 assert_not_contains "the reset kept the bound from firing" "$log" "limit never reset"
+
+echo "== cycle-differentiated prompts and the completion marker =="
+fresh prompts
+# cycle 1 sends the caller's words plus the appended marker line, cycles
+# 2 and up only the resumption prompt; the plan ends ok so the ride
+# stops cleanly after three invocations
+printf 'productive\nproductive\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run ship the feature >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a caller-prompt ride completes" \
+	|| bad "a caller-prompt ride completes"
+assert_invocation "cycle 1 sends the caller's prompt with the marker line appended" 1 \
+	run --continue --auto "$(with_marker "ship the feature")"
+assert_invocation "cycle 2 re-sends only the resumption prompt" 2 \
+	run --continue --auto "$resume_prompt"
+assert_invocation "cycle 3 still never sees the caller's original prompt" 3 \
+	run --continue --auto "$resume_prompt"
+
+fresh no_progress_repeats_prompt
+# a no-progress attempt spends no cycle, so the retry re-sends the
+# caller's prompt: the model may never have consumed the words, and the
+# resumption note would claim a window reset that never happened
+printf 'quota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run ship it >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a ride past a no-progress attempt finishes" \
+	|| bad "a ride past a no-progress attempt finishes"
+assert_invocation "the no-progress retry re-sends the caller's prompt with the marker line" 2 \
+	run --continue --auto "$(with_marker "ship it")"
+
+fresh productive_switches_to_resume
+# a genuinely productive cycle is what switches later invocations to the
+# resumption note
+printf 'productive\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run ship it >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a ride past a productive cycle finishes" \
+	|| bad "a ride past a productive cycle finishes"
+assert_invocation "the first productive cycle switches the next invocation to the resumption note" 2 \
+	run --continue --auto "$resume_prompt"
+
+fresh marker_in_prompt
+# the append skips when the caller's own words already carry the marker
+printf 'ok\n' >"$FAKE_STATE/plan"
+oc run "wrap up; end with $complete_marker when finished" >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a self-marking prompt run completes" \
+	|| bad "a self-marking prompt run completes"
+assert_invocation "a caller prompt already carrying the marker is sent verbatim" 1 \
+	run --continue --auto "wrap up; end with $complete_marker when finished"
+
+fresh marker_last
+printf 'complete\n' >"$FAKE_STATE/plan"
+oc run finish the lot >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a session ending in the marker stops the ride" \
+	|| bad "a session ending in the marker stops the ride"
+assert_eq "the marker stop ended the ride after one session" "1" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the complete log line carries the child's rc, distinct from a clean exit" "$log" \
+	"session 1: work complete (OC-CONTINUE: COMPLETE, rc=0)"
+assert_not_contains "no clean-exit line rides on a marker stop" "$log" "completed cleanly"
+
+fresh marker_ansi
+# ANSI escapes are stripped before the last-line comparison
+printf 'complete_ansi\n' >"$FAKE_STATE/plan"
+oc run finish in color >/dev/null 2>&1
+wait_for 10 engine_idle && ok "an ANSI-wrapped marker still stops the ride" \
+	|| bad "an ANSI-wrapped marker still stops the ride"
+assert_contains "the wrapped marker read as the terminal line" "$(cat "$STATE/engine.log")" \
+	"work complete (OC-CONTINUE: COMPLETE, rc=0)"
+
+fresh marker_quota
+# the marker check runs before quota classification: a session whose
+# last line is the marker despite a quota fail reads as complete
+printf 'complete_quota\n' >"$FAKE_STATE/plan"
+oc run finish through the hit >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a marker under a quota fail still ends the ride" \
+	|| bad "a marker under a quota fail still ends the ride"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the marker stop fired before quota classification" "$log" \
+	"work complete (OC-CONTINUE: COMPLETE, rc=1)"
+assert_not_contains "the quota hit never reached the park logic" "$log" "parking"
+
+fresh marker_mid
+# a bare marker line mid-output is a mention, not a stop: the ride
+# continues, spends a productive cycle, and finishes cleanly
+printf 'marker_mid_quota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run mention and keep going >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a mid-output marker mention does not stop the ride" \
+	|| bad "a mid-output marker mention does not stop the ride"
+assert_eq "the ride continued past the mention to a second session" "2" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the mention session spent a productive cycle" "$log" \
+	"session 1: productive quota hit 1; unbounded ride continues"
+assert_not_contains "no complete report for a mid-output mention" "$log" "work complete"
+
+echo "== unbounded ride =="
+fresh unbounded
+# no -n: the ride outlasts the old two-session default and ends on the
+# marker, never on a budget report
+printf 'productive\nproductive\nproductive\ncomplete\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+out="$(oc run ride it out)"
+OC_ENV=()
+wait_for 15 engine_idle && ok "the unbounded ride ends on the marker" \
+	|| bad "the unbounded ride ends on the marker"
+assert_contains "the launcher detached the unbounded engine" "$out" "detached (pid"
+assert_eq "the ride outlasted the old two-session default budget" "4" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the engine logs the ride as unbounded, until the marker" "$log" \
+	"unbounded, until OC-CONTINUE: COMPLETE"
+assert_contains "the ride quits with the complete report, not a budget line" "$log" \
+	"work complete (OC-CONTINUE: COMPLETE, rc=0)"
+assert_not_contains "an unbounded ride never reports a spent budget" "$log" "budget spent"
+assert_contains "productive hits on an unbounded ride just re-park" "$log" \
+	"unbounded ride continues"
+
+fresh unbounded_neverreset
+# the never-reset bound stays active without -n
+printf 'quota\nquota\nquota\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run ride a dead window >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "an unbounded ride still honors the never-reset bound" \
+	|| bad "an unbounded ride still honors the never-reset bound"
+assert_eq "the bound quit stopped after the third attempt" "3" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the never-reset report fires on an unbounded ride" "$log" \
+	"no-progress quota hit 3 consecutive; limit never reset, quitting"
+assert_not_contains "the unbounded quit stays distinct from budget exhaustion" "$log" "budget spent"
 
 echo "== wall-time fallback for content-less quota hits =="
 fresh fallback_up
@@ -385,7 +547,7 @@ engine_pid="$(cat "$STATE/run.pid" 2>/dev/null)"
 wait_for 10 grep -q "slow line one" "$follow_out" \
 	&& ok "follower tails the live engine output" || bad "follower tails the live engine output"
 assert_invocation "--follow and -n are consumed after a passthrough flag, never forwarded" 1 \
-	run --continue --auto --model zhipu/glm-5.3 "ship it"
+	run --continue --auto --model zhipu/glm-5.3 "$(with_marker "ship it")"
 sess="$(ps -o sess= -p "$engine_pid" 2>/dev/null | tr -d '[:space:]')"
 assert_eq "engine runs in its own session, out of terminal signal reach" "$engine_pid" "$sess"
 if ((${#reset_int[@]})); then
@@ -424,7 +586,7 @@ oc run --session sess-1 --dir /tmp --log-level DEBUG --pure --fork \
 wait_for 10 engine_idle && ok "flag-heavy run completes" || bad "flag-heavy run completes"
 assert_invocation "value flags pair with their tokens, equals forms stay intact" 1 \
 	run --continue --auto --session sess-1 --dir /tmp --log-level DEBUG --pure --fork \
-	--model=zhipu/glm -m other/model "fix it now"
+	--model=zhipu/glm -m other/model "$(with_marker "fix it now")"
 
 fresh pass_after
 # a synchronous case must never carry --follow: the launcher execs into
@@ -444,40 +606,41 @@ assert_contains "declared-after-passthrough launcher detaches cleanly" "$pass_ou
 wait_for 10 engine_idle && ok "declared-after-passthrough run completes" \
 	|| bad "declared-after-passthrough run completes"
 assert_invocation "a trailing declared value flag after a passthrough flag is consumed with its pair" 1 \
-	run --continue --auto --model zhipu/glm-5.3 "fix it"
+	run --continue --auto --model zhipu/glm-5.3 "$(with_marker "fix it")"
 
 fresh pass_unknown
 oc run --bogus --nonsense=1 fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown-flag run completes" || bad "unknown-flag run completes"
 assert_invocation "unknown dash tokens pass through verbatim" 1 \
-	run --continue --auto --bogus --nonsense=1 fix
+	run --continue --auto --bogus --nonsense=1 "$(with_marker fix)"
 
 fresh pass_unknown_val
 oc run --flavor spicy fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown bare-flag run completes" \
 	|| bad "unknown bare-flag run completes"
 assert_invocation "unknown bare flags do not steal the next token" 1 \
-	run --continue --auto --flavor "spicy fix"
+	run --continue --auto --flavor "$(with_marker "spicy fix")"
 
 fresh pass_dashdash
 oc run -- --weird -n 2 >/dev/null 2>&1
 wait_for 10 engine_idle && ok "dash-forced prompt run completes" \
 	|| bad "dash-forced prompt run completes"
 assert_invocation "bare -- forces everything after it to be prompt" 1 \
-	run --continue --auto "--weird -n 2"
+	run --continue --auto "$(with_marker "--weird -n 2")"
 
 fresh pass_prompt_first
 oc run fix --session ID >/dev/null 2>&1
 wait_for 10 engine_idle && ok "prompt-first run completes" || bad "prompt-first run completes"
 assert_invocation "flags after the first prompt word stay prompt" 1 \
-	run --continue --auto "fix --session ID"
+	run --continue --auto "$(with_marker "fix --session ID")"
 
 fresh pass_default
-default_prompt="$(sed -n "s/^DEFAULT_PROMPT='\(.*\)'$/\1/p" "$OC")"
 oc run >/dev/null 2>&1
 wait_for 10 engine_idle && ok "default-prompt run completes" || bad "default-prompt run completes"
-assert_invocation "no prompt falls back to the continuation prompt" 1 \
-	run --continue --auto "$default_prompt"
+assert_invocation "no prompt falls back to the truthful default plus the marker line" 1 \
+	run --continue --auto "$(with_marker "$default_prompt")"
+assert_not_contains "the ride default never claims your quota is fresh" \
+	"$(invocation_args 1)" "your quota is fresh"
 
 fresh refuse_usage
 refuse "run refuses a non-numeric budget" run -n abc fix it
