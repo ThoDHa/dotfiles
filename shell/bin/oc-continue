@@ -80,7 +80,7 @@ QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (ex
 DEFAULT_PROMPT='The provider rate-limit window has reset and your quota is fresh. Continue this session from where the rate limit interrupted it. First re-orient: reread the recent conversation, the todo list, and the current state of the files on disk. Then finish the remaining work without redoing steps already completed. If the work is already complete, verify that and report it instead of starting anything new.'
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
-OC_VALUE_FLAGS=(--command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
+OC_VALUE_FLAGS=(--log-level --command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
 
 log_line() {
     mkdir -p "$STATE_DIR"
