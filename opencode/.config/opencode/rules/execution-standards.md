@@ -39,6 +39,12 @@ When user requirements conflict with this hierarchy, user requirements take prec
 
 Broader behavioral standards in [`core.md`](core.md) govern task execution unchanged: clarification follows its ["Clarification Protocol"](core.md#clarification-protocol), and honesty, persistence, transparency, and help-seeking follow its corresponding requirements. Execution-specific priority and authority rules are defined in [Priority Hierarchy](#priority-hierarchy).
 
+### Provider Rate-Limit Reset Times
+
+The reset time in a provider rate-limit error reflects the provider's timezone, not the user's local time. Implementations MUST NOT interpret it as local time, MUST NOT schedule waits or plan work around it, MUST NOT claim quota is fresh based on it, and MUST NOT present it as a local time.
+
+When a rate limit must be reported, implementations quote the error's wording without converting or acting on the timestamp.
+
 ---
 
 ## Task Complexity Protocol
