@@ -18,9 +18,11 @@
 #                                        remains. The ride stops on that
 #                                        marker, a clean exit, a non-quota
 #                                        failure, or (with -n) the Nth
-#                                        productive cycle; three consecutive
-#                                        no-progress attempts always quit
-#                                        with a limit-never-reset report.
+#                                        productive cycle; consecutive
+#                                        no-progress attempts (default 50,
+#                                        OC_NO_PROGRESS_LIMIT to tune) end
+#                                        the ride with a limit-never-reset
+#                                        report.
 #                                        Detaches immediately: parks and
 #                                        sessions happen in the background.
 #                                        --follow: stay in the foreground and
@@ -77,7 +79,7 @@
 #                                            productive cycles
 #   oc-continue run -n 3 --follow "ship it"  background, tailing live output
 #                                            in this terminal until Ctrl-C
-#   oc-continue run -m zhipu/glm-5.3 fix tui continue, model override passed
+#   oc-continue run -m zai-coding-plan/glm-5.3 fix tui, model override passed
 #                                            through to opencode
 #   oc-continue at 22:30                     one-shot tonight at 22:30
 #   oc-continue in 45m "run the test suite"  one-shot after a 45m pause
@@ -93,6 +95,14 @@
 #                     (default 20; testing): a quota fail whose output
 #                     holds nothing beyond the error still counts as
 #                     productive once it outlasts this many seconds
+#   OC_NO_PROGRESS_LIMIT consecutive no-progress quota fails tolerated
+#                     before the engine concludes the limit never reset
+#                     (default 50: about 8h at 10m parks, about 10d at
+#                     the default 4h52m park; 90+ for 15h at 10m);
+#                     a productive session resets the count
+#   OC_MODEL            default model for opencode runs (default
+#                     zai-coding-plan/glm-5.3); an explicit -m/--model passthrough
+#                     flag always wins; empty disables the default
 #   OC_STATE_DIR      state directory override (testing)
 
 set -u
@@ -120,7 +130,10 @@ MIN_PROGRESS_SECONDS="${OC_MIN_PROGRESS_SECONDS:-20}"
 # Consecutive no-progress quota fails tolerated before the engine
 # concludes the limit never reset and quits; a productive session or a
 # clean completion resets the count.
-NO_PROGRESS_LIMIT=3
+NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-50}"
+# Default model pinned on every opencode invocation unless the caller
+# passes -m/--model or OC_MODEL overrides (empty OC_MODEL disables).
+DEFAULT_MODEL='zai-coding-plan/glm-5.3'
 # Anchored the way the A/B driver pins it: a bare 429 inside a number or a
 # timestamp must not read as a quota event.
 QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (exhausted|exceeded)|exceeded your'
@@ -320,6 +333,22 @@ interpret_run_flags() {
     return 0
 }
 
+# Pin the model for an opencode invocation: an explicit -m/--model in
+# the caller's passthrough flags always wins; otherwise append --model
+# with OC_MODEL (default DEFAULT_MODEL). The ${OC_MODEL-...} form (no
+# colon) is deliberate: an explicitly empty OC_MODEL disables injection.
+apply_default_model() {
+    local f resolved
+    for f in ${oc_flags[@]+"${oc_flags[@]}"}; do
+        case "$f" in
+            -m|-m=*|--model|--model=*) return 0 ;;
+        esac
+    done
+    resolved="${OC_MODEL-$DEFAULT_MODEL}"
+    [[ -n "$resolved" ]] || return 0
+    oc_flags+=(--model "$resolved")
+}
+
 start_engine() {
     local existing
     if existing=$(running_pid); then
@@ -337,6 +366,7 @@ cmd_run() {
     oc_declared=true
     split_run_args "$@" || return 2
     interpret_run_flags || return 2
+    apply_default_model
     # Empty means unbounded: the ride runs until the completion marker, a
     # clean exit, a non-quota failure, or the never-reset bound.
     local sessions="$run_sessions"
@@ -438,6 +468,7 @@ cmd_once() {
     local sleep_for="$1"; shift
     oc_declared=false
     split_run_args "$@" || return 2
+    apply_default_model
     local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
 
     start_engine || return 1

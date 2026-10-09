@@ -26,6 +26,7 @@ marker_instruction="$(sed -n "s/^MARKER_INSTRUCTION='\(.*\)'$/\1/p" "$OC")"
 default_prompt="$(sed -n "s/^DEFAULT_PROMPT='\(.*\)'$/\1/p" "$OC")"
 resume_note="$(sed -n "s/^RESUME_NOTE='\(.*\)'$/\1/p" "$OC")"
 resume_prompt="${resume_note} ${marker_instruction}"
+default_model="$(sed -n "s/^DEFAULT_MODEL='\(.*\)'$/\1/p" "$OC")"
 export OC_FAKE_MARKER="$complete_marker"
 with_marker() { # first-line; the cycle-1 ride prompt with the marker line appended
 	printf '%s\n%s' "$1" "$marker_instruction"
@@ -184,7 +185,7 @@ assert_contains "engine log records the clean completion" "$(cat "$STATE/engine.
 assert_contains "engine log records the OC_WAIT_SECONDS park" "$(cat "$STATE/engine.log")" \
 	"parking 0.3s"
 assert_invocation "the final session resumes with only the resumption prompt" 3 \
-	run --continue --auto "$resume_prompt"
+	run --continue --auto --model "$default_model" "$resume_prompt"
 
 fresh spent
 printf 'productive\nproductive\nproductive\n' >"$FAKE_STATE/plan"
@@ -214,7 +215,7 @@ oc in 0 --pure do it >/dev/null 2>&1
 wait_for 10 engine_idle && ok "one-shot completes its single run" \
 	|| bad "one-shot completes its single run"
 assert_invocation "one-shot forwards oc flags after its duration" 1 \
-	run --continue --auto --pure "do it"
+	run --continue --auto --pure --model "$default_model" "do it"
 assert_contains "one-shot quota hit is not retried" "$(cat "$STATE/engine.log")" \
 	"one-shot: quota hit"
 [[ -f "$STATE/last.1.out" ]] && ok "one-shot run retains its session output" \
@@ -226,7 +227,7 @@ fresh budget_free
 # leaves it untouched: the quit fires on the Nth productive hit, not the
 # Nth invocation
 printf 'quota\nproductive\nproductive\n' >"$FAKE_STATE/plan"
-OC_ENV=(OC_WAIT_SECONDS=0.2)
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=3)
 oc run -n 2 try again >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "a no-progress fail followed by two productive hits ends on the budget" \
@@ -263,7 +264,7 @@ fresh neverreset
 # three consecutive no-progress attempts mean the window never opened:
 # the bound quit fires even though the budget is far from spent
 printf 'quota\nquota\nquota\n' >"$FAKE_STATE/plan"
-OC_ENV=(OC_WAIT_SECONDS=0.2)
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=3)
 oc run -n 5 still trying >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "three consecutive no-progress attempts end the run" \
@@ -278,7 +279,7 @@ fresh boundreset
 # a productive session resets the consecutive count, so no-progress
 # streaks on either side of it neither quit the run nor spend budget
 printf 'quota\nproductive\nquota\nquota\nproductive\n' >"$FAKE_STATE/plan"
-OC_ENV=(OC_WAIT_SECONDS=0.2)
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=3)
 oc run -n 2 push through >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "a productive session lets the run survive later no-progress streaks" \
@@ -303,11 +304,11 @@ OC_ENV=()
 wait_for 15 engine_idle && ok "a caller-prompt ride completes" \
 	|| bad "a caller-prompt ride completes"
 assert_invocation "cycle 1 sends the caller's prompt with the marker line appended" 1 \
-	run --continue --auto "$(with_marker "ship the feature")"
+	run --continue --auto --model "$default_model" "$(with_marker "ship the feature")"
 assert_invocation "cycle 2 re-sends only the resumption prompt" 2 \
-	run --continue --auto "$resume_prompt"
+	run --continue --auto --model "$default_model" "$resume_prompt"
 assert_invocation "cycle 3 still never sees the caller's original prompt" 3 \
-	run --continue --auto "$resume_prompt"
+	run --continue --auto --model "$default_model" "$resume_prompt"
 
 fresh no_progress_repeats_prompt
 # a no-progress attempt spends no cycle, so the retry re-sends the
@@ -320,7 +321,7 @@ OC_ENV=()
 wait_for 15 engine_idle && ok "a ride past a no-progress attempt finishes" \
 	|| bad "a ride past a no-progress attempt finishes"
 assert_invocation "the no-progress retry re-sends the caller's prompt with the marker line" 2 \
-	run --continue --auto "$(with_marker "ship it")"
+	run --continue --auto --model "$default_model" "$(with_marker "ship it")"
 
 fresh productive_switches_to_resume
 # a genuinely productive cycle is what switches later invocations to the
@@ -332,7 +333,7 @@ OC_ENV=()
 wait_for 15 engine_idle && ok "a ride past a productive cycle finishes" \
 	|| bad "a ride past a productive cycle finishes"
 assert_invocation "the first productive cycle switches the next invocation to the resumption note" 2 \
-	run --continue --auto "$resume_prompt"
+	run --continue --auto --model "$default_model" "$resume_prompt"
 
 fresh marker_in_prompt
 # the append skips when the caller's own words already carry the marker
@@ -341,7 +342,7 @@ oc run "wrap up; end with $complete_marker when finished" >/dev/null 2>&1
 wait_for 10 engine_idle && ok "a self-marking prompt run completes" \
 	|| bad "a self-marking prompt run completes"
 assert_invocation "a caller prompt already carrying the marker is sent verbatim" 1 \
-	run --continue --auto "wrap up; end with $complete_marker when finished"
+	run --continue --auto --model "$default_model" "wrap up; end with $complete_marker when finished"
 
 fresh marker_last
 printf 'complete\n' >"$FAKE_STATE/plan"
@@ -414,7 +415,7 @@ assert_contains "productive hits on an unbounded ride just re-park" "$log" \
 fresh unbounded_neverreset
 # the never-reset bound stays active without -n
 printf 'quota\nquota\nquota\n' >"$FAKE_STATE/plan"
-OC_ENV=(OC_WAIT_SECONDS=0.2)
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=3)
 oc run ride a dead window >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "an unbounded ride still honors the never-reset bound" \
@@ -446,7 +447,7 @@ fresh fallback_under
 # under the floor the same fail is no-progress: the engine re-parks
 # without spending budget and still finishes cleanly
 printf 'slowquota\nok\n' >"$FAKE_STATE/plan"
-OC_ENV=(OC_WAIT_SECONDS=0.2 FAKE_SLOW=1.2 OC_MIN_PROGRESS_SECONDS=5)
+OC_ENV=(OC_WAIT_SECONDS=0.2 FAKE_SLOW=1.2 OC_MIN_PROGRESS_SECONDS=5 OC_NO_PROGRESS_LIMIT=3)
 oc run -n 2 slow start >/dev/null 2>&1
 OC_ENV=()
 wait_for 15 engine_idle && ok "a slow quota fail under the floor is no progress" \
@@ -459,6 +460,8 @@ assert_not_contains "no productive cycle was recorded" "$log" "productive quota 
 
 echo "== park math =="
 park_default="$(sed -n 's/^PARK_SECONDS=\([0-9]\+\).*/\1/p' "$OC")"
+limit_default="$(sed -n 's/^NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-\([0-9]\+\)}"$/\1/p' "$OC")"
+assert_eq "NO_PROGRESS_LIMIT defaults to 50" "50" "$limit_default"
 epoch_fn="$(awk '/^epoch_of\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
 park_fn="$(awk '/^park_seconds\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
 zsh_park() {
@@ -612,35 +615,70 @@ fresh pass_unknown
 oc run --bogus --nonsense=1 fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown-flag run completes" || bad "unknown-flag run completes"
 assert_invocation "unknown dash tokens pass through verbatim" 1 \
-	run --continue --auto --bogus --nonsense=1 "$(with_marker fix)"
+	run --continue --auto --bogus --nonsense=1 --model "$default_model" "$(with_marker fix)"
 
 fresh pass_unknown_val
 oc run --flavor spicy fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown bare-flag run completes" \
 	|| bad "unknown bare-flag run completes"
 assert_invocation "unknown bare flags do not steal the next token" 1 \
-	run --continue --auto --flavor "$(with_marker "spicy fix")"
+	run --continue --auto --flavor --model "$default_model" "$(with_marker "spicy fix")"
 
 fresh pass_dashdash
 oc run -- --weird -n 2 >/dev/null 2>&1
 wait_for 10 engine_idle && ok "dash-forced prompt run completes" \
 	|| bad "dash-forced prompt run completes"
 assert_invocation "bare -- forces everything after it to be prompt" 1 \
-	run --continue --auto "$(with_marker "--weird -n 2")"
+	run --continue --auto --model "$default_model" "$(with_marker "--weird -n 2")"
 
 fresh pass_prompt_first
 oc run fix --session ID >/dev/null 2>&1
 wait_for 10 engine_idle && ok "prompt-first run completes" || bad "prompt-first run completes"
 assert_invocation "flags after the first prompt word stay prompt" 1 \
-	run --continue --auto "$(with_marker "fix --session ID")"
+	run --continue --auto --model "$default_model" "$(with_marker "fix --session ID")"
 
 fresh pass_default
 oc run >/dev/null 2>&1
 wait_for 10 engine_idle && ok "default-prompt run completes" || bad "default-prompt run completes"
 assert_invocation "no prompt falls back to the truthful default plus the marker line" 1 \
-	run --continue --auto "$(with_marker "$default_prompt")"
+	run --continue --auto --model "$default_model" "$(with_marker "$default_prompt")"
 assert_not_contains "the ride default never claims your quota is fresh" \
 	"$(invocation_args 1)" "your quota is fresh"
+
+fresh model_default
+oc run pin me >/dev/null 2>&1
+wait_for 10 engine_idle && ok "default-model run completes" || bad "default-model run completes"
+assert_invocation "no model flag pins the GLM 5.3 default after passthrough flags" 1 \
+	run --continue --auto --model "$default_model" "$(with_marker "pin me")"
+
+fresh model_env
+OC_ENV=(OC_MODEL=other/model)
+oc run pin me >/dev/null 2>&1
+OC_ENV=()
+wait_for 10 engine_idle && ok "OC_MODEL run completes" || bad "OC_MODEL run completes"
+assert_invocation "OC_MODEL overrides the default model" 1 \
+	run --continue --auto --model other/model "$(with_marker "pin me")"
+
+fresh model_empty
+OC_ENV=(OC_MODEL=)
+oc run pin me >/dev/null 2>&1
+OC_ENV=()
+wait_for 10 engine_idle && ok "empty-OC_MODEL run completes" || bad "empty-OC_MODEL run completes"
+assert_invocation "empty OC_MODEL disables the default injection" 1 \
+	run --continue --auto "$(with_marker "pin me")"
+
+fresh model_explicit
+oc run -m other/model pin me >/dev/null 2>&1
+wait_for 10 engine_idle && ok "explicit-model run completes" || bad "explicit-model run completes"
+assert_invocation "an explicit -m wins over the default, never duplicated" 1 \
+	run --continue --auto -m other/model "$(with_marker "pin me")"
+
+fresh model_explicit_equals
+oc run -m=other/model pin me >/dev/null 2>&1
+wait_for 10 engine_idle && ok "short-equals explicit-model run completes" \
+	|| bad "short-equals explicit-model run completes"
+assert_invocation "an explicit -m=<value> wins over the default, never appended to" 1 \
+	run --continue --auto -m=other/model "$(with_marker "pin me")"
 
 fresh refuse_usage
 refuse "run refuses a non-numeric budget" run -n abc fix it
