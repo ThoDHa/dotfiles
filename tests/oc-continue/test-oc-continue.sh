@@ -461,7 +461,7 @@ assert_not_contains "no productive cycle was recorded" "$log" "productive quota 
 echo "== park math =="
 park_default="$(sed -n 's/^PARK_SECONDS=\([0-9]\+\).*/\1/p' "$OC")"
 limit_default="$(sed -n 's/^NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-\([0-9]\+\)}"$/\1/p' "$OC")"
-assert_eq "NO_PROGRESS_LIMIT defaults to 50" "50" "$limit_default"
+assert_eq "NO_PROGRESS_LIMIT defaults to 90" "90" "$limit_default"
 epoch_fn="$(awk '/^epoch_of\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
 park_fn="$(awk '/^park_seconds\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
 zsh_park() {

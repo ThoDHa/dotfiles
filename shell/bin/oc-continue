@@ -19,7 +19,7 @@
 #                                        marker, a clean exit, a non-quota
 #                                        failure, or (with -n) the Nth
 #                                        productive cycle; consecutive
-#                                        no-progress attempts (default 50,
+#                                        no-progress attempts (default 90,
 #                                        OC_NO_PROGRESS_LIMIT to tune) end
 #                                        the ride with a limit-never-reset
 #                                        report.
@@ -89,7 +89,7 @@
 # Environment overrides:
 #   OC_BIN            opencode binary (default: opencode; tests use a fake)
 #   OC_WAIT_UNTIL     HH:MM known window-reset time; overrides the default
-#                     observed-hit + 4h52m park
+#                     10m park
 #   OC_WAIT_SECONDS   fixed park length (testing; bypasses window math)
 #   OC_MIN_PROGRESS_SECONDS  progress wall-time floor in seconds
 #                     (default 20; testing): a quota fail whose output
@@ -97,8 +97,7 @@
 #                     productive once it outlasts this many seconds
 #   OC_NO_PROGRESS_LIMIT consecutive no-progress quota fails tolerated
 #                     before the engine concludes the limit never reset
-#                     (default 50: about 8h at 10m parks, about 10d at
-#                     the default 4h52m park; 90+ for 15h at 10m);
+#                     (default 90: about 15h at the default 10m park);
 #                     a productive session resets the count
 #   OC_MODEL            default model for opencode runs (default
 #                     zai-coding-plan/glm-5.3); an explicit -m/--model passthrough
@@ -119,7 +118,7 @@ OUT_FILE="$STATE_DIR/last.out"
 SCRIPT_PATH="$0"
 OC_BIN="${OC_BIN:-opencode}"
 SECONDS_PER_DAY=86400
-PARK_SECONDS=17520   # 4h52m: observed-hit plus safety, under the 5h window
+PARK_SECONDS=600     # 10m: probe cadence while the quota window is up
 TAIL_LINES=40
 READY_POLLS=20       # x READY_POLL_INTERVAL: how long launch waits for the
 READY_POLL_INTERVAL=0.1   # engine's pid file before reporting failure
@@ -130,7 +129,7 @@ MIN_PROGRESS_SECONDS="${OC_MIN_PROGRESS_SECONDS:-20}"
 # Consecutive no-progress quota fails tolerated before the engine
 # concludes the limit never reset and quits; a productive session or a
 # clean completion resets the count.
-NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-50}"
+NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-90}"
 # Default model pinned on every opencode invocation unless the caller
 # passes -m/--model or OC_MODEL overrides (empty OC_MODEL disables).
 DEFAULT_MODEL='zai-coding-plan/glm-5.3'
