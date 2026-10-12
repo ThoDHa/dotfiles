@@ -180,6 +180,8 @@ assert_contains "launcher detaches immediately" "$out" "detached (pid"
 wait_for 15 engine_idle && ok "engine rides two quota windows and finishes" \
 	|| bad "engine rides two quota windows and finishes"
 assert_eq "three sessions ran under a three-session budget" "3" "$(fake_calls)"
+assert_contains "the engine log names each invoking opencode run" "$(cat "$STATE/engine.log")" \
+	"session 1: invoking opencode run"
 assert_contains "engine log records the clean completion" "$(cat "$STATE/engine.log")" \
 	"session 3: run completed cleanly"
 assert_contains "engine log records the OC_WAIT_SECONDS park" "$(cat "$STATE/engine.log")" \
@@ -278,6 +280,8 @@ log="$(cat "$STATE/engine.log")"
 assert_contains "the engine reports the limit never reset" "$log" \
 	"no-progress quota hit 3 consecutive; limit never reset, quitting"
 assert_not_contains "the bound quit stays distinct from budget exhaustion" "$log" "budget spent"
+assert_eq "the persisted streak reads three after the bound quit" "3" \
+	"$(cat "$STATE/failed.count")"
 
 fresh boundreset
 # a productive session resets the consecutive count, so no-progress
@@ -295,6 +299,8 @@ assert_contains "the consecutive count restarts after a productive session" "$lo
 assert_contains "the productive cycles still spend the budget" "$log" \
 	"productive quota hit 2 of budget 2; budget spent, quitting"
 assert_not_contains "the reset kept the bound from firing" "$log" "limit never reset"
+assert_eq "the persisted streak reads zero after the productive budget quit" "0" \
+	"$(cat "$STATE/failed.count")"
 
 echo "== cycle-differentiated prompts and the completion marker =="
 fresh prompts
@@ -429,6 +435,8 @@ log="$(cat "$STATE/engine.log")"
 assert_contains "the never-reset report fires on an unbounded ride" "$log" \
 	"no-progress quota hit 3 consecutive; limit never reset, quitting"
 assert_not_contains "the unbounded quit stays distinct from budget exhaustion" "$log" "budget spent"
+assert_eq "the unbounded bound quit leaves the streak persisted" "3" \
+	"$(cat "$STATE/failed.count")"
 
 echo "== wall-time fallback for content-less quota hits =="
 fresh fallback_up
@@ -465,6 +473,7 @@ assert_not_contains "no productive cycle was recorded" "$log" "productive quota 
 echo "== park math =="
 park_default="$(sed -n 's/^PARK_SECONDS=\([0-9]\+\).*/\1/p' "$OC")"
 limit_default="$(sed -n 's/^NO_PROGRESS_LIMIT="${OC_NO_PROGRESS_LIMIT:-\([0-9]\+\)}"$/\1/p' "$OC")"
+assert_eq "PARK_SECONDS defaults to 600" "600" "$park_default"
 assert_eq "NO_PROGRESS_LIMIT defaults to 90" "90" "$limit_default"
 epoch_fn="$(awk '/^epoch_of\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
 park_fn="$(awk '/^park_seconds\(\)/{f=1} f{print} f&&/^}/{exit}' "$OC")"
@@ -531,6 +540,55 @@ printf 'oc-continue: invoking opencode run (session 7, 2026-01-01T00:00:00+00:00
 	"$complete_marker" >"$stamp_dir/marker"
 assert_eq "the stamp never breaks marker detection" \
 	"quota:0 progress:1 complete:1" "$(stamp_probe "$stamp_dir/marker" 0)"
+
+echo "== failed-run counter =="
+fresh failedcount
+# two no-progress attempts, a productive cycle, then one more
+# no-progress, then a clean finish: the persisted count mirrors only the
+# consecutive no-progress streak, so the productive session zeroes it
+# mid-ride and the next attempt starts the streak over at one
+printf 'quota\nquota\nproductive\nquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=5)
+oc run -n 2 count the failures >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a mixed ride with no-progress attempts finishes on the budget" \
+	|| bad "a mixed ride with no-progress attempts finishes on the budget"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the post-reset attempt starts the streak over at one of the limit" "$log" \
+	"session 4: no-progress quota hit 1 of 5 consecutive"
+assert_not_contains "no cumulative failed total rides anywhere in the log" "$log" "(failed total"
+assert_eq "the persisted streak reads zero after the clean finish" "0" \
+	"$(cat "$STATE/failed.count")"
+st="$(oc status)"
+assert_contains "idle status still reports the reset failed count" "$st" "failed runs: 0"
+
+fresh failedstatus
+# parked mid-ride behind no-progress attempts: status must show the
+# live streak while the engine still runs
+printf 'quota\nquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=3 OC_NO_PROGRESS_LIMIT=5)
+oc run -n 1 stall and watch >/dev/null 2>&1
+OC_ENV=()
+wait_for 10 grep -q "no-progress quota hit 2" "$STATE/engine.log" \
+	&& ok "the ride parks behind two no-progress attempts" \
+	|| bad "the ride parks behind two no-progress attempts"
+st="$(oc status)"
+assert_contains "status names the running engine" "$st" "running (pid"
+assert_contains "running status reports the live failed streak" "$st" "failed runs: 2"
+assert_eq "the persisted count reads two mid-ride" "2" "$(cat "$STATE/failed.count")"
+oc stop >/dev/null 2>&1
+wait_for 5 engine_idle && ok "the stalled ride stops on request" \
+	|| bad "the stalled ride stops on request"
+
+fresh failedrestart
+# a fresh run zeroes the stale count from an earlier killed ride
+printf 'ok\n' >"$FAKE_STATE/plan"
+printf '%s\n' 7 >"$STATE/failed.count"
+oc run reopen cleanly >/dev/null 2>&1
+wait_for 10 engine_idle && ok "the reopening run completes" \
+	|| bad "the reopening run completes"
+assert_eq "the fresh start zeroed the stale failed count" "0" \
+	"$(cat "$STATE/failed.count")"
 
 echo "== per-session retention =="
 fresh retain

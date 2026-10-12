@@ -38,9 +38,10 @@
 #                                        rate-limit hit just fails; `run`
 #                                        rides windows. Detaches immediately.
 #   oc-continue stop                     Kill a running engine and its child.
-#   oc-continue status                   Running pid, productive cycles spent,
-#                                        tail, and which per-session outputs
-#                                        are retained.
+#   oc-continue status                   Running pid, tail, the consecutive
+#                                        no-progress ("failed") streak,
+#                                        and which per-session
+#                                        outputs are retained.
 #   oc-continue clean                    Remove state (log, live and retained
 #                                        output, stale pid); refuses while
 #                                        running.
@@ -61,6 +62,10 @@
 # run (session N, TIMESTAMP)` stamp line, so `follow` shows when each
 # retry actually fired; the classifiers treat the stamp as metadata,
 # never as progress or a quota signal. The consecutive no-progress
+# ("failed") streak persists in $STATE_DIR/failed.count, so `status`
+# reports it mid-ride; any productive session, a successful ride end
+# (marker or clean exit), and a fresh engine start zero it, and the
+# limit-never-reset quit leaves the count visible.
 #
 # Flag contract: oc-continue declares its own flags in the OC_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
@@ -119,6 +124,7 @@ STATE_DIR="${OC_STATE_DIR:-$HOME/.local/share/opencode/oc-continue}"
 LOG_FILE="$STATE_DIR/engine.log"
 PID_FILE="$STATE_DIR/run.pid"
 OUT_FILE="$STATE_DIR/last.out"
+FAILED_FILE="$STATE_DIR/failed.count"
 # Top level on purpose: inside a zsh function $0 is the function's name,
 # not this script's path.
 SCRIPT_PATH="$0"
@@ -384,7 +390,16 @@ start_engine() {
     # Drop the previous run's retained sessions so status never presents a
     # longer old run's tail as current; `clean` stays the explicit wipe.
     rm -f "$STATE_DIR"/last.<->.out(N)
+    persist_failed 0
     print -r -- $$ > "$PID_FILE"
+}
+
+# Mirror the consecutive no-progress streak ($1) to $STATE_DIR/failed.count
+# for `status`; every write to the file routes through here. Callers pass
+# 0 wherever the streak zeroes: a fresh engine start, a productive
+# session, or a successful ride end.
+persist_failed() {
+    print -r -- "$1" > "$FAILED_FILE"
 }
 
 cmd_run() {
@@ -401,7 +416,8 @@ cmd_run() {
 
     # cycles counts productive quota hits against the cap when one is set;
     # no_progress counts consecutive no-progress quota fails against
-    # NO_PROGRESS_LIMIT and resets on any productive session.
+    # NO_PROGRESS_LIMIT, resets on any productive session, and is
+    # mirrored to $FAILED_FILE for `status` on every change.
     local session=1 cycles=0 no_progress=0
     if [[ -n "$sessions" ]]; then
         log_line "run start (pid $$): budget $sessions productive cycle(s), oc=${OC_BIN} ${oc_flags[*]}"
@@ -434,12 +450,14 @@ cmd_run() {
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
 
         if session_completed "$session_out"; then
+            persist_failed 0
             log_line "session $session: work complete ($COMPLETE_MARKER, rc=$rc)"
             printf 'oc-continue: work complete (%s)\n' "$COMPLETE_MARKER"
             return 0
         fi
 
         if (( rc == 0 )); then
+            persist_failed 0
             log_line "session $session: run completed cleanly"
             printf 'oc-continue: completed cleanly (session %s)\n' "$session"
             return 0
@@ -453,6 +471,7 @@ cmd_run() {
 
         if ! made_progress "$session_out" "$elapsed"; then
             no_progress=$(( no_progress + 1 ))
+            persist_failed "$no_progress"
             if (( no_progress >= NO_PROGRESS_LIMIT )); then
                 log_line "session $session: no-progress quota hit $no_progress consecutive; limit never reset, quitting"
                 printf 'oc-continue: limit never reset (%s consecutive no-progress attempts); quitting; output: %s, events: %s\n' \
@@ -469,6 +488,7 @@ cmd_run() {
         fi
 
         no_progress=0
+        persist_failed "$no_progress"
         cycles=$(( cycles + 1 ))
         if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
             log_line "session $session: productive quota hit $cycles of budget $sessions; budget spent, quitting"
@@ -557,7 +577,7 @@ cmd_stop() {
 }
 
 cmd_status() {
-    local pid retained name names
+    local pid retained name names failed_count=''
     retained=("$STATE_DIR"/last.<->.out(N))
     if ! pid=$(running_pid); then
         printf 'oc-continue: not running\n'
@@ -565,6 +585,12 @@ cmd_status() {
     else
         printf 'oc-continue: running (pid %s)\n' "$pid"
         [[ -f "$LOG_FILE" ]] && tail -n 5 "$LOG_FILE"
+    fi
+    if [[ -f "$FAILED_FILE" ]]; then
+        failed_count="$(cat "$FAILED_FILE" 2>/dev/null)"
+    fi
+    if [[ "$failed_count" =~ ^[0-9]+$ ]]; then
+        printf 'oc-continue: failed runs: %s\n' "$failed_count"
     fi
     if (( ${#retained} )); then
         names=''
