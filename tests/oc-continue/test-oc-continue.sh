@@ -216,10 +216,14 @@ wait_for 10 engine_idle && ok "one-shot completes its single run" \
 	|| bad "one-shot completes its single run"
 assert_invocation "one-shot forwards oc flags after its duration" 1 \
 	run --continue --auto --pure --model "$default_model" "do it"
+assert_contains "the one-shot engine log names its invoking opencode run" \
+	"$(cat "$STATE/engine.log")" "one-shot: invoking opencode run"
 assert_contains "one-shot quota hit is not retried" "$(cat "$STATE/engine.log")" \
 	"one-shot: quota hit"
 [[ -f "$STATE/last.1.out" ]] && ok "one-shot run retains its session output" \
 	|| bad "one-shot run retains its session output"
+assert_contains "one-shot output opens with the timestamped session stamp" \
+	"$(head -n 1 "$STATE/last.1.out")" "oc-continue: invoking opencode run (session 1, "
 
 echo "== no-progress re-parks and the never-reset bound =="
 fresh budget_free
@@ -487,6 +491,47 @@ else
 	ok "an unparseable OC_WAIT_UNTIL fails"
 fi
 
+echo "== session-start stamp classification =="
+stamp_lib="$ROOT/stamp-lib.zsh"
+{
+	printf 'TAIL_LINES=%s\n' "$(sed -n 's/^TAIL_LINES=\([0-9]\+\)$/\1/p' "$OC")"
+	printf "QUOTA_REGEX='%s'\n" "$(sed -n "s/^QUOTA_REGEX='\(.*\)'$/\1/p" "$OC")"
+	printf "BANNER_REGEX='%s'\n" "$(sed -n "s/^BANNER_REGEX='\(.*\)'$/\1/p" "$OC")"
+	printf "SESSION_START_REGEX='%s'\n" "$(sed -n "s/^SESSION_START_REGEX='\(.*\)'$/\1/p" "$OC")"
+	printf 'ANSI_ESC=%s\n' "$(sed -n 's/^ANSI_ESC=\(.*\)$/\1/p' "$OC")"
+	printf "COMPLETE_MARKER='%s'\n" "$complete_marker"
+	printf 'MIN_PROGRESS_SECONDS=%s\n' "$(sed -n 's/^MIN_PROGRESS_SECONDS="${OC_MIN_PROGRESS_SECONDS:-\([0-9]\+\)}"$/\1/p' "$OC")"
+	for fn in looks_like_quota made_progress session_completed; do
+		awk -v fn="$fn" '$0 ~ "^" fn "\\(\\)" {f=1} f{print} f && /^}/{exit}' "$OC"
+	done
+} >"$stamp_lib"
+stamp_probe() { # file elapsed; prints quota/progress/complete flags
+	STAMP_PROBE_FILE="$1" STAMP_PROBE_ELAPSED="$2" STAMP_LIB="$stamp_lib" zsh -c '
+. "$STAMP_LIB"
+if looks_like_quota "$STAMP_PROBE_FILE"; then q=1; else q=0; fi
+if made_progress "$STAMP_PROBE_FILE" "$STAMP_PROBE_ELAPSED"; then p=1; else p=0; fi
+if session_completed "$STAMP_PROBE_FILE"; then c=1; else c=0; fi
+printf "quota:%s progress:%s complete:%s" "$q" "$p" "$c"'
+}
+stamp_dir="$ROOT/stamp"
+mkdir -p "$stamp_dir"
+printf 'oc-continue: invoking opencode run (session 429, 2026-01-01T00:00:00+00:00)\n' \
+	>"$stamp_dir/only"
+assert_eq "a lone session-429 stamp is neither quota nor progress" \
+	"quota:0 progress:0 complete:0" "$(stamp_probe "$stamp_dir/only" 0)"
+printf 'oc-continue: invoking opencode run (session 7, 2026-01-01T00:00:00+00:00)\n> build · glm-5.3\n' \
+	>"$stamp_dir/banner"
+assert_eq "stamp plus banner noise alone is still no progress" \
+	"quota:0 progress:0 complete:0" "$(stamp_probe "$stamp_dir/banner" 0)"
+printf 'oc-continue: invoking opencode run (session 7, 2026-01-01T00:00:00+00:00)\nError 429: rate limit exceeded\n' \
+	>"$stamp_dir/quota"
+assert_eq "the stamp never masks a real quota signal" \
+	"quota:1 progress:0 complete:0" "$(stamp_probe "$stamp_dir/quota" 0)"
+printf 'oc-continue: invoking opencode run (session 7, 2026-01-01T00:00:00+00:00)\nwrapped up the remaining work\n%s\n' \
+	"$complete_marker" >"$stamp_dir/marker"
+assert_eq "the stamp never breaks marker detection" \
+	"quota:0 progress:1 complete:1" "$(stamp_probe "$stamp_dir/marker" 0)"
+
 echo "== per-session retention =="
 fresh retain
 printf 'productive\nok\n' >"$FAKE_STATE/plan"
@@ -513,6 +558,16 @@ assert_not_contains "retained session 2 holds no session 1 output" \
 assert_contains "retained session 2 is complete" "$(cat "$STATE/last.2.out")" "fake session 2 done"
 assert_eq "live last.out ends as the final session alone" "$(cat "$STATE/last.2.out")" \
 	"$(cat "$STATE/last.out")"
+assert_contains "retained session 1 opens with its timestamped start stamp" \
+	"$(head -n 1 "$STATE/last.1.out")" "oc-continue: invoking opencode run (session 1, "
+stamp_line="$(head -n 1 "$STATE/last.2.out")"
+assert_contains "retained session 2 opens with its own session stamp" \
+	"$stamp_line" "oc-continue: invoking opencode run (session 2, "
+if [[ "$stamp_line" =~ ^oc-continue:\ invoking\ opencode\ run\ \(session\ 2,\ [0-9]{4}-[0-9]{2}-[0-9]{2}T ]]; then
+	ok "the session stamp carries an ISO-8601 timestamp"
+else
+	bad "the session stamp carries an ISO-8601 timestamp (got [$stamp_line])"
+fi
 st="$(oc status)"
 assert_contains "status lists the retained outputs" "$st" \
 	"retained session output: last.1.out last.2.out"

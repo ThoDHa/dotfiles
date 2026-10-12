@@ -57,6 +57,10 @@
 # every opencode run invocation gets its own file, no-progress retries
 # included); last.out stays the live current-session file that `follow`
 # tails, truncated at each session boundary, never merged across sessions.
+# Every file opens with a timestamped `oc-continue: invoking opencode
+# run (session N, TIMESTAMP)` stamp line, so `follow` shows when each
+# retry actually fired; the classifiers treat the stamp as metadata,
+# never as progress or a quota signal. The consecutive no-progress
 #
 # Flag contract: oc-continue declares its own flags in the OC_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
@@ -105,8 +109,10 @@
 #   OC_STATE_DIR      state directory override (testing)
 
 set -u
-# The per-session tee (last.out plus last.N.out) rides multios; an
-# inherited NO_MULTIOS would truncate last.out and never write it.
+# The per-session tee (last.out plus last.N.out) rides multios onto the
+# opencode append below; the session stamp is written directly, so an
+# inherited NO_MULTIOS would leave last.out holding only its stamp while
+# the child output lands in last.N.out alone.
 setopt multios
 
 STATE_DIR="${OC_STATE_DIR:-$HOME/.local/share/opencode/oc-continue}"
@@ -140,6 +146,10 @@ QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|credits? (ex
 # "> " and carries the · separator. Both markers required, so an
 # assistant-quoted blockquote without the separator survives as content.
 BANNER_REGEX='^> .*·'
+# The session-start stamp cmd_run/cmd_once write atop each invocation's
+# output: metadata, never progress, so both classifiers skip it. The
+# literal '(' is escaped for ERE.
+SESSION_START_REGEX='^oc-continue: invoking opencode run \('
 ANSI_ESC=$'\e'
 # The terminal line a ride session must end its final message with once
 # nothing remains; the engine stops the ride when this is the last
@@ -175,6 +185,18 @@ log_line() {
     printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$LOG_FILE"
 }
 
+# Open an invocation's two output files (the live $OUT_FILE and the
+# retained per-session file $2) with the session-start stamp for session
+# $1: two sequential plain truncating writes, one redirection per
+# statement, so the stamp never depends on multios tee ordering across
+# the pair.
+write_session_stamp() {
+    local stamp
+    stamp="oc-continue: invoking opencode run (session $1, $(date -Iseconds))"
+    printf '%s\n' "$stamp" > "$OUT_FILE"
+    printf '%s\n' "$stamp" > "$2"
+}
+
 running_pid() {
     [[ -f "$PID_FILE" ]] || return 1
     local pid
@@ -206,21 +228,25 @@ park_seconds() {
 }
 
 looks_like_quota() {
-    tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -qiE "$QUOTA_REGEX"
+    # The session-start stamp is metadata: a session number containing
+    # 429 (session 429, 1429, ...) must not read as a quota event.
+    tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -vE "$SESSION_START_REGEX" \
+        | command grep -qiE "$QUOTA_REGEX"
 }
 
 # Classify a quota-hit session as productive or no-progress, from its
 # retained last.N.out ($1) and its elapsed seconds ($2). ANSI escape
 # sequences are stripped before every exclusion: they carry no content,
 # so an escape-only line must not read as progress. Primary signal: one
-# surviving line with non-whitespace content after the quota-filter and
-# banner exclusions. Fallback: elapsed wall time at or over
-# MIN_PROGRESS_SECONDS, reached only when the entire output matched the
-# exclusions.
+# surviving line with non-whitespace content after the quota-filter,
+# banner, and session-start-stamp exclusions (the stamp is metadata, so
+# a stamp alone never reads as progress). Fallback: elapsed wall time at
+# or over MIN_PROGRESS_SECONDS, reached only when the entire output
+# matched the exclusions.
 made_progress() {
     local session_out="$1" elapsed="$2"
     if sed "s/${ANSI_ESC}\[[0-9;:?]*[A-Za-z]//g" "$session_out" 2>/dev/null \
-        | command grep -ivE "${QUOTA_REGEX}|${BANNER_REGEX}" \
+        | command grep -ivE "${QUOTA_REGEX}|${BANNER_REGEX}|${SESSION_START_REGEX}" \
         | command grep -qE '[^[:space:]]'; then
         return 0
     fi
@@ -398,9 +424,10 @@ cmd_run() {
         fi
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
         log_line "session $session: invoking opencode run"
+        write_session_stamp "$session" "$session_out"
         printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
         start_s=$SECONDS
-        "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$session_out" 2>&1
+        "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" >> "$OUT_FILE" >> "$session_out" 2>&1
         rc=$?
         elapsed=$(( SECONDS - start_s ))
         is_quota=false
@@ -479,8 +506,9 @@ cmd_once() {
 
     : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
     log_line 'one-shot: invoking opencode run'
+    write_session_stamp 1 "$STATE_DIR/last.1.out"
     printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
-    "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$STATE_DIR/last.1.out" 2>&1
+    "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" >> "$OUT_FILE" >> "$STATE_DIR/last.1.out" 2>&1
     local rc=$?
     if (( rc == 0 )); then
         log_line 'one-shot: run completed cleanly'
