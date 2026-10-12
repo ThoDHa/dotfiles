@@ -397,6 +397,7 @@ cmd_run() {
             prompt="$RESUME_PROMPT"
         fi
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+        log_line "session $session: invoking opencode run"
         printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
         start_s=$SECONDS
         "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$session_out" 2>&1
@@ -477,6 +478,7 @@ cmd_once() {
     sleep "$sleep_for" || { log_line 'wait interrupted'; return 1; }
 
     : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+    log_line 'one-shot: invoking opencode run'
     printf 'oc-continue: %s run --continue --auto %s %s\n' "$OC_BIN" "${oc_flags[*]}" "$prompt"
     "$OC_BIN" run --continue --auto ${oc_flags[@]+"${oc_flags[@]}"} "$prompt" > "$OUT_FILE" > "$STATE_DIR/last.1.out" 2>&1
     local rc=$?
