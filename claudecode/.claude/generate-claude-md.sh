@@ -21,7 +21,24 @@ if [ ! -d "$RULES_DIR" ]; then
     RULES_DIR="$DOTFILES_REPO/opencode/.config/opencode/rules"
     echo "  opencode rules not stowed — using repo copy: $RULES_DIR"
 fi
+# Output location: an optional first argument redirects the file (used by
+# the sync test to regenerate into a scratch dir); empty (or
+# whitespace-only) and extra arguments are rejected so a typo can never
+# silently retarget $HOME.
 OUTPUT_FILE="$HOME/.claude/CLAUDE.md"
+if (( $# > 1 )); then
+    echo "Usage: $(basename "$0") [output-path]" >&2
+    exit 1
+fi
+if [[ $# -eq 1 ]]; then
+    # A whitespace-only path would drop a stray file named " " in the
+    # cwd, so it is treated exactly like the empty argument.
+    if [[ -z "${1//[[:space:]]/}" ]]; then
+        echo "Error: output path must not be empty" >&2
+        exit 1
+    fi
+    OUTPUT_FILE="$1"
+fi
 
 echo -e "${YELLOW}Generating CLAUDE.md for Claude Code...${NC}"
 echo "  Rules source: $RULES_DIR"

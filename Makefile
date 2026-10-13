@@ -29,7 +29,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue lint-corpus check
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode lint-corpus check
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -256,7 +256,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode
 	@echo ""
 	@echo "All tests passed!"
 
@@ -326,6 +326,11 @@ test-oc-continue:
 	@echo "Testing oc-continue runner..."
 	@bash tests/oc-continue/test-oc-continue.sh
 
+# Test that the generated CLAUDE.md matches a fresh generation of the rules
+test-claudecode:
+	@echo "Testing Claude Code sync (CLAUDE.md vs opencode rules)..."
+	@bash tests/claudecode/test-sync.sh
+
 # Help
 help:
 	@echo "Dotfiles Management"
@@ -353,13 +358,14 @@ help:
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue)"
+	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
+	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
