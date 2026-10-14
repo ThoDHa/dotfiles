@@ -1,9 +1,15 @@
-# Shared test harness for the repo's bash suites. Sourcing it defines the
-# per-suite pass/fail/skip counters, the ok/bad/skip_test printers, the
-# assert_eq/assert_contains/assert_not_contains family, and print_result,
-# the summary line each suite prints before its own
+# Shared test harness for the repo's Result-line suites:
+# tests/tasks/test-tasks.sh, tests/oc-continue/test-oc-continue.sh, and
+# tests/claudecode/test-sync.sh. lint-corpus.sh runs a different contract
+# (fail-fast lint, no counters) and is out of bounds here. Sourcing it
+# defines the per-suite pass/fail/skip counters, the ok/bad/skip_test
+# printers, the assert_eq/assert_contains/assert_not_contains family, and
+# print_result, the summary line each suite prints before its own
 # `((fail == 0)) || exit 1` exit contract. Suites source it through their
-# own BASH_SOURCE-derived REPO_ROOT.
+# own BASH_SOURCE-derived REPO_ROOT. Counters are in-process: a helper
+# invoked inside $( ) or a pipeline reports into the subshell and the
+# suite counters silently miss it; capture the verdict in the parent
+# (test-sync.sh's selftest_rc comparator self-test is the pattern).
 
 pass=0
 fail=0
