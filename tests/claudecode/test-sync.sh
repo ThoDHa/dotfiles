@@ -90,6 +90,38 @@ cmp -s "$fresh" "$fresh_again" \
 	&& ok "repeat generation to another path is byte-identical (deterministic)" \
 	|| bad "repeat generation to another path is byte-identical (deterministic)"
 
+# Overwrite idempotence: a third run against the SAME scratch path as the
+# first run. Every path above was fresh, so a generator regression that
+# appends its header instead of truncating still passes the determinism
+# check; against an already-populated path it doubles the file and fails.
+first_pass="$ROOT/first-pass.md"
+cp "$fresh" "$first_pass"
+if overwrite_out="$("$GENERATOR" "$fresh" 2>/dev/null)"; then
+	ok "repeat generation to the same path succeeds"
+else
+	bad "repeat generation to the same path succeeds"
+fi
+cmp -s "$first_pass" "$fresh" \
+	&& ok "repeat generation to the same path is byte-identical (idempotent overwrite)" \
+	|| bad "repeat generation to the same path is byte-identical (idempotent overwrite)"
+
+# Section order: core.md first, then the remaining rule basenames
+# alphabetically. The expected sequence is derived at test time from the
+# rules directory the generator itself resolved (printed on its stdout),
+# so adding or removing a rule file stays green while any deterministic
+# reordering inside the generator fails.
+rules_dir="$(sed -n 's/^[[:space:]]*Rules source: //p' <<<"$overwrite_out")"
+derived_order="core.md"
+for rule_path in "$rules_dir"/*.md; do
+	[[ -e "$rule_path" ]] || continue
+	rule_name="${rule_path##*/}"
+	[[ "$rule_name" == "core.md" ]] && continue
+	derived_order+=$'\n'"$rule_name"
+done
+actual_order="$(sed -n 's/^## Rule File: //p' "$fresh")"
+assert_eq "rule file sections follow core.md-first alphabetical order" \
+	"$derived_order" "$actual_order"
+
 if [[ ! -f "$HOST_FILE" ]]; then
 	skip_test "no ~/.claude/CLAUDE.md on this host; host sync check skipped"
 else
