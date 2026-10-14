@@ -9,23 +9,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
-pass=0
-fail=0
-skip=0
-
-ok()   { printf '  \033[0;32m✓\033[0m %s\n' "$1"; pass=$((pass + 1)); }
-bad()  { printf '  \033[0;31m✗\033[0m %s\n' "$1"; fail=$((fail + 1)); }
-skip_test() { printf '  \033[0;33m- skipped\033[0m %s\n' "$1"; skip=$((skip + 1)); }
-
-assert_eq() { # label expected actual
-	if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (expected [$2], got [$3])"; fi
-}
-assert_contains() { # label haystack needle
-	if grep -qF -- "$3" <<<"$2"; then ok "$1"; else bad "$1 (missing [$3])"; fi
-}
-assert_not_contains() { # label haystack needle
-	if grep -qF -- "$3" <<<"$2"; then bad "$1 (unexpected [$3])"; else ok "$1"; fi
-}
+source "$REPO_ROOT/tests/lib/harness.sh"
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -1467,9 +1451,5 @@ assert_contains "usage places --append after --section" "$usage_out" \
 assert_not_contains "usage does not place --append before --section" "$usage_out" \
 	"--append] --section"
 
-echo
-printf 'Result: \033[0;32m%d passed\033[0m, ' "$pass"
-if ((fail > 0)); then printf '\033[0;31m%d failed\033[0m' "$fail"; else printf '%d failed' "$fail"; fi
-if ((skip > 0)); then printf ', \033[0;33m%d skipped\033[0m' "$skip"; fi
-printf '\n'
+print_result
 ((fail == 0)) || exit 1
