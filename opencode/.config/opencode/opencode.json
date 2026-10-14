@@ -1,5 +1,23 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "thoai-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "ThOAI Local GPU Server",
+      "options": {
+        "baseURL": "http://thoai-op:8080/v1"
+      },
+      "models": {
+        "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M": {
+          "name": "Qwen2.5 Coder 7B (RTX 3050)",
+          "limit": {
+            "context": 32768,
+            "output": 2048
+          }
+        }
+      }
+    }
+  },
   "instructions": [
     "~/.config/opencode/rules/core.md",
     "~/.config/opencode/rules/coding-standards.md",
