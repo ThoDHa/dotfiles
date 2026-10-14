@@ -19,20 +19,7 @@ HOST_FILE="$HOME/.claude/CLAUDE.md"
 REMEDIATION="run make sync-claudecode"
 DIFF_SUMMARY_LINES=12
 
-pass=0
-fail=0
-skip=0
-
-ok()   { printf '  \033[0;32m✓\033[0m %s\n' "$1"; pass=$((pass + 1)); }
-bad()  { printf '  \033[0;31m✗\033[0m %s\n' "$1"; fail=$((fail + 1)); }
-skip_test() { printf '  \033[0;33m- skipped\033[0m %s\n' "$1"; skip=$((skip + 1)); }
-
-assert_eq() { # label expected actual
-	if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (expected [$2], got [$3])"; fi
-}
-assert_contains() { # label haystack needle
-	if grep -qF -- "$3" <<<"$2"; then ok "$1"; else bad "$1 (missing [$3])"; fi
-}
+source "$REPO_ROOT/tests/lib/harness.sh"
 
 report_stale() { # fresh actual; prints the diff summary and the remediation
 	echo "  Stale CLAUDE.md: $2 does not match a fresh generation of the rules."
@@ -49,13 +36,6 @@ compare_fresh() { # label fresh actual; ok on byte-identity, bad plus summary ot
 	bad "$1"
 	report_stale "$2" "$3"
 	return 1
-}
-
-print_result() {
-	printf '\nResult: \033[0;32m%d passed\033[0m, ' "$pass"
-	if ((fail > 0)); then printf '\033[0;31m%d failed\033[0m' "$fail"; else printf '%d failed' "$fail"; fi
-	if ((skip > 0)); then printf ', \033[0;33m%d skipped\033[0m' "$skip"; fi
-	printf '\n'
 }
 
 ROOT="$(mktemp -d)"
