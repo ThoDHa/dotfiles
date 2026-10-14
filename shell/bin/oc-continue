@@ -537,10 +537,12 @@ cmd_run() {
 
         # Shared productive tail: a quota hit that made progress, or a
         # challenge that found remaining work (rc 0 without the marker);
-        # both count one cycle and park under the same rules. The
-        # challenge produced classifiable content here, so a pending
-        # claim was either confirmed or found wanting: the flag clears
-        # and the next session runs the normal cycle.
+        # both count one cycle under the same rules. The challenge
+        # produced classifiable content here, so a pending claim was
+        # either confirmed or found wanting: the flag clears and the
+        # next session runs the normal cycle. The kinds part ways after
+        # the budget check: a quota window needs waiting out, work found
+        # does not.
         no_progress=0
         persist_failed "$no_progress"
         challenged=0
@@ -555,6 +557,23 @@ cmd_run() {
             log_line "session $session: $hit_kind $cycles of budget $sessions; budget spent, quitting"
             printf 'oc-continue: budget spent (%s productive cycle(s)); quitting after hit %s\n' "$sessions" "$cycles"
             return 0
+        fi
+
+        if [[ "$was_challenge" == true ]] && (( rc == 0 )); then
+            # Work found, no quota signal: the enumeration just proved
+            # remaining work exists, so no window needs waiting out and
+            # the next session follows at once.
+            session=$(( session + 1 ))
+            if [[ -n "$sessions" ]]; then
+                log_line "session $(( session - 1 )): $hit_kind $cycles of budget $sessions; work found, continuing immediately with session $session"
+                printf 'oc-continue: %s (cycle %s of %s); session %s proceeding now (oc-continue stop to cancel)\n' \
+                    "$resume_head" "$cycles" "$sessions" "$session"
+            else
+                log_line "session $(( session - 1 )): $hit_kind $cycles; unbounded ride continues; work found, continuing immediately with session $session"
+                printf 'oc-continue: %s (cycle %s); session %s proceeding now (oc-continue stop to cancel)\n' \
+                    "$resume_head" "$cycles" "$session"
+            fi
+            continue
         fi
 
         wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }

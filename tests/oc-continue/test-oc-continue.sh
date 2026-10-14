@@ -429,20 +429,41 @@ assert_eq "the challenge counted no session beyond its own" "3" "$(fake_calls)"
 
 fresh challenge_finds_work
 # the challenge ends rc 0 without the marker: the model found remaining
-# work, so the ride parks and continues on the normal resumption prompt
+# work, so the ride continues on the normal resumption prompt without a
+# park; the park length stays pinned to prove the transition parks
+# nothing
 printf 'complete\nok\nok\n' >"$FAKE_STATE/plan"
 OC_ENV=(OC_WAIT_SECONDS=0.2)
 oc run challenged with work left >/dev/null 2>&1
 OC_ENV=()
-wait_for 15 engine_idle && ok "a work-finding challenge parks and the ride continues" \
-	|| bad "a work-finding challenge parks and the ride continues"
+wait_for 15 engine_idle && ok "a work-finding challenge continues the ride without parking" \
+	|| bad "a work-finding challenge continues the ride without parking"
+assert_eq "the ride reached three sessions with no park in between" "3" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
 assert_contains "the work-finding challenge spent a productive cycle" "$log" \
-	"session 2: productive challenge 1; unbounded ride continues"
-assert_invocation "the session after a work-finding challenge resumes the normal cycle" 3 \
+	"session 2: productive challenge 1; unbounded ride continues; work found, continuing immediately with session 3"
+assert_not_contains "the work-found transition parks nothing" "$log" "; parking "
+assert_invocation "the session after a work-finding challenge resumes the normal cycle immediately" 3 \
 	run --continue --auto --model "$default_model" "$resume_prompt"
 assert_contains "the continued ride finished cleanly" "$log" "run completed cleanly"
 assert_not_contains "work found is never read as completion" "$log" "work complete"
+
+fresh challenge_budget
+# the same work-found continuation under -n: the challenge's cycle still
+# spends the budget and the budget quit still outranks the continuation;
+# with no park length pinned the default 600s park would outlast the
+# engine_idle wait, so a clean finish proves no park ran
+printf 'complete\nok\nproductive\n' >"$FAKE_STATE/plan"
+oc run -n 2 challenged on a budget >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a budgeted work-found challenge ride ends on the budget" \
+	|| bad "a budgeted work-found challenge ride ends on the budget"
+assert_eq "the budget quit stopped after the second productive cycle" "3" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the budgeted work-finding challenge logs the immediate continuation" "$log" \
+	"session 2: productive challenge 1 of budget 2; work found, continuing immediately with session 3"
+assert_contains "the budget quit still fires ahead of the continuation" "$log" \
+	"session 3: productive quota hit 2 of budget 2; budget spent, quitting"
+assert_not_contains "no park runs on the work-found transition at the default park length" "$log" "; parking "
 
 fresh challenge_quota
 # the challenge itself hits quota: existing parking rules apply
