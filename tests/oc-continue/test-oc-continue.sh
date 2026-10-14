@@ -6,12 +6,12 @@
 # OC_MIN_PROGRESS_SECONDS seams, asserting productive-cycle budget
 # counting across quota hits (no-progress re-parks, the never-reset
 # bound, and the wall-time fallback included), cycle-differentiated
-# prompts and the completion-marker stop, park math, per-session
-# retention, the --follow launch-plus-tail contract, and flag passthrough
-# isolation. When the real opencode is on PATH, OC_VALUE_FLAGS is
-# additionally pinned against live `opencode run --help` and the declared
-# flag table checked for overlap with the documented set; without it
-# those checks skip.
+# prompts and the completion-claim challenge cycle, park math,
+# per-session retention, the --follow launch-plus-tail contract, and
+# flag passthrough isolation. When the real opencode is on PATH,
+# OC_VALUE_FLAGS is additionally pinned against live
+# `opencode run --help` and the declared flag table checked for overlap
+# with the documented set; without it those checks skip.
 
 set -uo pipefail
 
@@ -26,6 +26,7 @@ marker_instruction="$(sed -n "s/^MARKER_INSTRUCTION='\(.*\)'$/\1/p" "$OC")"
 default_prompt="$(sed -n "s/^DEFAULT_PROMPT='\(.*\)'$/\1/p" "$OC")"
 resume_note="$(sed -n "s/^RESUME_NOTE='\(.*\)'$/\1/p" "$OC")"
 resume_prompt="${resume_note} ${marker_instruction}"
+challenge_prompt="$(sed -n "s/^CHALLENGE_PROMPT='\(.*\)'$/\1/p" "$OC")"
 default_model="$(sed -n "s/^DEFAULT_MODEL='\(.*\)'$/\1/p" "$OC")"
 export OC_FAKE_MARKER="$complete_marker"
 with_marker() { # first-line; the cycle-1 ride prompt with the marker line appended
@@ -87,8 +88,8 @@ cat >"$FAKE" <<'EOF'
 # slowquota (the noise prologue, a FAKE_SLOW wait, then a quota fail),
 # complete (a work line, then the completion marker as the final line),
 # complete_ansi (the marker wrapped in ANSI escape sequences),
-# complete_quota (quota text with the marker still last, so the marker
-# stop has to fire before quota classification),
+# complete_quota (quota text with the marker still last, so the completion
+# claim has to fire before quota classification),
 # marker_mid_quota (a bare marker line mid-output, which must not stop
 # the ride), fail, slow, or ok by default. The noise prologue is the real
 # transcript's opening: an escape-only line, the run banner, and a
@@ -355,35 +356,44 @@ assert_invocation "a caller prompt already carrying the marker is sent verbatim"
 	run --continue --auto --model "$default_model" "wrap up; end with $complete_marker when finished"
 
 fresh marker_last
-printf 'complete\n' >"$FAKE_STATE/plan"
+# a first completion claim no longer stops the ride: it arms exactly one
+# challenge session, and only the challenge's own marker ends it
+printf 'complete\ncomplete\n' >"$FAKE_STATE/plan"
 oc run finish the lot >/dev/null 2>&1
-wait_for 10 engine_idle && ok "a session ending in the marker stops the ride" \
-	|| bad "a session ending in the marker stops the ride"
-assert_eq "the marker stop ended the ride after one session" "1" "$(fake_calls)"
+wait_for 10 engine_idle && ok "a confirming challenge ends the ride" \
+	|| bad "a confirming challenge ends the ride"
+assert_eq "the ride ended on the challenge, after two sessions" "2" "$(fake_calls)"
+assert_invocation "the challenge session runs the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
 log="$(cat "$STATE/engine.log")"
-assert_contains "the complete log line carries the child's rc, distinct from a clean exit" "$log" \
-	"session 1: work complete (OC-CONTINUE: COMPLETE, rc=0)"
-assert_not_contains "no clean-exit line rides on a marker stop" "$log" "completed cleanly"
+assert_contains "the confirming stop carries the challenge-confirmed wording and the child's rc" "$log" \
+	"session 2: work complete (OC-CONTINUE: COMPLETE, rc=0, challenge confirmed)"
+assert_not_contains "no clean-exit line rides on a challenge-confirmed stop" "$log" "completed cleanly"
 
 fresh marker_ansi
-# ANSI escapes are stripped before the last-line comparison
-printf 'complete_ansi\n' >"$FAKE_STATE/plan"
+# ANSI escapes are stripped before the last-line comparison, so an
+# ANSI-wrapped marker still read as the terminal line and still earns
+# its challenge
+printf 'complete_ansi\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
 oc run finish in color >/dev/null 2>&1
-wait_for 10 engine_idle && ok "an ANSI-wrapped marker still stops the ride" \
-	|| bad "an ANSI-wrapped marker still stops the ride"
+OC_ENV=()
+wait_for 15 engine_idle && ok "an ANSI-wrapped marker still earns its challenge" \
+	|| bad "an ANSI-wrapped marker still earns its challenge"
 assert_contains "the wrapped marker read as the terminal line" "$(cat "$STATE/engine.log")" \
-	"work complete (OC-CONTINUE: COMPLETE, rc=0)"
+	"completion marker claimed; challenging the claim in session 2"
 
 fresh marker_quota
 # the marker check runs before quota classification: a session whose
-# last line is the marker despite a quota fail reads as complete
-printf 'complete_quota\n' >"$FAKE_STATE/plan"
+# last line is the marker despite a quota fail still earns its
+# challenge, and the confirming challenge never reaches the park logic
+printf 'complete_quota\ncomplete\n' >"$FAKE_STATE/plan"
 oc run finish through the hit >/dev/null 2>&1
-wait_for 10 engine_idle && ok "a marker under a quota fail still ends the ride" \
-	|| bad "a marker under a quota fail still ends the ride"
+wait_for 10 engine_idle && ok "a marker under a quota fail still earns its challenge" \
+	|| bad "a marker under a quota fail still earns its challenge"
 log="$(cat "$STATE/engine.log")"
-assert_contains "the marker stop fired before quota classification" "$log" \
-	"work complete (OC-CONTINUE: COMPLETE, rc=1)"
+assert_contains "the claim fired before quota classification" "$log" \
+	"completion marker claimed; challenging the claim in session 2"
 assert_not_contains "the quota hit never reached the park logic" "$log" "parking"
 
 fresh marker_mid
@@ -401,23 +411,156 @@ assert_contains "the mention session spent a productive cycle" "$log" \
 	"session 1: productive quota hit 1; unbounded ride continues"
 assert_not_contains "no complete report for a mid-output mention" "$log" "work complete"
 
+echo "== the challenge cycle: one challenge per completion claim =="
+fresh challenge_first_claim
+# the first marker never ends the ride: exactly one challenge session
+# follows it, running the enumeration prompt, and the ride goes on
+printf 'complete\nok\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run claim and get challenged >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "the ride continues past a challenged claim" \
+	|| bad "the ride continues past a challenged claim"
+assert_invocation "the first marker arms one challenge running the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_eq "exactly one challenge followed the first claim" "1" \
+	"$(grep -c 'completion marker claimed' "$STATE/engine.log")"
+assert_eq "the challenge counted no session beyond its own" "3" "$(fake_calls)"
+
+fresh challenge_finds_work
+# the challenge ends rc 0 without the marker: the model found remaining
+# work, so the ride parks and continues on the normal resumption prompt
+printf 'complete\nok\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run challenged with work left >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a work-finding challenge parks and the ride continues" \
+	|| bad "a work-finding challenge parks and the ride continues"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the work-finding challenge spent a productive cycle" "$log" \
+	"session 2: productive challenge 1; unbounded ride continues"
+assert_invocation "the session after a work-finding challenge resumes the normal cycle" 3 \
+	run --continue --auto --model "$default_model" "$resume_prompt"
+assert_contains "the continued ride finished cleanly" "$log" "run completed cleanly"
+assert_not_contains "work found is never read as completion" "$log" "work complete"
+
+fresh challenge_quota
+# the challenge itself hits quota: existing parking rules apply
+# unchanged, the quota hit with progress spends a cycle, and the ride
+# goes on to a later confirmed completion; a progress-passing quota hit
+# is classifiable content, so the claim's challenge clears and session
+# 3 resumes the normal cycle
+printf 'complete\nproductive\ncomplete\ncomplete\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run challenged through a window >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a quota-hit challenge parks and the ride continues" \
+	|| bad "a quota-hit challenge parks and the ride continues"
+assert_invocation "the quota-hit challenge ran the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_invocation "the session after the progress-making quota challenge resumes the normal cycle" 3 \
+	run --continue --auto --model "$default_model" "$resume_prompt"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the challenge's quota hit keeps the existing parking rules" "$log" \
+	"session 2: productive quota hit 1; unbounded ride continues"
+assert_contains "the quota-hit challenge parked before resuming" "$log" "parking 0.2s"
+assert_contains "the ride later ended on a confirmed completion" "$log" \
+	"challenge confirmed"
+assert_not_contains "the quota challenge never reported clean completion" "$log" \
+	"completed cleanly"
+
+fresh challenge_no_progress
+# a quota fail that eats the challenge (no progress: the enumeration
+# never reached the model) re-parks with the claim still challenged, so
+# the retry re-asks the enumeration instead of dropping it; the claim
+# is never taken for granted and the ride continues past the re-ask
+printf 'complete\nquota\nok\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=5)
+oc run claim challenged through a dead window >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a quota-eaten challenge re-parks with the claim still challenged" \
+	|| bad "a quota-eaten challenge re-parks with the claim still challenged"
+assert_invocation "the quota-eaten challenge ran the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_invocation "the retry after the quota-eaten challenge re-asks the enumeration" 3 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the quota-eaten challenge re-parked as no progress" "$log" \
+	"session 2: no-progress quota hit 1 of 5 consecutive"
+assert_contains "the ride ended cleanly only after the re-asked challenge" "$log" \
+	"session 4: run completed cleanly"
+
+fresh challenge_zeroes_streak
+# a claim session is productive (marker content ends it, whatever the
+# child's rc), so it zeroes the no-progress streak: the quota hit eating
+# its challenge starts a fresh count instead of extending the pre-claim
+# streak, and the never-reset bound does not fire early
+printf 'quota\nquota\ncomplete\nquota\ncomplete\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2 OC_NO_PROGRESS_LIMIT=3)
+oc run claim after a streak >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a claim after no-progress hits restarts the streak" \
+	|| bad "a claim after no-progress hits restarts the streak"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the claim logged between the pre-claim streak and the post-claim hit" "$log" \
+	"session 3: completion marker claimed; challenging the claim in session 4"
+assert_contains "the post-claim quota hit re-parks on a fresh streak of one" "$log" \
+	"session 4: no-progress quota hit 1 of 3 consecutive"
+assert_not_contains "the never-reset bound never fired on the carried streak" "$log" \
+	"limit never reset"
+assert_contains "the ride still ended on a confirmed completion" "$log" \
+	"challenge confirmed"
+assert_eq "the confirmed stop was the fifth session" "5" "$(fake_calls)"
+
+fresh challenge_confirms_under_quota
+# the challenge ends with the marker despite a quota fail: the claim
+# confirms, and the confirmed stop carries the challenge's non-zero rc
+printf 'complete\ncomplete_quota\n' >"$FAKE_STATE/plan"
+oc run claim confirmed through a hit >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a challenge ending in the marker under a quota fail ends the ride" \
+	|| bad "a challenge ending in the marker under a quota fail ends the ride"
+assert_invocation "the confirming challenge ran the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_contains "the confirmed stop carries the challenge's non-zero rc" \
+	"$(cat "$STATE/engine.log")" \
+	"work complete (OC-CONTINUE: COMPLETE, rc=1, challenge confirmed)"
+
+fresh challenge_reset
+# challenged resets on any session that does not end in the marker, so
+# a second fresh claim earns a second challenge
+printf 'complete\nok\ncomplete\ncomplete\n' >"$FAKE_STATE/plan"
+OC_ENV=(OC_WAIT_SECONDS=0.2)
+oc run claim, challenged, claim again >/dev/null 2>&1
+OC_ENV=()
+wait_for 15 engine_idle && ok "a second fresh claim earns a second challenge" \
+	|| bad "a second fresh claim earns a second challenge"
+assert_eq "both fresh claims were challenged" "2" \
+	"$(grep -c 'completion marker claimed' "$STATE/engine.log")"
+assert_invocation "the first claim's challenge ran the enumeration prompt" 2 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_invocation "the second claim's challenge ran the enumeration prompt again" 4 \
+	run --continue --auto --model "$default_model" "$challenge_prompt"
+assert_eq "the second challenge confirmed and ended the ride" "4" "$(fake_calls)"
+assert_contains "the ride ended on the second challenge's confirmation" \
+	"$(cat "$STATE/engine.log")" "challenge confirmed"
+
 echo "== unbounded ride =="
 fresh unbounded
-# no -n: the ride outlasts the old two-session default and ends on the
-# marker, never on a budget report
-printf 'productive\nproductive\nproductive\ncomplete\n' >"$FAKE_STATE/plan"
+# no -n: the ride outlasts the old two-session default and ends on a
+# challenge-confirmed marker, never on a budget report
+printf 'productive\nproductive\nproductive\ncomplete\ncomplete\n' >"$FAKE_STATE/plan"
 OC_ENV=(OC_WAIT_SECONDS=0.2)
 out="$(oc run ride it out)"
 OC_ENV=()
-wait_for 15 engine_idle && ok "the unbounded ride ends on the marker" \
-	|| bad "the unbounded ride ends on the marker"
+wait_for 15 engine_idle && ok "the unbounded ride ends on the confirmed marker" \
+	|| bad "the unbounded ride ends on the confirmed marker"
 assert_contains "the launcher detached the unbounded engine" "$out" "detached (pid"
-assert_eq "the ride outlasted the old two-session default budget" "4" "$(fake_calls)"
+assert_eq "the ride outlasted the old two-session default budget" "5" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
 assert_contains "the engine logs the ride as unbounded, until the marker" "$log" \
 	"unbounded, until OC-CONTINUE: COMPLETE"
-assert_contains "the ride quits with the complete report, not a budget line" "$log" \
-	"work complete (OC-CONTINUE: COMPLETE, rc=0)"
+assert_contains "the ride quits with the confirmed complete report, not a budget line" "$log" \
+	"work complete (OC-CONTINUE: COMPLETE, rc=0, challenge confirmed)"
 assert_not_contains "an unbounded ride never reports a spent budget" "$log" "budget spent"
 assert_contains "productive hits on an unbounded ride just re-park" "$log" \
 	"unbounded ride continues"
