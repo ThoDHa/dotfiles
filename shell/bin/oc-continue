@@ -14,12 +14,18 @@
 #                                        note, and every prompt asks the
 #                                        session to end its final message
 #                                        with the terminal line
-#                                        OC-CONTINUE: COMPLETE once nothing
-#                                        remains. The ride stops on that
-#                                        marker, a clean exit, a non-quota
-#                                        failure, or (with -n) the Nth
-#                                        productive cycle; consecutive
-#                                        no-progress attempts (default 90,
+#                                        OC-CONTINUE: COMPLETE only once
+#                                        nothing remains of the whole
+#                                        launched objective. A session
+#                                        ending in that marker earns one
+#                                        challenge session demanding an
+#                                        enumeration of remaining work;
+#                                        the ride stops on that
+#                                        challenge's own marker, a clean
+#                                        exit, a non-quota failure, or
+#                                        (with -n) the Nth productive
+#                                        cycle; consecutive no-progress
+#                                        attempts (default 90,
 #                                        OC_NO_PROGRESS_LIMIT to tune) end
 #                                        the ride with a limit-never-reset
 #                                        report.
@@ -64,8 +70,8 @@
 # never as progress or a quota signal. The consecutive no-progress
 # ("failed") streak persists in $STATE_DIR/failed.count, so `status`
 # reports it mid-ride; any productive session, a successful ride end
-# (marker or clean exit), and a fresh engine start zero it, and the
-# limit-never-reset quit leaves the count visible.
+# (challenge-confirmed marker or clean exit), and a fresh engine start
+# zero it, and the limit-never-reset quit leaves the count visible.
 #
 # Flag contract: oc-continue declares its own flags in the OC_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
@@ -158,13 +164,16 @@ BANNER_REGEX='^> .*·'
 SESSION_START_REGEX='^oc-continue: invoking opencode run \('
 ANSI_ESC=$'\e'
 # The terminal line a ride session must end its final message with once
-# nothing remains; the engine stops the ride when this is the last
-# non-empty line of a session's output.
+# nothing remains; a session ending in it arms one challenge session,
+# and the engine stops the ride only when that challenge itself ends in
+# it.
 COMPLETE_MARKER='OC-CONTINUE: COMPLETE'
-# The one-line completion instruction appended to a caller prompt (cycle 1
-# only, skipped when the prompt already carries the marker) and built into
-# the default and resumption prompts.
-MARKER_INSTRUCTION='When nothing remains, do a terse final verification (no new work) and end your final message with the single terminal line: OC-CONTINUE: COMPLETE'
+# The whole-objective completion instruction appended to a caller prompt
+# (cycle 1 only, skipped when the prompt already carries the marker) and
+# built into the default and resumption prompts: the terminal line is
+# earned only when nothing remains anywhere on the launched objective's
+# todo list or task board, never after a single step or unit.
+MARKER_INSTRUCTION='When nothing remains of the entire launched objective (not just the current step or unit, but every remaining item on the todo list or task board), do a terse final verification (no new work) and end your final message with the single terminal line: OC-CONTINUE: COMPLETE. If any part of the objective remains, end without that line.'
 # The no-prompt default, sent verbatim as the cycle-1 ride default and by
 # the one-shot at/in commands: truthful about the interruption, no
 # re-orientation from scratch, no redoing of finished steps.
@@ -173,6 +182,10 @@ DEFAULT_PROMPT='Your last turn was cut off by a provider rate limit, not by fini
 # the marker instruction).
 RESUME_NOTE='The quota window reset mid-work; resume from where your last turn stopped, do not re-orient from scratch, and do not repeat finished steps.'
 RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
+# The single challenge a completion claim earns: it forces an enumeration
+# of remaining work instead of a confirmation, and only an empty list may
+# re-earn the terminal line.
+CHALLENGE_PROMPT='Your last turn claimed completion. List every remaining item from the todo list or task board you have been tracking. If and only if that list is empty, do a terse final verification (no new work) and end your final message with the single terminal line: OC-CONTINUE: COMPLETE. Otherwise continue the listed work without redoing finished steps.'
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
 OC_VALUE_FLAGS=(--log-level --command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
@@ -407,18 +420,21 @@ cmd_run() {
     split_run_args "$@" || return 2
     interpret_run_flags || return 2
     apply_default_model
-    # Empty means unbounded: the ride runs until the completion marker, a
-    # clean exit, a non-quota failure, or the never-reset bound.
+    # Empty means unbounded: the ride runs until a challenge-confirmed
+    # completion marker, a clean exit, a non-quota failure, or the
+    # never-reset bound.
     local sessions="$run_sessions"
     local caller_prompt="${prompt_words[*]:-}"
 
     start_engine || return 1
 
-    # cycles counts productive quota hits against the cap when one is set;
-    # no_progress counts consecutive no-progress quota fails against
-    # NO_PROGRESS_LIMIT, resets on any productive session, and is
-    # mirrored to $FAILED_FILE for `status` on every change.
-    local session=1 cycles=0 no_progress=0
+    # cycles counts productive quota hits and work-finding challenge
+    # sessions against the cap when one is set; no_progress counts
+    # consecutive no-progress quota fails against NO_PROGRESS_LIMIT,
+    # resets on any productive session, and is mirrored to $FAILED_FILE
+    # for `status` on every change. challenged arms the single challenge
+    # session a completion claim earns.
+    local session=1 cycles=0 no_progress=0 challenged=0
     if [[ -n "$sessions" ]]; then
         log_line "run start (pid $$): budget $sessions productive cycle(s), oc=${OC_BIN} ${oc_flags[*]}"
         printf 'oc-continue: starting; budget %s productive cycle(s)\n' "$sessions"
@@ -428,12 +444,20 @@ cmd_run() {
     fi
 
     local rc is_quota wait_s session_out start_s elapsed prompt
+    local was_challenge hit_kind resume_head
     while :; do
         session_out="$STATE_DIR/last.$session.out"
-        # Cycles count productive hits: until the first one lands, each
-        # invocation re-sends the cycle-1 prompt, because a no-progress
-        # attempt means the model may never have consumed those words.
-        if (( cycles == 0 )); then
+        # An armed claim outranks everything: the next session re-asks
+        # the claimed completion with $CHALLENGE_PROMPT, which demands an
+        # enumeration of remaining work, and the flag survives the
+        # no-progress re-park so a quota-eaten challenge is retried.
+        # Every other session follows the normal cycle differentiation,
+        # and until the first productive cycle lands each invocation
+        # re-sends the cycle-1 prompt, because a no-progress attempt
+        # means the model may never have consumed those words.
+        if (( challenged == 1 )); then
+            prompt="$CHALLENGE_PROMPT"
+        elif (( cycles == 0 )); then
             prompt=$(cycle_one_prompt "$caller_prompt")
         else
             prompt="$RESUME_PROMPT"
@@ -449,27 +473,51 @@ cmd_run() {
         is_quota=false
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
 
-        if session_completed "$session_out"; then
+        # A completion claim never ends the ride outright: the first
+        # claim arms exactly one challenge session, and only a challenge
+        # that itself ends with the marker confirms the stop. The flag
+        # clears only when the challenge produced classifiable content:
+        # the confirmed marker below, or work found or a progress-passing
+        # quota hit in the productive tail. A quota fail that eats the
+        # challenge re-parks with it still armed, so the retry re-asks
+        # the enumeration instead of dropping it, bounded by the
+        # never-reset limit.
+        was_challenge=false
+        if (( challenged == 1 )); then
+            was_challenge=true
+            if session_completed "$session_out"; then
+                persist_failed 0
+                log_line "session $session: work complete ($COMPLETE_MARKER, rc=$rc, challenge confirmed)"
+                printf 'oc-continue: work complete (%s, challenge confirmed)\n' "$COMPLETE_MARKER"
+                return 0
+            fi
+        elif session_completed "$session_out"; then
+            # A claim session is productive (marker content ends it,
+            # whatever the child's rc): the streak zeroes with it, so
+            # the bound counts only hits after the claim.
+            no_progress=0
             persist_failed 0
-            log_line "session $session: work complete ($COMPLETE_MARKER, rc=$rc)"
-            printf 'oc-continue: work complete (%s)\n' "$COMPLETE_MARKER"
-            return 0
+            challenged=1
+            session=$(( session + 1 ))
+            log_line "session $(( session - 1 )): completion marker claimed; challenging the claim in session $session"
+            printf 'oc-continue: completion marker claimed; one challenge session follows (session %s)\n' "$session"
+            continue
         fi
 
-        if (( rc == 0 )); then
+        if [[ "$was_challenge" == false ]] && (( rc == 0 )); then
             persist_failed 0
             log_line "session $session: run completed cleanly"
             printf 'oc-continue: completed cleanly (session %s)\n' "$session"
             return 0
         fi
 
-        if [[ "$is_quota" != true ]]; then
+        if (( rc != 0 )) && [[ "$is_quota" != true ]]; then
             log_line "session $session: non-quota failure rc=$rc; not retrying"
             printf 'oc-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
             return "$rc"
         fi
 
-        if ! made_progress "$session_out" "$elapsed"; then
+        if (( rc != 0 )) && ! made_progress "$session_out" "$elapsed"; then
             no_progress=$(( no_progress + 1 ))
             persist_failed "$no_progress"
             if (( no_progress >= NO_PROGRESS_LIMIT )); then
@@ -487,11 +535,24 @@ cmd_run() {
             continue
         fi
 
+        # Shared productive tail: a quota hit that made progress, or a
+        # challenge that found remaining work (rc 0 without the marker);
+        # both count one cycle and park under the same rules. The
+        # challenge produced classifiable content here, so a pending
+        # claim was either confirmed or found wanting: the flag clears
+        # and the next session runs the normal cycle.
         no_progress=0
         persist_failed "$no_progress"
+        challenged=0
         cycles=$(( cycles + 1 ))
+        hit_kind='productive quota hit'
+        resume_head='rate limit hit after progress'
+        if (( rc == 0 )); then
+            hit_kind='productive challenge'
+            resume_head='challenge found remaining work'
+        fi
         if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
-            log_line "session $session: productive quota hit $cycles of budget $sessions; budget spent, quitting"
+            log_line "session $session: $hit_kind $cycles of budget $sessions; budget spent, quitting"
             printf 'oc-continue: budget spent (%s productive cycle(s)); quitting after hit %s\n' "$sessions" "$cycles"
             return 0
         fi
@@ -499,13 +560,13 @@ cmd_run() {
         wait_s=$(park_seconds) || { printf 'oc-continue: bad OC_WAIT_UNTIL\n' >&2; return 2; }
         session=$(( session + 1 ))
         if [[ -n "$sessions" ]]; then
-            log_line "session $(( session - 1 )): productive quota hit $cycles of budget $sessions; parking ${wait_s}s until session $session"
-            printf 'oc-continue: rate limit hit after progress (cycle %s of %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
-                "$cycles" "$sessions" "$wait_s" "$session"
+            log_line "session $(( session - 1 )): $hit_kind $cycles of budget $sessions; parking ${wait_s}s until session $session"
+            printf 'oc-continue: %s (cycle %s of %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
+                "$resume_head" "$cycles" "$sessions" "$wait_s" "$session"
         else
-            log_line "session $(( session - 1 )): productive quota hit $cycles; unbounded ride continues; parking ${wait_s}s until session $session"
-            printf 'oc-continue: rate limit hit after progress (cycle %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
-                "$cycles" "$wait_s" "$session"
+            log_line "session $(( session - 1 )): $hit_kind $cycles; unbounded ride continues; parking ${wait_s}s until session $session"
+            printf 'oc-continue: %s (cycle %s); parked %ss, then session %s (oc-continue stop to cancel)\n' \
+                "$resume_head" "$cycles" "$wait_s" "$session"
         fi
         sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
     done
