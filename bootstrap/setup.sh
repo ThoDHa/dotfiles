@@ -414,10 +414,27 @@ _install_opencode_v2() {
     fi
 }
 
+# Warn (non-fatal) when the stowed opencode config is no longer a symlink.
+# v2's one-time config migration rename-replaces
+# ~/.config/opencode/opencode.json with a real translated file, and the
+# Makefile stows before the installer runs, so a fresh machine's first v2
+# invocation can be this bootstrap's own installer and silently break the
+# deployment. Call after every installer invocation; the up-to-date path
+# never calls it. 'make readopt' from the dotfiles repo re-adopts the file
+# and restores the symlink; 'make clean-stow stow' is the explicit
+# alternative (plain re-stow conflicts while a real file occupies the
+# target). Never fails the step.
+_warn_opencode_config_shadowed() {
+    if [ ! -L "$HOME/.config/opencode/opencode.json" ]; then
+        echo "  Warning: ~/.config/opencode/opencode.json is not a stow symlink (opencode v2 migration replaces it) — run 'make readopt' or 'make clean-stow stow' in $DOTFILES_DIR to repair"
+    fi
+}
+
 step_opencode() {
     if ! command -v opencode &>/dev/null; then
         echo "  Installing opencode v2..."
         _install_opencode_v2
+        _warn_opencode_config_shadowed
         return
     fi
     local current latest major
@@ -426,6 +443,7 @@ step_opencode() {
     if [ "$major" = "1" ]; then
         echo "  Migrating opencode v1 $current → opencode v2..."
         _install_opencode_v2
+        _warn_opencode_config_shadowed
         # Clean up an npm-installed v1 alongside the binary migration; a
         # missing npm or a missing package is not an error.
         if command -v npm &>/dev/null && npm ls -g opencode-ai &>/dev/null; then
@@ -440,11 +458,13 @@ step_opencode() {
     elif [ -z "$current" ]; then
         echo "  opencode version unknown, reinstalling"
         _install_opencode_v2
+        _warn_opencode_config_shadowed
     elif [ "$current" = "$latest" ]; then
         echo "  opencode $current is up to date"
     else
         echo "  Upgrading opencode $current → $latest (opencode v2)..."
         _install_opencode_v2
+        _warn_opencode_config_shadowed
     fi
 }
 
