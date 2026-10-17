@@ -10,6 +10,7 @@
 # invoked inside $( ) or a pipeline reports into the subshell and the
 # suite counters silently miss it; capture the verdict in the parent
 # (test-sync.sh's selftest_rc comparator self-test is the pattern).
+# Requires bash 4.4+: suites expand possibly-empty arrays ("${arr[@]}") under set -u, which errors on bash < 4.4.
 
 pass=0
 fail=0
