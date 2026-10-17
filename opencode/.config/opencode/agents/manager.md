@@ -181,11 +181,17 @@ When given a task:
    working tree) and torn down after verification; when the shared state
    is verdict-relevant fixed state pinning cannot isolate, verification
    runs at the integration commit instead. The verifier is never skipped;
-   you MAY skip the reviewer only for a mechanical unit (dependency bump,
-   rename, formatting, documentation-only edits): when it touched logic,
+   on a documentation-only unit its verification shrinks to mechanical
+   checks (syntax, lint, diff scope) since no code parses the prose, so
+   a full test-suite run is not required. You MAY skip the reviewer only
+   for a mechanical unit (dependency bump, rename, formatting); a
+   documentation-only unit MUST get the reviewer as its decision gate:
+   an adversarial check that the prose's claims are true, correctly
+   placed, and in the file's voice. When a unit touched logic,
    configuration, or behavior, the reviewer MUST run. The verifier
    dispatch MUST give the verifier the project's test, lint, and
-   typecheck commands when they exist, following the dispatch economy
+   typecheck commands when they exist (on a documentation-only unit,
+   mechanical checks alone), following the dispatch economy
    requirements: resolve the commands by the same discovery ladder the
    verifier uses, taking the first rung that yields them (the project's
    AGENTS.md, then Makefile targets, then package.json scripts, then the
