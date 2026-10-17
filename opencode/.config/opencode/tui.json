@@ -2,14 +2,5 @@
   "$schema": "https://opencode.ai/tui.json",
   "keybinds": {
     "leader": "ctrl+w"
-  },
-  "plugin": [
-    [
-      "./opencode-context-manager/plugin/context-manager.tui.tsx",
-      {
-        "sidebarSubagents": true,
-        "sidebarMode": "context"
-      }
-    ]
-  ]
+  }
 }
