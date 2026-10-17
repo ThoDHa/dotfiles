@@ -5,11 +5,19 @@ CONTAINER   := base_dev
 STOW_PACKAGES_ALL := shell tmux isort agents opencode claudecode
 STOW_TARGET   := $(HOME)
 
-# Optional tool packages are stowed only when the tool is installed.
+# Optional tool packages are stowed only when the tool is installed. If PATH
+# cannot resolve opencode but the canonical ~/.opencode/bin/opencode exists
+# (non-interactive shells may lack that dir on PATH), PATH is extended first
+# so detection and every recipe resolve the same binary.
 # FORCE_OPENCODE=1 / FORCE_CLAUDECODE=1 override detection; bootstrap uses
 # these to stow config before its tool install steps have run.
+ifeq ($(shell command -v opencode >/dev/null 2>&1 && echo 1),)
+ifneq ($(wildcard $(HOME)/.opencode/bin/opencode),)
+PATH := $(HOME)/.opencode/bin$(if $(PATH),:$(PATH))
+endif
+endif
 OPENCODE_PRESENT  := $(shell command -v opencode >/dev/null 2>&1 && echo 1)
-CLAUDE_PRESENT    := $(shell command -v claude >/dev/null 2>&1 && echo 1)
+CLAUDE_PRESENT    := $(shell command -v claude >/dev/null 2>&1 || test -x "$(HOME)/.local/bin/claude" && echo 1)
 OPENCODE_STOW     := $(if $(or $(FORCE_OPENCODE),$(OPENCODE_PRESENT)),opencode)
 CLAUDECODE_STOW   := $(if $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT)),claudecode)
 STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
@@ -302,9 +310,11 @@ test-rules:
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
 	@opencode run --auto "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
-		tee /tmp/opencode-rules-test.txt | \
-		grep -qiE "coding-standards|core\.md|delegation|execution-standards|git-protocol|task-files" || \
-		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
+		tee /tmp/opencode-rules-test.txt >/dev/null
+	@grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/opencode-rules-test.txt || \
+		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
+	@grep -qiE "delegation|git-protocol|task-files" /tmp/opencode-rules-test.txt || \
+		(echo "FAIL: Skills not detected in response (expected delegation, git-protocol, or task-files). Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
 else
