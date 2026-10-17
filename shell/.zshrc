@@ -147,9 +147,9 @@ else
     CLIP_CMD='cat > /dev/null'
 fi
 # Launch the TUI in auto mode by default; subcommands pass through untouched.
-# Flag-first invocations are assumed root-flag-shaped (v2 root no longer carries -m/--agent); --auto is never duplicated.
+# Flag-first invocations are assumed root-flag-shaped (v2 root no longer carries -m/--agent); only an exact --auto token suppresses the prepend, one inside an argument value does not.
 opencode() {
-    if [[ $# -eq 0 || $1 == -* ]] && [[ " $* " != *" --auto "* ]]; then
+    if [[ $# -eq 0 || $1 == -* ]] && (( ${argv[(Ie)--auto]} == 0 )); then
         command opencode --auto "$@"
     else
         command opencode "$@"
