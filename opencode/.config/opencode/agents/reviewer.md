@@ -5,14 +5,27 @@ permission:
   edit:
     "*": "deny"
     "/tmp/opencode/reports/**": "allow"
+  # read-only relief: v2 permission rules are ordered and the last matching rule wins, so the deny sits first with the exception allows after, mirroring the edit maps
   bash:
     "*": "deny"
-    "git status*": "allow"
-    "git diff*": "allow"
-    "git log*": "allow"
-    "git show*": "allow"
-    "git rev-parse*": "allow"
-    "tasks report*": "allow"
+    "git status *": "allow"
+    "git diff *": "allow"
+    "git log *": "allow"
+    "git show *": "allow"
+    "git rev-parse *": "allow"
+    "git worktree list *": "allow"
+    "git -C * status *": "allow"
+    "git -C * log *": "allow"
+    "git -C * diff *": "allow"
+    "git -C * show *": "allow"
+    "git -C * worktree list *": "allow"
+    "ls *": "allow"
+    "cat *": "allow"
+    "head *": "allow"
+    "tail *": "allow"
+    "grep *": "allow"
+    "wc *": "allow"
+    "tasks report *": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"
