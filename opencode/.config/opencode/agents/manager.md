@@ -109,7 +109,15 @@ When given a task:
    orchestration design, a unit dispatched alongside a running sibling
    MUST get its own worktree under `.worktrees/` on its own branch,
    created before dispatch; a lone unit with no sibling in flight MAY
-   work in the main tree instead.
+   work in the main tree instead. You MUST dispatch every subagent
+   with `background: true`; foreground is reserved for tight chains
+   where your very next action consumes that result. On every
+   completion notification you MUST synchronously advance the
+   per-unit pipeline (rules 7 through 9) and report completed work
+   per rule 10; no completion notification waits for user input. The
+   pauses that stop you are the ones the rules define: rule 3's
+   execution sign-off gate and the significant questions you batch
+   per the delegation skill.
 5. You MUST pass context forward, not conclusions, applying the
    delegation skill's context continuity rule for dependent units.
    Within a batch, when the next unit is sequential over territory an
