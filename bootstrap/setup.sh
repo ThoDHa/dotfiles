@@ -359,34 +359,92 @@ step_eza() {
 
 # Fetch <url> to a temp file and execute it. The floating installers always
 # install the latest release; the temp file keeps nothing piped straight from
-# the network into a shell.
+# the network into a shell. Args after <url> are forwarded to the installer
+# script.
 _run_floating_installer() {
+    local url="$1"
+    shift
     (
         tmp=$(mktemp -d)
         trap 'rm -rf "$tmp"' EXIT
         cd "$tmp"
-        curl -fsSL "$1" -o install.sh
-        bash install.sh
+        curl -fsSL "$url" -o install.sh
+        bash install.sh "$@"
     )
+}
+
+# Print opencode v2's latest version from its update feed; empty on any
+# fetch or parse failure so callers can degrade gracefully.
+_opencode_latest_version() {
+    curl -fsSL https://opencode.ai/update/api/latest/cli/npm 2>/dev/null \
+        | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true
+}
+
+# Print the installed opencode version as bare X.Y.Z. v1 prints "1.18.35";
+# v2 prints "opencode v2.0.31": keep the last whitespace field, then drop
+# the v prefix. Prints empty when the binary is missing or fails. Checks
+# the binary at <bin-path> when given, opencode on PATH otherwise.
+_opencode_installed_version() {
+    local version
+    version=$("${1:-opencode}" --version 2>/dev/null | head -1 || true)
+    version="${version##* }"
+    version="${version#v}"
+    printf '%s\n' "$version"
+}
+
+# Run the opencode v2 installer. It replaces ~/.opencode/bin/opencode in
+# place, so the same invocation serves install, migration, and upgrade.
+# --no-modify-path is mandatory: ~/.zshrc is a stow symlink into this repo,
+# and without the flag the installer appends a PATH export through it into
+# the managed file. shell/.zshrc already puts ~/.opencode/bin on PATH, which
+# is where v2 installs. Afterwards re-read the installed version once and
+# warn (non-fatal) when it differs from the update feed: the installer
+# channel can serve an older build than the feed advertises. The version
+# check resolves the known install dir when PATH lags behind a first
+# bootstrap, so a fresh install does not warn just because PATH is stale.
+_install_opencode_v2() {
+    local expected installed installed_bin
+    expected=$(_opencode_latest_version)
+    _run_floating_installer "https://opencode.ai/v2/install" --no-modify-path
+    installed_bin=$(command -v opencode 2>/dev/null || true)
+    [ -n "$installed_bin" ] || installed_bin="${HOME}/.opencode/bin/opencode"
+    installed=$(_opencode_installed_version "$installed_bin")
+    if [ -n "$expected" ] && [ "$installed" != "$expected" ]; then
+        echo "  Warning: opencode v2 installer produced ${installed:-unknown}, expected $expected"
+    fi
 }
 
 step_opencode() {
     if ! command -v opencode &>/dev/null; then
-        echo "  Installing opencode..."
-        _run_floating_installer "https://opencode.ai/install"
+        echo "  Installing opencode v2..."
+        _install_opencode_v2
         return
     fi
-    local current latest
-    current=$(opencode --version 2>/dev/null | head -1 | awk '{print $1}' || true)
-    latest=$(curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest 2>/dev/null \
-        | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/' | head -1 || true)
+    local current latest major
+    current=$(_opencode_installed_version)
+    major="${current%%.*}"
+    if [ "$major" = "1" ]; then
+        echo "  Migrating opencode v1 $current → opencode v2..."
+        _install_opencode_v2
+        # Clean up an npm-installed v1 alongside the binary migration; a
+        # missing npm or a missing package is not an error.
+        if command -v npm &>/dev/null && npm ls -g opencode-ai &>/dev/null; then
+            echo "  Removing npm opencode-ai (v1)..."
+            npm rm -g opencode-ai
+        fi
+        return
+    fi
+    latest=$(_opencode_latest_version)
     if [ -z "$latest" ]; then
-        echo "  Could not fetch opencode version — skipping update"
+        echo "  Could not fetch opencode v2 version — skipping update"
+    elif [ -z "$current" ]; then
+        echo "  opencode version unknown, reinstalling"
+        _install_opencode_v2
     elif [ "$current" = "$latest" ]; then
         echo "  opencode $current is up to date"
     else
-        echo "  Upgrading opencode $current → $latest..."
-        _run_floating_installer "https://opencode.ai/install"
+        echo "  Upgrading opencode $current → $latest (opencode v2)..."
+        _install_opencode_v2
     fi
 }
 

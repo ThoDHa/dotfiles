@@ -199,11 +199,11 @@ assert_contains "engine log records the non-quota failure" "$(cat "$STATE/engine
 
 fresh oneshot
 printf 'quota\n' >"$FAKE_STATE/plan"
-oc in 0 --pure do it >/dev/null 2>&1
+oc in 0 --fork --title ride do it >/dev/null 2>&1
 wait_for 10 engine_idle && ok "one-shot completes its single run" \
 	|| bad "one-shot completes its single run"
 assert_invocation "one-shot forwards oc flags after its duration" 1 \
-	run --continue --auto --pure --model "$default_model" "do it"
+	run --continue --auto --fork --title ride --model "$default_model" "do it"
 assert_contains "the one-shot engine log names its invoking opencode run" \
 	"$(cat "$STATE/engine.log")" "one-shot: invoking opencode run"
 assert_contains "one-shot quota hit is not retried" "$(cat "$STATE/engine.log")" \
@@ -846,12 +846,12 @@ follower=""
 
 echo "== passthrough isolation =="
 fresh pass_known
-oc run --session sess-1 --dir /tmp --log-level DEBUG --pure --fork \
+oc run --session sess-1 --server http://localhost:4096 --log-level DEBUG --print-logs --fork \
 	--model=zhipu/glm -m other/model fix it now >/dev/null 2>&1
 wait_for 10 engine_idle && ok "flag-heavy run completes" || bad "flag-heavy run completes"
 assert_invocation "value flags pair with their tokens, equals forms stay intact" 1 \
-	run --continue --auto --session sess-1 --dir /tmp --log-level DEBUG --pure --fork \
-	--model=zhipu/glm -m other/model "$(with_marker "fix it now")"
+	run --continue --auto --session sess-1 --server http://localhost:4096 --log-level DEBUG \
+	--print-logs --fork --model=zhipu/glm -m other/model "$(with_marker "fix it now")"
 
 fresh pass_after
 # a synchronous case must never carry --follow: the launcher execs into
@@ -954,29 +954,28 @@ assert_eq "usage refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
 
 echo "== value-flag parity against the real opencode binary =="
 if real_oc="$(command -v opencode)"; then
-	opt_re='^[[:space:]]*(-([a-zA-Z0-9]),[[:space:]]+)?(--[a-zA-Z0-9-]+)'
-	inline_val_re='\[(string|number|array)\]'
-	wrapped_val_re='^[[:space:]]*\[(string|number|array)\]'
-	# The help wraps long option descriptions, leaving the type marker
-	# alone on the next line; a bare marker line belongs to the option
-	# above it.
+	# v2 help layout, pinned to live `opencode run --help`: one option per
+	# line, long flag first with an optional `, -x` short after it, then for
+	# value-taking options a type token: a bare word (string, choice) in the
+	# FLAGS section, a <...> placeholder in the GLOBAL FLAGS section.
+	opt_re='^[[:space:]]*(--[a-zA-Z0-9-]+)(,[[:space:]]+-([a-zA-Z0-9]))?([[:space:]]+([^[:space:]]+))?'
 	declare -A opt_takes_value=() opt_short=()
 	opt_order=()
-	cur=""
 	while IFS= read -r line; do
-		if [[ "$line" =~ $opt_re ]]; then
-			cur="${BASH_REMATCH[3]}"
-			[[ -z "${opt_takes_value[$cur]+x}" ]] && opt_order+=("$cur")
-			opt_short["$cur"]="${BASH_REMATCH[2]:-}"
-			if [[ "$line" =~ $inline_val_re ]]; then
-				opt_takes_value["$cur"]=1
-			else
-				opt_takes_value["$cur"]=0
-			fi
-		elif [[ -n "$cur" && "$line" =~ $wrapped_val_re ]]; then
+		[[ "$line" =~ $opt_re ]] || continue
+		cur="${BASH_REMATCH[1]}"
+		[[ -z "${opt_takes_value[$cur]+x}" ]] && opt_order+=("$cur")
+		opt_short["$cur"]="${BASH_REMATCH[3]:-}"
+		token="${BASH_REMATCH[5]:-}"
+		if [[ "$token" == '<'* || "$token" == 'string' || "$token" == 'choice' ]]; then
 			opt_takes_value["$cur"]=1
+		else
+			opt_takes_value["$cur"]=0
 		fi
 	done < <("$real_oc" run --help 2>&1)
+	# An unrecognized help layout must fail loudly here, never pass
+	# vacuously through an empty derived set.
+	(( ${#opt_order[@]} > 0 )) || bad "help parses to a non-empty option set"
 	derived_value=()
 	derived_all=()
 	for opt in "${opt_order[@]}"; do
@@ -986,6 +985,12 @@ if real_oc="$(command -v opencode)"; then
 			derived_value+=("$opt")
 			[[ -n "${opt_short[$opt]}" ]] && derived_value+=("-${opt_short[$opt]}")
 		fi
+	done
+	# Sentinels for the drift classes parity cannot see: it proves table
+	# equals derived, never derived equals the truth.
+	for sentinel in --session --model --server; do
+		[[ "${opt_takes_value[$sentinel]:-}" == 1 ]] && ok "derived set keeps $sentinel as value-taking" \
+			|| bad "derived set lost $sentinel as value-taking; help layout or type vocabulary drifted"
 	done
 	script_value_flags="$(sed -n 's/^OC_VALUE_FLAGS=(\(.*\))$/\1/p' "$OC" \
 		| tr ' ' '\n' | sed '/^$/d' | LC_ALL=C sort)"
