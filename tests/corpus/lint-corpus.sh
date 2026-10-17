@@ -24,7 +24,7 @@
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 355,
 #                             worker 145, verifier 65, reviewer 135,
-#                             planner 105), rules 190, SKILL.md 950,
+#                             planner 120), rules 190, SKILL.md 950,
 #                             README/DESIGN under 500
 #
 # Reads only tracked files (git ls-files basis), so the result is
@@ -108,7 +108,7 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/worker.md]=145
 	[opencode/.config/opencode/agents/verifier.md]=65
 	[opencode/.config/opencode/agents/reviewer.md]=135
-	[opencode/.config/opencode/agents/planner.md]=105
+	[opencode/.config/opencode/agents/planner.md]=120
 )
 
 EM_DASH="$(printf '\xe2\x80\x94')"
