@@ -61,15 +61,5 @@
       "/tmp/**": "allow"
     },
     "doom_loop": "allow"
-  },
-  "plugin": [
-    [
-      "./opencode-context-manager/plugin/context-manager.ts",
-      {
-        "manualMode": true,
-        "watermarkTokens": 250000,
-        "agedReadEvictionMessages": 30
-      }
-    ]
-  ]
+  }
 }

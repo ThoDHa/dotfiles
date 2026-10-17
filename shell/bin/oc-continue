@@ -78,9 +78,13 @@
 # zone and never forwarded to opencode. The declared table governs `run`
 # only: `at` and `in` declare none, so --follow there forwards verbatim
 # today. Every other dash-prefixed arg before the prompt passes through to
-# `opencode run` verbatim, so `oc-continue run --session ID --dir PATH -m
+# `opencode run` verbatim, so `oc-continue run --session ID --server URL -m
 # provider/model fix it` works. Known value-taking flags consume their
-# value token; others can use --flag=value. A bare `--` forces everything
+# value token; others can use --flag=value.
+# Hazard: v2's `run --format json` (any non-default format) emits NDJSON,
+# not plain text, breaking the OC-CONTINUE: COMPLETE check, banner exclusion,
+# and quota classification; never pass --format until the runner parses JSON.
+# A bare `--` forces everything
 # after it to be prompt. No prompt given: the resume-the-interrupted-turn
 # default is used. Naming discipline: never adopt a declared name from
 # `opencode run`'s documented flag set; on overlap oc-continue wins and
@@ -188,7 +192,7 @@ RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
 CHALLENGE_PROMPT='Your last turn claimed completion. List every remaining item from the todo list or task board you have been tracking. If and only if that list is empty, do a terse final verification (no new work) and end your final message with the single terminal line: OC-CONTINUE: COMPLETE. Otherwise continue the listed work without redoing finished steps.'
 # opencode run flags that consume a separate value token, for passthrough;
 # bare flags and --flag=value forms need no entry here.
-OC_VALUE_FLAGS=(--log-level --command --title --format --attach --password --username --dir --port --variant --model --agent --session --file -s -m -f -p -u)
+OC_VALUE_FLAGS=(--session --server --model --agent --format --file --title --log-level --completions -s -m -f)
 # oc-continue's declared flag table: names split_run_args parses and
 # consumes itself, never forwarding them to opencode. On a name overlap
 # with opencode run's documented flags oc-continue wins, so never adopt a

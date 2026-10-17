@@ -301,9 +301,9 @@ test-rules:
 	@echo "Testing opencode rules loading..."
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
-	@opencode run "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
+	@opencode run --auto "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
 		tee /tmp/opencode-rules-test.txt | \
-		grep -qiE "coding-standards|core|delegation|execution-standards|git-protocol|task-files" || \
+		grep -qiE "coding-standards|core\.md|delegation|execution-standards|git-protocol|task-files" || \
 		(echo "FAIL: Rules files not detected in response. Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
