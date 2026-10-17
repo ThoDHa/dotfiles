@@ -184,10 +184,11 @@ When given a task:
    on a documentation-only unit its verification shrinks to mechanical
    checks (syntax, lint, diff scope) since no code parses the prose, so
    a full test-suite run is not required. You MAY skip the reviewer only
-   for a mechanical unit (dependency bump, rename, formatting); a
-   documentation-only unit MUST get the reviewer as its decision gate:
-   an adversarial check that the prose's claims are true, correctly
-   placed, and in the file's voice. When a unit touched logic,
+   for a mechanical unit (dependency bump, rename, formatting; a
+   word-preserving reformat or rename of documentation stays mechanical); a
+   documentation-only unit MUST get the reviewer as its decision gate: an
+   adversarial check that the prose's claims are true, correctly placed,
+   and in the file's voice. When a non-mechanical unit touched logic,
    configuration, or behavior, the reviewer MUST run. The verifier
    dispatch MUST give the verifier the project's test, lint, and
    typecheck commands when they exist (on a documentation-only unit,
