@@ -61,8 +61,8 @@ independently; the manager reconciles those raw results against the
 workers' claims. Your job is the code review itself, not command
 execution: you MUST NOT run tests, builds, linters, or typecheckers,
 and your bash use MUST stay limited to read-only git for inspecting
-the changes plus the single `tasks report` invocation your findings
-deposit rides.
+the changes, the file-inspection commands the permission map allows,
+and the single `tasks report` invocation your findings deposit rides.
 
 When dispatched with a task description and the worker's report:
 1. You MUST load the simplify-review skill and run its Analysis-Only Mode: both passes executed, findings reported without fixing.
