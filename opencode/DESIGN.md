@@ -14,7 +14,7 @@ requirement's canonical home (file plus section heading or rule number).
 | manager | primary | glm-5.3-flash | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
-| reviewer | subagent | glm-5.3 | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
+| reviewer | subagent | glm-5.3 | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond its deny-first read-only map plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
 | planner | subagent | glm-5.3 | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
 | analyst | subagent | glm-5.3 | Judgment labor behind the manager's decisions: evaluation memos for plan approvals, discrepancy reconciliation analysis, design-challenge position drafts, reviewer-finding disposition drafts, incoming-request triage, closing-report synthesis, git-reshape design; read-only repos and logs, evidence stated with anchors, one memo deposit per dispatch, never authoring what it judges |
 
@@ -132,10 +132,11 @@ returns, its verifier and reviewer are dispatched in parallel and four
 independent sources are reconciled per unit (worker claims, verifier
 results, reviewer findings, git ground truth). The verifier reports raw
 results without interpretation, the reviewer runs the simplify-review loop
-in Analysis-Only Mode and nothing beyond read-only git plus exactly one
-findings-deposit write per dispatch, with the reviewer's reply to the
-manager carrying only the deposit path and digest (normative in rule 7 of
-the manager agent file and the verifier and reviewer agent files). On a pass
+in Analysis-Only Mode and nothing beyond its deny-first read-only map plus
+exactly one findings-deposit write per dispatch, with the reviewer's reply
+to the manager carrying only the deposit path and digest (normative in
+rule 7 of the manager agent file and the verifier and reviewer agent
+files). On a pass
 the manager backfills the freed slot immediately and gives every
 discrepancy, finding, and suggestion exactly one recorded disposition (fix,
 defer, or decline), because unbounded loops hide failures and unactioned
@@ -180,38 +181,100 @@ Worktree Teardown sections.
 ## Permissions posture
 
 Agent permission tiers mirror their prompts, defined in each agent file's
-frontmatter and the global opencode.json; config and agent files load at
-session start, so permission edits take effect only in newly started
-sessions. The manager's edit denial is the single architectural line,
-confining its edits to `.tasks/**` while bash stays open; the worker holds
-everything except push, history reshaping, gh writes, and subagent spawning;
-the verifier's bash is intentionally open so it can run tests; the
-reviewer holds read-only git plus exactly one findings-deposit write: the
-`tasks report` channel under task files, a direct edit under
-`/tmp/opencode/reports/` otherwise; the planner pairs read-only git with the
-two `tasks` CLI channels and an edit map opening only `.tasks/**`, covering
-both the channels its research role runs on and the direct `research/`
-deposit write, so the prompt-level routing added
-no permission changes; and the analyst copies the planner's read-only
-bash tier (its `grep` allow already covers the service-log reading its
-reconciliation memos need) while its edit map opens
-`/tmp/opencode/reports/**` for the memo deposits. Prefix-based bash permissions are
-guardrails against uninstructed behavior, not security boundaries: a
-determined `sh -c` or `git -C` route slips past them, and hard
-enforcement would require hooks or credential separation.
+frontmatter and the global opencode.json; under opencode v2 each map
+translates into an ordered rule list where the last matching rule wins
+and agent rules append after the global ones. An action matching no rule
+falls to that permission's default (allow for most, ask for a few like
+`external_directory`), and a headless subagent session auto-rejects
+anything that asks. The watching background service refreshes config
+mid-run (the shared service log records the events; grep
+`event.type=config.updated` and `event.type=agent.updated`), so
+permission-map edits no longer wait for a newly started session. The
+manager's edit denial is the single architectural line, confining its
+edits to `.tasks/**` while bash stays open; the worker holds everything
+except push, history reshaping, gh writes, and subagent spawning; the
+verifier's bash is intentionally open so it can run tests. The reviewer
+and planner run deny-first maps: the reviewer's bash allows read-only git
+(status, diff, log, show, rev-parse, worktree list, plus the `git -C`
+forms for all but rev-parse), file inspection (`ls`, `cat`, `grep`, `wc`,
+head and tail withdrawn, the native read tool covering their case and
+the base deny governing their shapes), and the single `tasks report`
+deposit channel, with its edit map opening only
+`/tmp/opencode/reports/**`; the planner
+pairs the same git set minus the `git -C` worktree-list form with the
+same inspection core and adds the two `tasks` channels, `make test`,
+`sqlite3 -readonly`, the opencode help and version probes, and the
+exact `opencode debug config` and `opencode debug agents` entries,
+with its edit map opening only `.tasks/**` for the planning carve-out
+and the direct `research/` deposit write; and the analyst copies the
+planner's bash map rule for rule (its `grep` allow already covers the
+service-log reading its reconciliation memos need), with its edit map
+opening `/tmp/opencode/reports/**` for the memo deposits instead of
+`.tasks/**`. The maps are guardrails
+against uninstructed behavior, not security boundaries, and the failure
+mode now splits by map shape: on the allow-first maps (manager, worker,
+verifier) a determined `sh -c` or `git -C` route slips past the prefixed
+denies, while the deny-first maps fail closed, an unrouted command
+denied outright, so the residual surface there is only the shapes that
+legitimately match an allow, recorded in the accepted-risk register
+below; hard enforcement everywhere would still require policies or
+credential separation.
+
+### Accepted-risk register
+
+The deny-first reviewer, planner, and analyst maps carry four accepted residual
+classes, accepted because withdrawing them would gut all three charters (diff
+inspection is the reviewer's core duty, cat and grep the standard
+inspection path). Single-command redirects are a pattern-level match:
+`cat file > /target` matches `cat *`, the same class for the other
+inspection commands and the git prefixes; the docs specify no redirect
+rule and any platform defense is unrecorded, so the claim states the
+conservative ceiling, able only to overstate the risk.
+Argument-level writes ride the diff, log, and show prefixes:
+`git diff --output=/path` needs no metacharacters. `.env` reads ride the
+inspection allows around the base policy's read defaults, which deny
+`.env` files (the `*.env.example` allow carve-out aside) and gate the
+read tool only, a different action: `cat .env Makefile` passes because
+the secret is not the trailing token a `cat *.env` deny requires, quoted
+forms like `cat ".env"` pass because the raw command string does not
+match the deny pattern, and grep and `git show *` read env files and
+blobs like `HEAD:.env` outright. Piped compounds reject in headless
+sessions even when every segment individually matches an allow (observed
+live); the docs do not specify the compound rule. Status as of the
+hardening batch: the direct cat forms of the `.env` class are closed by
+the landed `cat *.env` and `cat *.env.*` deny pairs, everything else
+open. The hardening shape is deny entries placed after the allows, which
+win by position; asks are the wrong tool there because headless sessions
+auto-reject them, and the structural complete fix for the cat class,
+dropping `cat *` for named reads, is the recorded option if the threat
+model changes. The acceptance guard is the read-only charters plus
+transcript visibility: every open residual is a read or a redirect
+visible in the session transcript, and pattern syntax is no barrier to
+later narrowing, since literals like `>` and `=` are expressible in deny
+entries.
 
 ## LRU context plugin
 
 The LRU context plugin and its `/lru` sidebar panel live in their own
-repository, [opencode-lru-context](https://github.com/ThoDHa/opencode-lru-context):
-`make install` there symlinks the three plugin files into
-`~/.config/opencode/plugin/`, so the `plugin` array in opencode.json and the
-`tui` entry in tui.json resolve against the symlinked files unchanged, and the
-repository's DESIGN.md carries the full design note for the eviction
-pipeline, the tools, the metrics log, and the panel. tui.json passes the TUI
-entry one option, `sidebarSubagents: true`, so the session sidebar's LRU
-group also lists the fleet's child sessions (worker, verifier, reviewer,
-planner, analyst) aggregated by agent type; the option is off by default upstream.
+repository, [opencode-lru-context](https://github.com/ThoDHa/opencode-lru-context),
+whose DESIGN.md carries the full design note for the eviction pipeline, the
+tools, the metrics log, and the panel. Under opencode v2 the plugin does
+not load: v2 requires a configured plugin path to be a directory and
+warned on every config load of the single-file `plugin` array in
+opencode.json (grep the service log for `configured plugin path must be
+a directory`), so that stanza came out, and tui.json's `plugin` stanza
+pointing at the `.tsx` twin, inert under v2, followed in the same batch;
+each stanza is preserved verbatim in its removal commit's diff for the
+plugin-port task to restore deliberately. tui.json keeps only
+its keybinds; the `sidebarSubagents: true` option that listed the fleet's
+child sessions (worker, verifier, reviewer, planner, analyst) in the
+sidebar's LRU group rode the removed entry and returns with the port. The
+tripwire for the `.tsx` twin lives here: after any future v2 upgrade,
+grep the shared service log for a WARN line naming `tui.tsx` (baseline
+zero; echoes are INFO `spawning process` lines, so the `level=WARN`
+requirement disarms them) the same day, because the `.ts` stanza's
+rejection warned on every load and a resurfacing plugin-parse warning on
+the `.tsx` path would surface as just such a WARN line.
 
 ## Known limits
 
@@ -273,8 +336,11 @@ planner, analyst) aggregated by agent type; the option is off by default upstrea
   finds the main repo root's `.tasks/`, so logs and reports land on
   the main board. `--dir` (or `TASKS_DIR`) are explicit overrides,
   needed only for working directories outside the repo tree.
-- Subagent gating through the `permission.task` key depends on SDK
-  support: on some SDK versions (for example 1.18.5) the key may be a
-  no-op, so the agents' task permission blocks may not be enforced; the
-  prompt prohibitions are the backstop until the running binary confirms
-  the key.
+- Subagent gating through the `permission.task` key is enforced on the
+  running binary (v2.0.32): the shared service log records the translated
+  per-agent task rules evaluating on spawns without an ask (grep
+  `message=evaluated permission=task`), closing the v1-era concern that
+  the key could be a no-op on some SDK versions (1.18.5 among them); the
+  manager's named-agent allows plus catch-all deny and the subagents'
+  blanket `task: deny` hold at the permission layer, and the prompt
+  prohibitions remain the conduct backstop, not the enforcement.
