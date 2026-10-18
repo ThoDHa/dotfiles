@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Corpus lint: mechanical drift checks over the tracked documentation
-# corpus (corpus-review finding 16). Six checks run in order and the
+# corpus (corpus-review finding 16). Seven checks run in order and the
 # lint fails fast on the first finding, printing `FAIL: <file>:<line>:
 # <what>`:
 #
@@ -26,6 +26,9 @@
 #                             worker 145, verifier 65, reviewer 135,
 #                             planner 120, analyst 85), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
+#   7. bash map identity      the planner and analyst `permission:`
+#                             `bash:` blocks stay byte-identical; a
+#                             missing or empty block fails too
 #
 # Reads only tracked files (git ls-files basis), so the result is
 # reproducible locally and in CI. The lint's own files (this script, the
@@ -112,6 +115,14 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/analyst.md]=85
 )
 
+# The two agent files that share one read-only bash permission map,
+# pinned byte-identical by the map-identity check. Exactly this pair:
+# not a registry, and not generalized to edit: or the other
+# frontmatter maps, which deliberately differ (planner edits .tasks/**,
+# analyst /tmp/opencode/reports/**).
+MAP_ID_PLANNER="$AGENTS_SCOPE/planner.md"
+MAP_ID_ANALYST="$AGENTS_SCOPE/analyst.md"
+
 EM_DASH="$(printf '\xe2\x80\x94')"
 EN_DASH="$(printf '\xe2\x80\x93')"
 
@@ -179,7 +190,7 @@ check_em_dashes() {
 		assert_present "$file"
 		scan_em_dashes "$file"
 	done < <(md_corpus_files; printf '%s\n' "$MAKEFILE")
-	echo "  1/6 em-dash sweep: clean"
+	echo "  1/7 em-dash sweep: clean"
 }
 
 heading_slugs() { # file; prints GitHub-style anchor slugs for its headings
@@ -278,7 +289,7 @@ check_links() {
 			fi
 		done < <(extract_links "$file")
 	done < <(md_corpus_files)
-	echo "  2/6 link liveness: clean"
+	echo "  2/7 link liveness: clean"
 }
 
 scan_headings() { # file
@@ -323,7 +334,7 @@ check_headings() {
 		assert_present "$file"
 		scan_headings "$file"
 	done < <(md_corpus_files)
-	echo "  3/6 heading structure: clean"
+	echo "  3/7 heading structure: clean"
 }
 
 parse_inventory() { # emits C<class> and E<entry> records
@@ -414,7 +425,7 @@ check_inventory_counts() {
 				"class '<$name>' heading count ${INV_COUNT[$name]} != list length ${INV_ENTRY_TOTAL[$name]}"
 		fi
 	done
-	echo "  4/6 INVENTORY heading counts: clean"
+	echo "  4/7 INVENTORY heading counts: clean"
 }
 
 inventory_corpus_docs_members() {
@@ -448,7 +459,7 @@ check_inventory_membership() {
 				"membership drift in class '<$name>' vs $source_desc: missing [$missing] extra [$extra]"
 		fi
 	done
-	echo "  5/6 INVENTORY membership: clean"
+	echo "  5/7 INVENTORY membership: clean"
 }
 
 check_line_budgets() {
@@ -487,7 +498,67 @@ check_line_budgets() {
 		is_tracked "$file" || fail_at "$file" 1 \
 			"line budget mapped for a file that is not tracked; remove or rename the entry"
 	done
-	echo "  6/6 line budgets: clean"
+	echo "  6/7 line budgets: clean"
+}
+
+# Map-identity check: the planner and analyst files carry one shared
+# read-only bash permission map, and a drift in either file breaks the
+# shared contract, so neither side is authoritative and any difference
+# fails the pair. Extraction is line-based like every other check here
+# (no YAML parser; worker.md's frontmatter carries an unquoted ': '
+# in its description value, which defeats strict YAML parsing, so
+# consumers stay line-asserted):
+# the block is the `  bash:` line through the line before the next
+# two-space-indented sibling key (`  task:`) or the closing `---`,
+# opened only inside the line-1 `---` frontmatter so a body code
+# fence cannot stand in for the map; and a block whose lines beyond
+# the header are blank fails as entry-less instead of passing
+# vacuously.
+check_map_identity() {
+	assert_present "$MAP_ID_PLANNER"
+	assert_present "$MAP_ID_ANALYST"
+	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ANALYST" '
+	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
+	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
+	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
+	in_frontmatter && $0 == "---" { in_frontmatter = 0 }
+	!done && in_frontmatter && /^  bash:$/ { in_block = 1 }
+	in_block {
+		if (!(FILENAME in start)) start[FILENAME] = FNR
+		if ($0 !~ /^  bash:$/ && $0 ~ /[^[:space:]]/) entries[FILENAME]++
+		count[FILENAME]++
+		lines[FILENAME, count[FILENAME]] = $0
+	}
+	END {
+		if (!(pf in start)) {
+			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); must stay byte-identical to %s\n", pf, af
+			exit 1
+		}
+		if (!(af in start)) {
+			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); must stay byte-identical to %s\n", af, pf
+			exit 1
+		}
+		if (entries[pf] == 0) {
+			printf "FAIL: %s:%d: bash permission map has no entries; must stay byte-identical to %s\n", pf, start[pf], af
+			exit 1
+		}
+		if (entries[af] == 0) {
+			printf "FAIL: %s:%d: bash permission map has no entries; must stay byte-identical to %s\n", af, start[af], pf
+			exit 1
+		}
+		for (i = 1; i <= count[pf] && i <= count[af]; i++) {
+			if (lines[pf, i] != lines[af, i]) {
+				printf "FAIL: %s:%d: bash permission map diverges from %s:%d at map line %d: \x27%s\x27 vs \x27%s\x27\n", pf, start[pf] + i - 1, af, start[af] + i - 1, i, lines[pf, i], lines[af, i]
+				exit 1
+			}
+		}
+		if (count[pf] != count[af]) {
+			shared = (count[pf] < count[af] ? count[pf] : count[af])
+			printf "FAIL: %s:%d: bash permission map diverges from %s:%d at map line %d: blocks have %d vs %d lines\n", pf, start[pf] + shared, af, start[af] + shared, shared + 1, count[pf], count[af]
+			exit 1
+		}
+	}' "$MAP_ID_PLANNER" "$MAP_ID_ANALYST"
+	echo "  7/7 bash map identity: clean"
 }
 
 check_preflight() { # the structural basis every later check assumes
@@ -512,7 +583,8 @@ main() {
 	check_inventory_counts
 	check_inventory_membership
 	check_line_budgets
-	echo "Corpus lint passed: 6 checks clean"
+	check_map_identity
+	echo "Corpus lint passed: 7 checks clean"
 }
 
 main "$@"
