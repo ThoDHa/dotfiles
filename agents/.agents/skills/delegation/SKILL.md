@@ -36,7 +36,7 @@ This follows, and does not replace, the Sequential/Parallel protocol prompt: a u
 | "1 agent", "limited resources" | Delegating (single) | Delegate to a single agent/ally at a time |
 | "multiple", "many", "no limit" | Delegating (parallel) | Coordinate multiple agents/allies |
 
-The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer, planner via its permission map), which serves as the standing answer to the resource question.
+The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer, planner, analyst via its permission map), which serves as the standing answer to the resource question.
 
 ### Manager Mode (Solo)
 
@@ -52,7 +52,7 @@ The manager delegates as much work as its available agents can take: in Manager 
 
 ### Direct Execution Exceptions
 
-The manager MUST execute directly: quick tasks (< 30 seconds), planning and strategic thinking, coordinating between agents, synthesizing reports from multiple agents, communicating with the user, and tactical decisions requiring judgment. This list is exhaustive and MUST be construed narrowly: the manager MUST NOT extend it by analogy or let borderline items accumulate into direct execution. An item qualifies only when dispatching costs more than doing (the quick-task bound) or the work structurally requires the manager (every other item); borderline work defaults to delegation.
+The manager MUST execute directly: quick tasks (< 30 seconds), planning and strategic thinking, coordinating between agents, synthesizing reports from multiple agents, communicating with the user, and tactical decisions requiring judgment, except as an orchestration design in force routes them. This list is exhaustive and MUST be construed narrowly: the manager MUST NOT extend it by analogy or let borderline items accumulate into direct execution. An item qualifies only when dispatching costs more than doing (the quick-task bound) or the work structurally requires the manager (every other item); borderline work defaults to delegation.
 
 **Solo exception**: in Manager Mode (Solo) the manager inverts the rule and MUST execute all tasks directly, including the delegable items above, regardless of duration or complexity, while Solo state persists.
 
@@ -79,7 +79,7 @@ Planning labor is not execution: planner and research dispatches MAY run before 
 | **Allies** | Independent judgment, specialized skills, full capabilities | Any task of moderate complexity or above: exploration and reconnaissance, architecture review, complex implementation, anything requiring judgment |
 | **Agents** | No judgment, simple execution | Trivial bulk operations (renames, identical commands), simple parallel tasks requiring no decisions |
 
-Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally. The table scopes fleets that have allies: in a fleet whose members are all agents (for example a fixed permission-mapped opencode fleet of worker, verifier, reviewer, and planner), every member takes the table's agent-row semantics and the prefer-allies tie-break rule is inapplicable.
+Outside this table, "agent" is used generically for any delegated worker unless the distinction is explicitly in play. Implementations MUST prefer allies over agents; when uncertain, use an ally. The table scopes fleets that have allies: in a fleet whose members are all agents (for example a fixed permission-mapped opencode fleet of worker, verifier, reviewer, planner, and analyst), every member takes the table's agent-row semantics and the prefer-allies tie-break rule is inapplicable.
 
 ### Dispatched Agent Conduct
 

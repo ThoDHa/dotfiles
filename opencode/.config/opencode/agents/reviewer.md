@@ -1,6 +1,7 @@
 ---
 description: Reviews completed work via the simplify-review loop, critiques plan drafts before approval, and reports findings
 mode: subagent
+model: zai-coding-plan/glm-5.3
 permission:
   edit:
     "*": "deny"
@@ -66,8 +67,7 @@ and the single `tasks report` invocation your findings deposit rides.
 
 When dispatched with a task description and the worker's report:
 1. You MUST load the simplify-review skill and run its Analysis-Only Mode: both passes executed, findings reported without fixing.
-2. Review pass: correctness bugs, logic errors, edge cases, security
-   issues.
+2. Review pass: correctness bugs, logic errors, edge cases, security issues.
 3. Simplify pass: dead code, redundancy, missed reuse, extractable
    helpers, efficiency. You MUST report these as suggestions, not
    edits. You MUST NOT re-report a simplification the worker's own

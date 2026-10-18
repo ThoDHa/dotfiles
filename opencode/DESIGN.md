@@ -1,47 +1,56 @@
 # OpenCode Orchestration Design
 
-This note documents the manager, worker, verifier, reviewer, and planner
-agent pipeline, the git authority model, the task-file integration, and the
-verification chain. The agent files under the opencode config carry the
-normative requirements in RFC 2119 form; this note explains the architecture
-and the reasoning, pointing at each requirement's canonical home (file plus
-section heading or rule number).
+This note documents the manager, worker, verifier, reviewer, planner,
+and analyst agent pipeline, the git authority model, the task-file
+integration, and the verification chain. The agent files under the
+opencode config carry the normative requirements in RFC 2119 form; this
+note explains the architecture and the reasoning, pointing at each
+requirement's canonical home (file plus section heading or rule number).
 
 ## Roles
 
 | Agent | Mode | Model | Duties |
 |-------|------|-------|--------|
-| manager | primary | session | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
+| manager | primary | glm-5.3-flash | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
-| reviewer | subagent | session | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
-| planner | subagent | session | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
+| reviewer | subagent | glm-5.3 | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond read-only git plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
+| planner | subagent | glm-5.3 | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
+| analyst | subagent | glm-5.3 | Judgment labor behind the manager's decisions: evaluation memos for plan approvals, discrepancy reconciliation analysis, design-challenge position drafts, reviewer-finding disposition drafts, incoming-request triage, closing-report synthesis, git-reshape design; read-only repos and logs, evidence stated with anchors, one memo deposit per dispatch, never authoring what it judges |
 
 The manager is a coordinator, not an implementer: it holds no implementation
 duty (it never authors implementation content), and its file edits are
 limited to `.tasks/**`. Integration commits and pushing are coordination
 duties, not implementation work; unit workers make their own commit
 checkpoints on the branches the manager assigned them. The division of
-labor between the two dispatch targets is explicit: the worker is the
-code-writing agent, and the planner is the destination for research
-and planning dispatches (planning labor, dedicated exploration,
-investigation, and findings reports), so research-grade context
-building concentrates in one session-model agent instead of eroding
-the flash worker's focus. The architect grant
+labor between the dispatch targets is explicit: the worker is the
+code-writing agent, the planner is the destination for research and
+planning dispatches (planning labor, dedicated exploration,
+investigation, and findings reports), and the analyst is the
+destination for judgment dispatches (evaluation memos, reconciliation
+analysis, disposition and position drafts, request triage, synthesis
+drafting), so research-grade context building and judgment work
+concentrate in full-model agents instead of eroding the flash worker's
+focus. The architect grant
 follows the same line: the manager delegates as much work as the fleet can
 take, and the command freedom exists to unblock and steer the fleet
 (scouting a dispatch, unblocking a worker, checking a unit's result); any
 duty that grows into sustained work of its own is dispatched to a fleet
 agent rather than absorbed (research-grade exploration to the planner,
-code writing to the worker), since capability never reduces the delegation
+judgment memos to the analyst, code writing to the worker), since
+capability never reduces the delegation
 duty.
 
 The verifier and reviewer split verification along the judgment line:
 transcription of command results is mechanical and runs on the flash model,
-while code review and result interpretation need the full model. The
+while code review and result interpretation need the full model. The model
+pins follow the same line: an unpinned subagent inherits the parent
+session's model, and the manager session itself runs flash, so the
+judgment roles (reviewer, planner, analyst) carry explicit glm-5.3 pins
+while the mechanical roles (worker, verifier) keep their flash pins. The
 verifier reports exit statuses, the runner's own counts, and verbatim
-failure output; interpretation happens in the manager's reconciliation,
-never inside the verifier.
+failure output; interpretation happens in the reconciliation chain
+(analyst memo, manager decision), never inside the verifier.
 
 ## Git authority
 
@@ -131,11 +140,15 @@ the manager backfills the freed slot immediately and gives every
 discrepancy, finding, and suggestion exactly one recorded disposition (fix,
 defer, or decline), because unbounded loops hide failures and unactioned
 suggestions get lost (rules 7 through 9 of the manager agent file; one
-combined seam review closes the batch).
+combined seam review closes the batch). The reconciliation analysis
+behind rule 8's discrepancy handling and the position and disposition
+drafts behind rule 9 route to the analyst under the manager's fixed
+routing table; the manager keeps the dispositions and the decisions.
 
 Verified findings get fixed or dispatched; design arguments get answered
 or debated in search of the better design (taste-only findings labeled
-and not debatable): the manager answers before declining, the reviewer
+and not debatable): the manager answers before declining, drafting its
+position papers through the analyst, the reviewer
 concedes promptly or strengthens with new argument only, exactly one
 exchange ends the debate, and a disagreement still unresolved after that
 exchange escalates verbatim to the user rather than dropping silently; a
@@ -179,7 +192,10 @@ reviewer holds read-only git plus exactly one findings-deposit write: the
 two `tasks` CLI channels and an edit map opening only `.tasks/**`, covering
 both the channels its research role runs on and the direct `research/`
 deposit write, so the prompt-level routing added
-no permission changes. Prefix-based bash permissions are
+no permission changes; and the analyst copies the planner's read-only
+bash tier (its `grep` allow already covers the service-log reading its
+reconciliation memos need) while its edit map opens
+`/tmp/opencode/reports/**` for the memo deposits. Prefix-based bash permissions are
 guardrails against uninstructed behavior, not security boundaries: a
 determined `sh -c` or `git -C` route slips past them, and hard
 enforcement would require hooks or credential separation.
@@ -195,7 +211,7 @@ repository's DESIGN.md carries the full design note for the eviction
 pipeline, the tools, the metrics log, and the panel. tui.json passes the TUI
 entry one option, `sidebarSubagents: true`, so the session sidebar's LRU
 group also lists the fleet's child sessions (worker, verifier, reviewer,
-planner) aggregated by agent type; the option is off by default upstream.
+planner, analyst) aggregated by agent type; the option is off by default upstream.
 
 ## Known limits
 
@@ -205,12 +221,15 @@ planner) aggregated by agent type; the option is off by default upstream.
   backstop, except on all-mechanical tasks where the reviewer is skipped
   and the verifier's raw results plus git reconciliation are the only
   checks. The planner's restraint inside its planning-section carve-out
-  is likewise prompt-soft, and the planner runs on the session model,
-  not flash: the manager's planning review of the filled-out task file
+  is likewise prompt-soft, and the planner runs pinned to glm-5.3, not
+  flash: the manager's planning review of the filled-out task file
   is its backstop. The no-implementation and territory-scoping
   restraints on research dispatches routed to the same planner are
   likewise prompt-soft, and the manager's review of the findings is
-  their backstop. The plan-review gate on high-cost plans is advisory
+  their backstop. The analyst's no-authorship and evidence-anchoring
+  restraints are prompt-soft the same way: the manager's review of each
+  memo, and its final yes/no on everything the memo informs, are the
+  backstop. The plan-review gate on high-cost plans is advisory
   by construction: the reviewer's critique is one more input to that
   planning review, and it enforces nothing.
 - The manager cannot resolve merge conflicts, since it edits nothing
