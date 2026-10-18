@@ -40,6 +40,13 @@ refuse() { # label; rest is the command to attempt
 	if oc "$@" </dev/null >/dev/null 2>&1; then bad "$label"; else ok "$label"; fi
 }
 
+refuse_rc() { # expected_status label; rest is the command to attempt
+	local want="$1" label="$2"; shift 2
+	local rc=0
+	oc "$@" </dev/null >/dev/null 2>&1 || rc=$?
+	assert_eq "$label" "$want" "$rc"
+}
+
 ROOT="$(mktemp -d)"
 follower=""
 cleanup() {
@@ -118,6 +125,13 @@ OC_ENV=()
 oc() { # oc-continue under test, seams wired for the current scenario
 	env OC_BIN="$FAKE" OC_STATE_DIR="$STATE" ${OC_ENV[@]+"${OC_ENV[@]}"} "$OC" "$@"
 }
+
+# The engine is a zsh script; a parse slip would surface as confusing
+# per-test failures long before their cause, so pin the syntax upfront.
+# stderr is captured for the failure message; stdout stays clean either way.
+zsh_parse_err="$(zsh -n "$OC" 2>&1 >/dev/null)" \
+	&& ok "the script parses clean as zsh" \
+	|| bad "the script parses clean as zsh ($zsh_parse_err)"
 
 wait_for() { # timeout_seconds; rest is a poll command run until it succeeds
 	local deadline=$(( $(date +%s) + $1 )); shift
@@ -893,6 +907,13 @@ wait_for 10 engine_idle && ok "dash-forced prompt run completes" \
 assert_invocation "bare -- forces everything after it to be prompt" 1 \
 	run --continue --auto --model "$default_model" "$(with_marker "--weird -n 2")"
 
+fresh pass_format_dashdash
+oc run -- --format json fix >/dev/null 2>&1
+wait_for 10 engine_idle && ok "dash-forced --format prompt run completes" \
+	|| bad "dash-forced --format prompt run completes"
+assert_invocation "a --format after bare -- rides as prompt text" 1 \
+	run --continue --auto --model "$default_model" "$(with_marker "--format json fix")"
+
 fresh pass_prompt_first
 oc run fix --session ID >/dev/null 2>&1
 wait_for 10 engine_idle && ok "prompt-first run completes" || bad "prompt-first run completes"
@@ -951,6 +972,20 @@ assert_contains "non-numeric budget refusal says why" "$err" "-n needs a number"
 assert_eq "usage refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
 [[ ! -f "$STATE/run.pid" ]] && ok "usage refusals arm no pid file" \
 	|| bad "usage refusals arm no pid file"
+
+fresh refuse_format
+# Pins the hazard's enforcement split: the preflight rejects --format
+# outright, while after a bare `--` it stays prompt text (the
+# pass_format_dashdash case above).
+refuse_rc 2 "run rejects --format json" run --format json fix it
+refuse_rc 2 "run rejects --format=json" run --format=json fix it
+refuse_rc 2 "run rejects --format mid-passthrough" run --session sess-9 --format json fix it
+refuse_rc 2 "run rejects a bare trailing --format" run --format
+err="$(oc run --format json fix it 2>&1 >/dev/null || true)"
+assert_contains "format refusal names the header hazard" "$err" "Hazard note in the header"
+assert_eq "format refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "format refusals arm no pid file" \
+	|| bad "format refusals arm no pid file"
 
 echo "== value-flag parity against the real opencode binary =="
 if real_oc="$(command -v opencode)"; then
