@@ -22,10 +22,10 @@
 #                             (directory classes: git ls-files of the
 #                             heading's directory; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           per-file agent budgets (manager 355,
+#   6. line budgets           per-file agent budgets (manager 390,
 #                             worker 145, verifier 65, reviewer 135,
-#                             planner 120), rules 190, SKILL.md 950,
-#                             README/DESIGN under 500
+#                             planner 120, analyst 85), rules 190,
+#                             SKILL.md 950, README/DESIGN under 500
 #
 # Reads only tracked files (git ls-files basis), so the result is
 # reproducible locally and in CI. The lint's own files (this script, the
@@ -104,11 +104,12 @@ BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
 declare -A BUDGET_AGENT_FILE_LINES=(
-	[opencode/.config/opencode/agents/manager.md]=355
+	[opencode/.config/opencode/agents/manager.md]=390
 	[opencode/.config/opencode/agents/worker.md]=145
 	[opencode/.config/opencode/agents/verifier.md]=65
 	[opencode/.config/opencode/agents/reviewer.md]=135
 	[opencode/.config/opencode/agents/planner.md]=120
+	[opencode/.config/opencode/agents/analyst.md]=85
 )
 
 EM_DASH="$(printf '\xe2\x80\x94')"

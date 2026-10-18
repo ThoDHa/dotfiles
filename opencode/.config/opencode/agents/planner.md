@@ -1,6 +1,7 @@
 ---
 description: Plans Triage task files and handles dedicated research dispatches (exploration, investigation, findings reports); never implements
 mode: subagent
+model: zai-coding-plan/glm-5.3
 permission:
   edit:
     "*": "deny"
