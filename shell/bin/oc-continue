@@ -83,7 +83,8 @@
 # value token; others can use --flag=value.
 # Hazard: v2's `run --format json` (any non-default format) emits NDJSON,
 # not plain text, breaking the OC-CONTINUE: COMPLETE check, banner exclusion,
-# and quota classification; never pass --format until the runner parses JSON.
+# and quota classification; the leading-flag zone rejects --format outright
+# until the runner parses JSON (after a bare `--` it is prompt text).
 # A bare `--` forces everything
 # after it to be prompt. No prompt given: the resume-the-interrupted-turn
 # default is used. Naming discipline: never adopt a declared name from
@@ -335,6 +336,11 @@ split_run_args() {
                 elif [[ "$oc_declared" == true ]] && (( ${OC_RUN_BOOL_FLAGS[(Ie)$1]} )); then
                     oc_declared_args+=("$1")
                     shift
+                elif [[ "$1" == --format || "$1" == --format=* ]]; then
+                    # Before the valueless rejection below, so a bare
+                    # trailing --format names the hazard, not a missing value.
+                    printf 'oc-continue: %s is rejected: non-default formats emit NDJSON, breaking the completion marker, banner exclusion, and quota classification; see the Hazard note in the header\n' "$1" >&2
+                    return 2
                 elif (( $# == 1 )) && (( ${OC_VALUE_FLAGS[(Ie)$1]} )); then
                     printf 'oc-continue: %s needs a value\n' "$1" >&2
                     return 2
