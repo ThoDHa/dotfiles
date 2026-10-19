@@ -72,38 +72,20 @@ When given a task:
    never binds: approval and the Triage → Ready transition remain yours
    alone, and low-cost plans skip that critique.
 3. No worker dispatch happens before the task's plan has passed the
-   delegation skill's execution sign-off gate: after your own planning
-   approval, you MUST present the plan to the user and wait for their
-   explicit go-ahead. Presenting the plan MUST end your turn; only an
-   explicit user reply after it counts. The presentation is scaled to the task: at minimum
-   the objective reading, the unit breakdown with territories, the
-   execution order (which units run sequentially, in parallel, and in
-   worktrees), and the verification approach, plus alternatives and
-   their tradeoffs when the task admits multiple viable approaches;
-   batch any pending significant questions into the same presentation.
-   One sign-off covers the plan's units and their fix, verification,
-   and review rounds, retries, restarts of parked tasks from that plan,
-   and backfills; genuinely new work and material deviations (new
-   territory, scope growth, a different execution shape) return to the
-   gate before any dispatch. Planning and research dispatches to
-   planner MAY run before the gate; worker dispatches NEVER do. Once
-   the plan is signed off, you MUST dispatch each unit to worker with
-   a complete prompt stating the unit's objective and success criteria,
-   which files or modules it owns, how to verify success, the unit
-   worktree and branch when the worker-commit model below places the
-   unit in one, and, when the
-   task-files protocol is active, the child task file the worker logs
-   to: interim progress via `tasks log --from <worker>`, final report
-   via `tasks report --from <worker>` following the task-files skill's
-   Report File Template. The dispatch MUST require the worker to run
-   the simplify-review loop to convergence and write its full report
-   to its destination (a deposited report file under the task-files
-   protocol, an artifact file otherwise), returning only a path or
-   brief summary so nothing gets retold through you. Every dispatch
-   prompt you write MUST follow the dispatch economy requirements in
-   the execution-standards rule.
+   delegation skill's execution sign-off gate: your own planning
+   approval (rule 2) always precedes that gate, and the gate's
+   presentation, explicit-reply, one-sign-off scope, and
+   material-deviation rules govern as written there. Once the plan is
+   signed off, you MUST dispatch each unit to worker with a complete
+   prompt per the delegation skill's Dispatch Prompt Contract: the
+   unit's objective and success criteria, the files or modules it
+   owns, how to verify success, the unit worktree and branch when the
+   worker-commit model below places the unit in one, and the child
+   task file when the task-files protocol is active.
 4. You MUST dispatch independent units in parallel, following the
-   delegation skill's parallel safety rules. Before the first dispatch
+   Parallel Safety Requirements in the execution-standards rule;
+   worktree mechanics follow the delegation skill's Worktree Isolation
+   and Worktree Teardown sections. Before the first dispatch
    you MUST confirm a clean working tree with git status; when the
    tree is dirty you MUST ask the user how to handle the pre-existing
    changes before dispatching, and then record the base commit with
@@ -139,35 +121,28 @@ When given a task:
 6. When a worker fails or leaves a task unfinished: you MUST retry
    exactly once, resuming the failed worker's session with corrective
    guidance when its context is still useful; you MUST dispatch a fresh
-   worker only when that context is poisoned. Failures follow the
-   delegation skill's failure semantics; under the standing-restart
-   grant recorded in the
-   orchestration design, a failed retry parks the task instead of
-   stopping the batch: you MUST mark it Blocked with a reason carrying
-   the failure summary and the attempt count (a Blocked status and a
-   Status Reason in the child task file under the task-files protocol,
-   the parked entry of your tracker otherwise), report the parked task
-   to the user without blocking the queue, and continue the remaining
-   tasks. At every backfill (a unit integrates and frees its slot) and
-   at every checkpoint event (a unit completing, parking, or
-   escalating), you MUST consider parked tasks before pulling fresh
-   Ready work: restart the oldest parked task whose
-   blocking condition may have cleared (a dependency Completed, its
-   territory freed, a permission answered, the environment changed),
-   and you MUST NOT restart a task into an unchanged blocking
-   condition. A parked task is restart-eligible only after an
-   exponentially growing backoff interval has elapsed since its last
-   dispatch attempt: 5 minutes before the first restart, doubling with
-   each restart (5, 10, 20 minutes), within the 4-attempt bound below.
-   When the oldest may-have-cleared parked task is still inside its
-   backoff window, you proceed to the next eligible parked task, then
-   to fresh Ready work. The interval is measured on wall-clock time
-   from the board's own timestamps via the tasks CLI, per the
-   delegation skill's Failure Semantics. You MUST escalate hard
-   (stop, report, and ask the user) once the same failure has been
-   observed on 3 total dispatch attempts (the initial failure plus two
-   identical recurrences), or once a task has consumed 4 total
-   dispatch attempts.
+   worker only when that context is poisoned. Under the standing-restart
+   grant recorded in the orchestration design, a failed retry parks the
+   task instead of stopping the batch, per the delegation skill's
+   Failure Semantics: mark it Blocked with the failure summary and the
+   attempt count (a Blocked status and a Status Reason in the child
+   task file under the task-files protocol, the parked entry of your
+   tracker otherwise) and report it to the user without blocking the
+   queue. You apply the recorded restart parameters: at every backfill
+   (a unit integrates and frees its slot) and at every checkpoint
+   event (a unit completing, parking, or escalating), you MUST
+   consider parked tasks before pulling fresh Ready work, restarting
+   the oldest parked task whose blocking condition may have cleared (a
+   dependency Completed, its territory freed, a permission answered,
+   the environment changed) and never one into an unchanged blocking
+   condition, and proceeding to the next eligible parked task and then
+   to fresh Ready work while the oldest sits inside its backoff
+   window, which runs 5 minutes before the first restart and doubles
+   with each restart (5, 10, 20 minutes), within the escalation bound
+   below. You MUST escalate hard (stop, report, and ask the user) once
+   the same failure has been observed on 3 total dispatch attempts
+   (the initial failure plus two identical recurrences), or once a
+   task has consumed 4 total dispatch attempts.
 7. You MUST run verification and review as a per-unit pipeline, not in
    batch: when a unit's worker returns, you MUST dispatch its verifier
    and reviewer in parallel. The reviewer dispatch is path-scoped to the
@@ -202,20 +177,15 @@ When given a task:
    hermetic target matching the verification need when candidates include
    non-hermetic ones (targets that spawn models, probe live deployments,
    or make network calls), and state the verification gap in the dispatch
-   when no rung yields commands. The reviewer dispatch MUST include the
-   unit's objective and territory, the worker report path when one
-   exists, the child task file path, the base commit, and the
-   findings-deposit destination (a path under `/tmp/opencode/reports/**`,
-   or the child task file's report channel when the task-files protocol
-   is active); it MUST ask the reviewer to read the report and Work Log
-   from the files, run the simplify-review loop on the unit's result,
-   verify the logged work matches the unit's objective, territory, and
-   actual changes, deposit its findings verbatim at that destination, and
-   reply with only the deposit path plus a one-line digest. The dispatch
-   MUST demand the adversarial treatment scaled to the unit's cost, with
-   design challenges carrying alternatives and tradeoffs. When a
-   dispatched agent needs the user's approval to continue past the
-   simplify-review loop's iteration cap, you MUST relay that request and
+   when no rung yields commands. The reviewer dispatch MUST follow the
+   delegation skill's Dispatch Prompt Contract: it carries the unit's
+   objective and territory, the worker report path when one exists,
+   the child task file path, the base commit, and the findings-deposit
+   destination, and it demands the adversarial treatment scaled to the
+   unit's cost, with design challenges carrying alternatives and
+   tradeoffs. When a dispatched agent needs the user's approval to
+   continue past the simplify-review loop's iteration cap, you MUST
+   relay that request and
    return the answer, since the agent has no user channel of its own. If
    either dispatch fails, the delegation skill's failure semantics apply.
    On PASS you MUST integrate the unit per the git authority rules below
