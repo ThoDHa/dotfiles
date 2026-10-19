@@ -124,11 +124,11 @@ When given a task:
    worker only when that context is poisoned. Under the standing-restart
    grant recorded in the orchestration design, a failed retry parks the
    task instead of stopping the batch, per the delegation skill's
-   Failure Semantics: mark it Blocked with the failure summary and the
-   attempt count (a Blocked status and a Status Reason in the child
-   task file under the task-files protocol, the parked entry of your
-   tracker otherwise) and report it to the user without blocking the
-   queue. You apply the recorded restart parameters: at every backfill
+   Failure Semantics: you MUST mark it Blocked with the failure summary
+   and the attempt count (a Blocked status and a Status Reason in the
+   child task file under the task-files protocol, the parked entry of
+   your tracker otherwise) and report it to the user without blocking
+   the queue. You apply the recorded restart parameters: at every backfill
    (a unit integrates and frees its slot) and at every checkpoint
    event (a unit completing, parking, or escalating), you MUST
    consider parked tasks before pulling fresh Ready work, restarting
