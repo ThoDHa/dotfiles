@@ -55,7 +55,7 @@ This protocol binds sessions that interact with the user directly. Dispatched ag
 
 When a task generates 4 or more todo items, implementations MUST pause and present execution options to the user.
 
-The floor is a sufficient trigger, not a necessary one: below it, the same pause and prompt are still required when the work is consequential (high-impact, irreversible, or externally visible, per the core rule's Clarification Protocol) or cross-cutting (spanning modules, files, or concerns that coordinate separately). Risk triggers fire regardless of todo count; nothing reaches execution past either trigger without the user's choice of approach.
+The floor is a sufficient trigger, not a necessary one: below it, the same pause and prompt are still required when the work is consequential (high-impact, irreversible, or externally visible, per the core rule's Clarification Protocol) or cross-cutting (spanning modules, files, or concerns that must be coordinated as separate territories or owners). Risk triggers fire regardless of todo count; nothing reaches execution past either trigger without the user's choice of approach.
 
 The prompt is satisfied and MUST NOT be re-asked when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent). Risk-based triggers require that a user-chosen approach exists before execution proceeds; they do not reopen the question in a session whose approach is already set.
 
