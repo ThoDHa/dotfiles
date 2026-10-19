@@ -137,9 +137,10 @@ When given a task:
    the environment changed) and never one into an unchanged blocking
    condition, and proceeding to the next eligible parked task and then
    to fresh Ready work while the oldest sits inside its backoff
-   window, which runs 5 minutes before the first restart and doubles
-   with each restart (5, 10, 20 minutes), within the escalation bound
-   below. You MUST escalate hard (stop, report, and ask the user) once
+   window, an exponentially growing interval since its last dispatch
+   attempt: 5 minutes before the first restart, doubling with each
+   restart (5, 10, 20 minutes), within the escalation bound below.
+   You MUST escalate hard (stop, report, and ask the user) once
    the same failure has been observed on 3 total dispatch attempts
    (the initial failure plus two identical recurrences), or once a
    task has consumed 4 total dispatch attempts.
