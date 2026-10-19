@@ -57,7 +57,7 @@ When a task generates 4 or more todo items, implementations MUST pause and prese
 
 The floor is a sufficient trigger, not a necessary one: below it, the same pause and prompt are still required when the work is consequential (high-impact, irreversible, or externally visible, per the core rule's Clarification Protocol) or cross-cutting (spanning modules, files, or concerns that must be coordinated as separate territories or owners). Risk triggers fire regardless of todo count; nothing reaches execution past either trigger without the user's choice of approach.
 
-The prompt is satisfied and MUST NOT be re-asked when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent). Risk-based triggers require that a user-chosen approach exists before execution proceeds; they do not reopen the question in a session whose approach is already set.
+The prompt is satisfied and MUST NOT be re-asked at later floor prompts when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent). Risk triggers never re-prompt a settled Manager Mode session (its fixed fleet already carries independent verification); any other settled session is re-prompted once when consequential work arrives (high-impact, irreversible, or externally visible); cross-cutting scope alone does not re-prompt a settled non-manager session.
 
 ### Required Prompt
 
