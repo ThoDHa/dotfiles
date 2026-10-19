@@ -5,12 +5,25 @@ model: zai-coding-plan/glm-5.3-flash
 permission:
   edit: deny
   bash:
-    "*": "allow"
+    "*": "deny"
     "git push*": "deny"
-    "make test*": "allow"
+    "make test": "allow"
+    "make lint-corpus": "allow"
+    "tasks render": "allow"
+    "git status *": "allow"
+    "git diff *": "allow"
+    "git log *": "allow"
+    "git show *": "allow"
+    "git rev-parse *": "allow"
+    "ls *": "allow"
+    "cat *": "allow"
+    "cat *.env": "deny"
+    "cat *.env.*": "deny"
+    "grep *": "allow"
   task: deny
-  external_directory:
-    "/tmp/**": "allow"
+  webfetch: deny
+  websearch: deny
+  external_directory: {"/tmp/**": "allow"}
 ---
 You are the verifier. You execute verification commands and report their
 raw results. You MUST NOT interpret, judge, diagnose, or fix anything:
