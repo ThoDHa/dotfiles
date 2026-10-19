@@ -16,19 +16,19 @@
 
 Implementations MUST search the current codebase and package registries for existing solutions, and evaluate whether they meet requirements, before implementing custom code. When equivalent functionality exists, implementations MUST use the existing implementation, extending it if modifications are needed, and MUST NOT create duplicate utility functions. Implementations MUST NOT create custom implementations when adequate solutions exist unless an existing solution has a concrete technical limitation that disqualifies it (unacceptable performance or unacceptable dependencies). A bypass MUST be justified by the specific limitation, not merely asserted, and MUST be documented in a code comment explaining why each existing solution was rejected.
 
-Repeated code patterns (3+ occurrences) MUST be extracted into a reusable helper function, class, or module in a designated shared location (utility functions in utilities/helpers directories, shared types in types/models directories, common constants in constants/config directories), documented with purpose and usage. Patterns spanning multiple projects SHOULD become a shared internal library or dedicated SDK, documented centrally for team discovery. Implementations MUST use named exports with descriptive identifiers over default exports.
+Repeated code patterns (3+ occurrences) SHOULD be extracted into a reusable helper function, class, or module in a designated shared location (utility functions in utilities/helpers directories, shared types in types/models directories, common constants in constants/config directories), documented with purpose and usage, following the language's and project's prevailing conventions. Genuine duplication is extracted; implementations MUST NOT add abstraction layers that introduce indirection without removing duplication. Patterns spanning multiple projects SHOULD become a shared internal library or dedicated SDK, documented centrally for team discovery. Named exports with descriptive identifiers are preferred over default exports unless the project's conventions dictate otherwise.
 
 ---
 
 ## Literal Value Requirements
 
-Implementations MUST NOT use literal numeric values except 0, 1, -1 in loop constructs and simple arithmetic, mathematical constants and unit conversion factors with obvious meaning, and array/string indices when context is clear; all other numeric literals MUST be extracted to named constants with descriptive identifiers. Implementations MUST NOT use literal strings for configuration values, error messages used in multiple locations, API endpoints or route paths, status codes or state identifiers, or feature flags or toggle names; these MUST be extracted to constants, enums, or configuration files. Implementations MUST externalize configuration values: environment-specific values MUST use environment variables, application settings MUST use dedicated configuration files, and feature flags MUST use a centralized feature management system or config. Implementations MUST NOT hardcode values that may vary between environments.
+Literal values follow the language's and project's prevailing conventions for naming and placement. Numeric and string literals whose meaning matters use named constants, enums, or configuration entries with descriptive identifiers: numeric values that are not obvious from context (indices and trivial arithmetic excepted), error messages reused in multiple locations, API endpoints or route paths, status codes or state identifiers, and feature flags or toggle names. Values that may vary between environments MUST be externalized rather than hardcoded: environment-specific values via environment variables, application settings via dedicated configuration files, and feature flags via a centralized feature management system or config.
 
 ---
 
 ## Error Handling Requirements
 
-Implementations MUST wrap all external calls (network requests, database operations, file system operations, subprocess execution, fallible third-party libraries) in language-appropriate error handling. The mechanism MUST either handle the error completely or re-throw it with additional context (errors are never silently swallowed and MUST NOT be caught only to log and ignore), provide meaningful context for debugging, release resources per [Resource Cleanup](#resource-cleanup), and log errors at appropriate severity levels at the boundary where they are handled or transformed rather than at every catch point.
+Failures from external interactions (network requests, database operations, file system operations, subprocess execution, fallible third-party libraries) MUST be handled at an appropriate boundary rather than wrapped uniformly at every call site, without redundant intermediate catches that only log or re-raise the error unchanged. The handling MUST either resolve the error completely or re-throw it with additional context (errors are never silently swallowed and MUST NOT be caught only to log and ignore), provide meaningful context for debugging, release resources per [Resource Cleanup](#resource-cleanup), and log at appropriate severity levels where the error is handled or transformed rather than at every catch point.
 
 Error messages MUST describe what operation failed, include relevant context (identifiers, parameters, state), provide actionable information, suggesting remediation when a known remediation exists, suit the intended audience (user vs developer), protect sensitive information (internal paths and stack traces from end users; secrets per [Secrets Management](#secrets-management)), and focus on the system issue rather than user fault. Errors MUST bubble up to appropriate handling boundaries unless handled completely at the point of capture, MUST be caught at module/service boundaries for logging and transformation, and MUST NOT cross API boundaries without sanitization.
 
@@ -46,7 +46,7 @@ Test names MUST describe the system under test, the scenario, and the expected b
 
 ### Test Result Verification
 
-Test run verification MUST gate on the tool's own reported result (the exit status or result code when it encodes the outcome, the reported result metrics when it does not), never on text matching against output, because failed runs also print summary lines a filter matches. Reported results MUST account for every outcome class the runner reports: passed, failed, skipped, and error counts. Any non-zero failure or skip count MUST be named explicitly and investigated before the run is treated as green ([Prohibited Test Behaviors](#prohibited-test-behaviors)). Where output is truncated or filtered for length, the unfiltered summary (total, passed, failed, skipped) and the runner's exit status MUST still be captured directly at the point of invocation and reported; filtered reading MUST NOT be the sole failure signal.
+Test run verification MUST gate on the tool's own reported result (the exit status or result code when it encodes the outcome, the reported result metrics when it does not), never on text matching against output, because failed runs also print summary lines a filter matches. Reported results MUST account for every outcome class the runner reports: passed, failed, skipped, and error counts, each named explicitly. Any non-zero failure or error count MUST be investigated before the run is treated as green ([Prohibited Test Behaviors](#prohibited-test-behaviors)). Skips are differentiated: a skip that existing documentation records as expected MAY be named and the run accepted; a new, changed, or unexplained skip MUST be investigated before the run is treated as green. Where output is truncated or filtered for length, the unfiltered summary (total, passed, failed, skipped) and the runner's exit status MUST still be captured directly at the point of invocation and reported; filtered reading MUST NOT be the sole failure signal.
 
 ### Prohibited Test Behaviors
 
@@ -58,9 +58,9 @@ All code implementation plans MUST include a test plan specifying what will be t
 
 ### Separation of Code and Test Changes
 
-This rule applies ONLY to test changes that ALTER the expected behavior of EXISTING tests; NEW tests for NEW feature code are grouped WITH that code per the `git-protocol` skill's Relationship Preservation section. Implementations MUST NOT update production code and the corresponding tests in the same commit, except when the two are inseparable and directly coupled. When a bug fix changes expected behavior, implementations MUST submit the production code fix in one commit and the test update documenting the new expected behavior in a follow-up commit, both within the same pull request or change set: the production fix first, the test-expectation commit second, referencing the related issue or the original change. The ordered pair MUST be pushed together as one landing: the red intermediate MUST NOT be pushed or integrated as its own landing, and the test suite MUST be green at the pull request head and at every landed tip. The red intermediate is permitted ONLY as the first commit of this ordered pair and MUST otherwise comply with the `git-protocol` skill's Working State Guarantee.
+Code and test changes that form one logical change SHOULD land together in a single atomic, green commit; atomic, green, logically complete commits are the default review and revert unit. NEW tests for NEW feature code are grouped WITH that code per the `git-protocol` skill's Relationship Preservation section.
 
-Only when the test and code change are small, tightly coupled, and cannot be meaningfully reviewed in isolation MAY they share a single commit, documenting the rationale in the PR description and securing reviewer approval. All exceptions to the separation rule MUST be documented in the change description, including the reason for coupling, the minimal scope, and a link to an approving review or decision record. Test-only behavior changes MUST reference an issue, design decision, or reviewer approval that authorizes them.
+Separation is reserved for changes where the production fix and the test-expectation update are each independently meaningful: the production fix lands first, the test update documenting the new expected behavior second, referencing the related issue or the original change. The ordered pair MUST be pushed together as one landing: the red intermediate MUST NOT be pushed or integrated as its own landing, the test suite MUST be green at the pull request head and at every landed tip, and the red intermediate is permitted only as the first commit of the pair, where it MUST comply with the `git-protocol` skill's Working State Guarantee. Test-only behavior changes MUST reference an issue, design decision, or reviewer approval that authorizes them.
 
 ### Test Change Intent Verification
 
@@ -72,7 +72,7 @@ When modifying tests with the goal of making them pass (rather than in the cours
 
 ### Function Documentation
 
-Every function MUST carry a function header (docstring) documenting its behavior. Function documentation MUST include, where applicable: a purpose description, parameter descriptions with types and constraints, the return value description, side effects, and exceptions or errors that may be thrown.
+Functions with public or nonobvious contracts MUST carry a function header (docstring) documenting their behavior: public API boundaries, contracts crossing module boundaries, and internal functions whose intent the code does not make obvious on its own. Trivial internal functions MAY remain self-documenting without a header. Where a header is required, it MUST include, when applicable: a purpose description, parameter descriptions with types and constraints, the return value description, side effects, and exceptions or errors that may be thrown.
 
 ### General Documentation
 
@@ -144,7 +144,7 @@ Implementations MUST consider algorithmic complexity for operations on collectio
 
 ### Async and Concurrent Patterns
 
-Implementations MUST use asynchronous patterns for network I/O (API calls, database queries), file system operations on multiple files, and any operation that may block for >100ms, and MUST NOT block the main thread or event loop with synchronous I/O in applications with concurrency requirements. When parallelizing work, implementations MUST limit concurrent operations to prevent resource exhaustion, handle partial failures gracefully, and provide cancellation mechanisms for long-running operations.
+In applications with concurrency requirements, implementations MUST NOT block the main thread or event loop with synchronous I/O: network I/O (API calls, database queries), file system operations on multiple files, and other long-running or latency-sensitive work use the language's asynchronous or nonblocking patterns where the runtime provides them. Concurrency MUST be justified by need rather than introduced as a default structure; when parallelizing work, implementations MUST limit concurrent operations to prevent resource exhaustion, handle partial failures gracefully, and provide cancellation mechanisms for long-running operations.
 
 ### Resource Cleanup
 
@@ -158,7 +158,7 @@ Implementations MUST prioritize correctness over simplicity: when a solution is 
 
 ### Simple Solution Documentation
 
-When a simple solution is chosen over a more comprehensive one for pragmatic reasons (time constraints, scope limitations), implementations MUST document that a simpler approach was taken, describe what the more comprehensive or correct solution would entail, and create a tracking item (issue, tracked TODO, or ticket) for the future improvement, keeping technical debt visible and actionable.
+A simple solution that is correct and appropriately scoped needs no fuller-solution record. When a chosen solution knowingly omits material capability or robustness, implementations MUST document the omission, describe what the more comprehensive or correct solution would entail, and create a tracking item (issue, tracked TODO, or ticket) for the future improvement, keeping technical debt visible and actionable.
 
 ---
 
