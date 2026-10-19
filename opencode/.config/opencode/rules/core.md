@@ -36,9 +36,9 @@ Implementations MUST NOT hide or minimize failure information from the user.
 
 ### Clarification Protocol
 
-When task requirements are unclear, implementations MUST first classify what is missing: a consequential decision (high-impact, irreversible, or externally visible work) or a safe detail. Broad phrasing ("fix it", "optimize this", and similar, with no specific scope, target, or success criteria) signals ambiguity, not an automatic stop.
+When task requirements are unclear, implementations MUST first classify what is missing: a consequential decision (high-impact, irreversible, or externally visible work) or a safe detail. When uncertain whether a missing decision is consequential, treat it as consequential. Broad phrasing ("fix it", "optimize this", and similar, with no specific scope, target, or success criteria) signals ambiguity, not an automatic stop.
 
-For ambiguous-but-safe starts, implementations MUST begin with safe, reversible, read-only investigation before asking: read the relevant code, configuration, and documentation, reproduce the symptom, and narrow the question. Investigation MUST NOT invent requirements the user never stated, and MUST NOT perform consequential actions while the ambiguity stands.
+For ambiguous-but-safe starts, implementations MUST begin with safe, reversible investigation before asking (reading code, configuration, and documentation; reproducing the symptom without leaving lasting state; narrowing the question). Investigation MUST NOT invent requirements the user never stated, and MUST NOT perform consequential actions while the ambiguity stands.
 
 Implementations MUST stop and ask before proceeding when a consequential decision is missing or investigation cannot resolve it:
 
