@@ -1,6 +1,6 @@
 ---
 name: task-files
-description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode, or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
+description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode (a loading trigger only: the activation never creates task files, it triggers only the Large Task Offer gate), or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
 ---
 
 > Manager Mode mechanics are defined in the `delegation` skill. Load it when Manager Mode activates.
@@ -31,7 +31,7 @@ Task files MUST be created ONLY when:
 
 Casual summary requests ("summarize", "quick recap") do NOT trigger task file creation.
 
-Manager Mode activation is not a creation trigger: activating Manager Mode, explicitly or by choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt, triggers only the offer of task-file tracking per the [Large Task Offer](#large-task-offer) gate, never silent creation, so an activation on a task below the gate's threshold promises no offer; task files are created only on the user's explicit confirmation.
+Manager Mode activation is a loading trigger, not a creation trigger: activating it, explicitly or by choosing parallel delegation or worktree execution at the Task Complexity Protocol prompt, loads this protocol and triggers only the offer of task-file tracking per the [Large Task Offer](#large-task-offer) gate, never silent creation, so an activation on a task below the gate's threshold promises no offer; task files are created only on the user's explicit confirmation.
 
 ### Creation Prohibition
 
