@@ -8,7 +8,7 @@
 - **TodoWrite todos**: lightweight TodoWrite tracking for standard work
 - **Task files**: comprehensive documentation files (see the `task-files` skill) for complex operations
 
-**Completion Requirement:** When any task completes with modifications to files (a todo, task-file task, or standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete.
+**Completion Requirement:** When any task completes with modifications to files (a todo, task-file task, or standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete. The loop is mandatory regardless of change size; its depth scales with the change's risk under the skill's own rules (iteration cap, diff-only scope, research-only skip), so a trivial edit does not receive a multi-iteration review and a security-sensitive one does.
 
 **Scratch Cleanup:** Before reporting the task complete, implementations MUST remove the scratch they created for it and MUST NOT remove content they did not create.
 
@@ -55,7 +55,9 @@ This protocol binds sessions that interact with the user directly. Dispatched ag
 
 When a task generates 4 or more todo items, implementations MUST pause and present execution options to the user.
 
-The prompt is satisfied and MUST NOT be re-asked when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent).
+The floor is a sufficient trigger, not a necessary one: below it, the same pause and prompt are still required when the work is consequential (high-impact, irreversible, or externally visible, per the core rule's Clarification Protocol) or cross-cutting (spanning modules, files, or concerns that coordinate separately). Risk triggers fire regardless of todo count; nothing reaches execution past either trigger without the user's choice of approach.
+
+The prompt is satisfied and MUST NOT be re-asked when the user has already explicitly chosen the execution approach for the session (for example by requesting parallel execution or operating the manager agent). Risk-based triggers require that a user-chosen approach exists before execution proceeds; they do not reopen the question in a session whose approach is already set.
 
 ### Required Prompt
 
@@ -87,7 +89,9 @@ Row keywords are accepted synonyms for the [Required Prompt](#required-prompt) o
 
 Task file tracking is NOT part of this prompt. Choosing Sequential, Parallel delegation, or Parallel with worktrees decides execution approach only and does NOT authorize task file creation; task files require a separate explicit confirmation per the `task-files` skill's Large Task Offer.
 
-Implementations MUST NOT proceed with complex tasks without user direction on execution approach.
+Coordination note: the `task-files` skill carries a paired trigger at the same 4-or-more-todos threshold, sequenced to ride this pause (its Large Task Offer). The two sides of the pairing are coordinated by design; a change to either trigger must account for the other and is not made unilaterally.
+
+Implementations MUST NOT proceed past a trigger of this protocol without user direction on execution approach.
 
 ---
 
@@ -95,13 +99,16 @@ Implementations MUST NOT proceed with complex tasks without user direction on ex
 
 These operations bind the same sessions as the Task Complexity Protocol: sessions that interact with the user directly. Dispatched agents are exempt (no user channel, no subagent spawning) and route execution-choice questions through their dispatcher per the Dispatch Economy conduct requirements.
 
+These operations are subordinate to the Task Complexity Protocol: they apply below its triggers, or after the user has answered the execution-choice prompt. The spawn requirements here never bypass a required pause, and in Manager Mode parallel dispatch operates within the fixed fleet the `delegation` skill defines, not as a competing mandate.
+
 ### Parallelization Conditions
 
 Even outside Manager Mode, implementations MUST spawn parallel agents when ALL of the following are true:
 
 - 2-3 independent tasks exist that do not depend on each other
-- Tasks can be completed faster in parallel
+- Tasks can be completed faster in parallel once the overhead of spawning and coordinating agents is counted; work too small to repay that overhead runs sequentially
 - No risk of file conflicts between agents exists
+- Running concurrently would not contend for shared runtime resources per [Parallel Safety Requirements](#parallel-safety-requirements); units whose execution or verification contends run sequentially
 
 ### Execution Protocol
 
