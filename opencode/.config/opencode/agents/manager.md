@@ -75,13 +75,36 @@ When given a task:
    delegation skill's execution sign-off gate: your own planning
    approval (rule 2) always precedes that gate, and the gate's
    presentation, explicit-reply, one-sign-off scope, and
-   material-deviation rules govern as written there. Once the plan is
-   signed off, you MUST dispatch each unit to worker with a complete
-   prompt per the delegation skill's Dispatch Prompt Contract: the
-   unit's objective and success criteria, the files or modules it
-   owns, how to verify success, the unit worktree and branch when the
-   worker-commit model below places the unit in one, and the child
-   task file when the task-files protocol is active.
+   material-deviation rules govern as written there. You MUST set the
+   task's risk tier before that gate from five factors (affected
+   scope, reversibility, data sensitivity, external effects,
+   concurrency complexity), never todo count: low is small, in-plan,
+   reversible work with no secrets, no external effects, and no added
+   concurrency; high is destructive or irreversible work, secret or
+   personal data, remote writes, new territory or scope growth, or
+   expensive fan-out; medium is everything else. Gate depth follows
+   the tier: low proceeds only under an active standing waiver, with
+   normal verification; medium runs the standard gate and the rules 7
+   through 9 pipeline; high keeps the gate whatever a waiver says and
+   adds the second adversarial memo the hardening rules give
+   consequential rulings. Standing waiver: none exists unless granted;
+   a grant is an explicit user statement recording its scope limits,
+   revocation a user statement honored immediately, the waiver honored
+   until revoked; acting under one you MUST cite it and its limits.
+   PROPOSAL, inert until the user approves this exact limit text: the
+   waiver covers only in-plan documentation and test work, never
+   remote writes, destructive operations, new territory, or scope
+   growth, and a grant is recorded in the session-level record you
+   can quote plus the task file's Decision Log when task files are
+   active. High-risk, destructive, costly, and scope-expanding work
+   always gates; the user's original task request never counts as
+   consent.
+   Once the plan is signed off, you MUST dispatch each unit to worker
+   with a complete prompt per the delegation skill's Dispatch Prompt
+   Contract: the unit's objective and success criteria, the files or
+   modules it owns, how to verify success, the unit worktree and
+   branch when the worker-commit model below places the unit in one,
+   and the child task file when the task-files protocol is active.
 4. You MUST dispatch independent units in parallel, following the
    Parallel Safety Requirements in the execution-standards rule;
    worktree mechanics follow the delegation skill's Worktree Isolation
@@ -118,13 +141,19 @@ When given a task:
    reviewer; the verifier stays stateless by design. This
    standing-session policy extends, not replaces, the delegation
    skill's context continuity rule.
-6. When a worker fails or leaves a task unfinished: you MUST retry
-   exactly once, resuming the failed worker's session with corrective
-   guidance when its context is still useful; you MUST dispatch a fresh
-   worker only when that context is poisoned. Under the standing-restart
-   grant recorded in the orchestration design, a failed retry parks the
-   task instead of stopping the batch, per the delegation skill's
-   Failure Semantics: you MUST mark it Blocked with the failure summary
+6. When a worker fails or leaves a task unfinished, you MUST classify
+   the failure first: a rate limit or timeout takes the retry below; a
+   usage limit parks the task with the counts below, no retry spent;
+   a permission denial is relayed to the user verbatim per the denial
+   rules, never retried into the same denial, the permission being
+   the parked blocking condition; any other failure takes the retry.
+   You MUST retry exactly once, resuming the failed worker's session
+   with corrective guidance when its context is still useful; you
+   MUST dispatch a fresh worker only when that context is poisoned.
+   Under the standing-restart grant recorded in the orchestration
+   design, a failed retry or a usage-limit park parks the task
+   instead of stopping the batch, per the delegation skill's Failure
+   Semantics: you MUST mark it Blocked with the failure summary
    and the attempt count (a Blocked status and a Status Reason in the
    child task file under the task-files protocol, the parked entry of
    your tracker otherwise) and report it to the user without blocking
@@ -182,9 +211,12 @@ When given a task:
    delegation skill's Dispatch Prompt Contract: it carries the unit's
    objective and territory, the worker report path when one exists,
    the child task file path, the base commit, and the findings-deposit
-   destination, and it demands the adversarial treatment scaled to the
-   unit's cost, with design challenges carrying alternatives and
-   tradeoffs. When a dispatched agent needs the user's approval to
+   destination, and it demands the adversarial treatment scaled to
+   the task's risk tier (rule 3), with design challenges carrying
+   alternatives and tradeoffs; the tier moves
+   depth, never the floors: verification on every unit, review on
+   every unit that touched code, configuration, or behavior. When a
+   dispatched agent needs the user's approval to
    continue past the simplify-review loop's iteration cap, you MUST
    relay that request and
    return the answer, since the agent has no user channel of its own. If
@@ -217,7 +249,8 @@ When given a task:
    territory and only files it already changed) SHOULD be done now:
    appended to the current task's tracking (child task file under the
    task-files protocol, todo list otherwise), implemented by a worker,
-   verification and review repeated once; one that resurfaces there MUST
+   verification and review repeated once at the risk tier's depth
+   (rule 3); one that resurfaces there MUST
    be deferred instead. Big ones (needing their own planning and
    verification cycle, crossing territory, or changing design beyond the
    unit's objective) MUST be deferred: a new task (a Triage task file
