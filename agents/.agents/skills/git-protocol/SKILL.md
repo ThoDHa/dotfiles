@@ -50,7 +50,7 @@ Related changes MUST be grouped together in the same commit:
 - A refactor with its updated documentation
 - A fix with its new regression test
 
-**Exception:** Changes that alter the expected behavior of existing tests MUST be committed separately from the production code, per the coding-standards rule's "Separation of Code and Test Changes" section. New tests written for new code still group with that code.
+**Exception:** Changes that alter the expected behavior of existing tests follow the coding-standards rule's "Separation of Code and Test Changes" section: the atomic, green commit is the default unit, and separation from the production code is reserved for changes where the production fix and the test-expectation update are each independently meaningful, in which case they land as the sanctioned ordered pair. New tests written for new code still group with that code.
 
 ### Concern Separation
 
@@ -76,7 +76,7 @@ Commits MUST be ordered by dependency:
 
 Every pushed commit tip and every integration point MUST leave the codebase in a functional state.
 
-Implementations MUST NOT push or integrate commits that break the build, tests, or basic functionality, and the test suite MUST be green at the head of every pull request and at every landed tip. A local commit that breaks the build or tests is permitted ONLY as the first commit of the ordered pair sanctioned by the coding-standards rule's "Separation of Code and Test Changes" section (production fix first, test-expectation commit second, pushed together within the same pull request or change set); it MUST NOT be pushed or integrated as its own landing.
+Implementations MUST NOT push or integrate commits that break the build, tests, or basic functionality, and the test suite MUST be green at the head of every pull request and at every landed tip. A local commit that breaks the build or tests is permitted ONLY as the first commit of the ordered pair sanctioned by the coding-standards rule's "Separation of Code and Test Changes" section (production fix first, test-expectation commit second, pushed together within the same pull request or change set; the pair is reserved for changes where the production fix and the test-expectation update are each independently meaningful, because the atomic, green commit is the default unit); it MUST NOT be pushed or integrated as its own landing.
 
 ---
 
