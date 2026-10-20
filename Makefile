@@ -219,8 +219,9 @@ build:
 	docker build -t $(CONTAINER) --no-cache -f bootstrap/Dockerfile .
 
 # Designated scratch for verifier dispatches: the only host path a verify
-# container may write. Override to relocate it.
-FLEET_VERIFY_SCRATCH ?= /tmp/opencode/fleet-verify
+# container may write. Per-run unique so concurrent verifier dispatches
+# never share a scratch dir; override to relocate the family.
+FLEET_VERIFY_SCRATCH ?= /tmp/opencode/fleet-verify-$(shell date +%s%N)
 
 # A linked worktree's .git file points at the main .git by absolute path, so
 # git inside the container resolves only when the common dir exists at that
@@ -246,7 +247,7 @@ endif
 verify:
 	@mkdir -p $(FLEET_VERIFY_SCRATCH)
 	@echo "Running the container verification suite (repo read-only, network off)..."
-	docker run --rm --network none -v $(CURDIR):/root/dotfiles:ro $(DOCKER_WORKTREE_GIT_MOUNT) -v $(FLEET_VERIFY_SCRATCH):/scratch -e TMPDIR=/scratch -w /root/dotfiles $(CONTAINER):latest sh -c 'make verify-inner; rc=$$?; rm -rf /scratch/* /scratch/.[!.]* 2>/dev/null; exit $$rc'
+	docker run --rm --network none -v $(CURDIR):/root/dotfiles:ro $(DOCKER_WORKTREE_GIT_MOUNT) -v $(FLEET_VERIFY_SCRATCH):/scratch -e TMPDIR=/scratch -w /root/dotfiles $(CONTAINER):latest sh -c 'make verify-inner; rc=$$?; rm -rf /scratch/* /scratch/.[!.]* /scratch/..?* 2>/dev/null; exit $$rc'
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
