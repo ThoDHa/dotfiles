@@ -252,8 +252,7 @@ probe_seed_repo() { # repo label; runs the whitelist and guard battery
 	mode="$(git -C "$repo" ls-files -s .githooks/pre-commit | awk '{print $1}')"
 	assert_eq "$label: pre-commit hook is tracked executable (100755)" "100755" "$mode"
 
-	local hook="$repo/.githooks/pre-commit"
-	if [[ -x "$hook" ]]; then
+	if [[ -x "$repo/.githooks/pre-commit" ]]; then
 		ok "$label: hook file is executable on disk"
 	else
 		bad "$label: hook file is executable on disk"
@@ -262,7 +261,7 @@ probe_seed_repo() { # repo label; runs the whitelist and guard battery
 
 	# Hook runs must resolve git inside the fixture repo, so each one is
 	# a subshell cd (the hook has no repo argument of its own).
-	run_hook() ( # hook-path; git resolves against the cd'd repo
+	run_hook() ( # repo-dir; git resolves against the cd'd repo
 		cd "$1" && "./.githooks/pre-commit"
 	)
 
