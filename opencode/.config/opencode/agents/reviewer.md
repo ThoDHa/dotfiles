@@ -22,11 +22,10 @@ permission:
     "git -C * worktree list *": "allow"
     "ls *": "allow"
     "cat *": "allow"
-    "cat *.env": "deny"
-    "cat *.env.*": "deny"
     "grep *": "allow"
     "wc *": "allow"
     "tasks report *": "allow"
+    "* *.env*": "deny"
   task: deny
   external_directory:
     "/tmp/**": "allow"
