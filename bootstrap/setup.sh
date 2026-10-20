@@ -632,8 +632,9 @@ step_verify() {
         _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.tui.tsx" "context-manager TUI plugin"
     fi
     # pi checks run only when selected and the deployed clone is present:
-    # a failed clone is already reported through FAILED_STEPS.
-    if [ "$WANT_PI" = "1" ] && [ -d "$HOME/.pi/agent" ]; then
+    # a failed clone is already reported through FAILED_STEPS, and an
+    # adopted non-repo dir is not the managed clone.
+    if [ "$WANT_PI" = "1" ] && [ -e "$HOME/.pi/agent/.git" ]; then
         if command -v pi &>/dev/null || compgen -G "$HOME/.nvm/versions/node/*/bin/pi" &>/dev/null; then
             echo "    ✓ pi binary"
         else
