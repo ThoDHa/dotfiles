@@ -31,8 +31,9 @@
 #   8. verifier bash order    the verifier `permission:` `bash:` map
 #                             keeps its order-dependent posture: the
 #                             catch-all deny first, the lexical `.env`
-#                             deny last, no allow after it, and the
-#                             `git push*` deny present
+#                             deny last, no allow after it, the
+#                             `git push*` deny present, and the entry
+#                             count pinned
 #   9. verify-recipe pin      the Makefile verify recipe keeps its
 #                             docker flags verbatim: the repo read-only
 #                             mount, --network none, and the scratch
@@ -565,23 +566,35 @@ check_map_identity() {
 # ORDER, not just by content, because opencode evaluates bash rules
 # last-match-wins: the catch-all deny must stay the first bash entry,
 # the lexical `.env` deny the final entry, every allow between them,
-# and the `git push*` deny present. A reorder that lets any allow
-# outrank a deny (a catch-all deny moved below another entry, an allow
-# moved after the `.env` guard) would quietly widen the map without
-# changing one byte of any entry, so the ordering itself is pinned.
-# Extraction is line-based like the map-identity check (same state
-# machine over the `  bash:` block inside the line-1 frontmatter, so a
-# body code fence cannot stand in for the map); entries are the
-# block's nonblank lines beyond the header, compared left-trimmed.
+# and the `git push*` deny present. The widening reorder class is
+# exclusively `.env`-deny-relative: an allow moved after the `.env`
+# guard quietly outranks it and widens the map without changing one
+# byte of any entry. The catch-all deny is the structural case, not a
+# widening one: moved below other entries it makes every entry it
+# passes dead (the map narrows or bricks, never widens), so its first
+# position is pinned for structure, not width: nothing can silently
+# precede and thus die under the floor, and a deleted catch-all is
+# caught. An allow inserted between the catch-all and the `.env` deny
+# escapes every ordering assertion (it sits inside the allow region),
+# so the entry count is pinned too, paired with the map the way the
+# line budgets pair with the agent files: the constant equals the
+# map's current entry count, and any entry added or removed must
+# deliberately update the pin in the same edit. Extraction is
+# line-based like the map-identity check (same state machine over the
+# `  bash:` block inside the line-1 frontmatter, so a body code fence
+# cannot stand in for the map); entries are the block's nonblank lines
+# beyond the header, compared left-trimmed.
 VERIFIER_MAP_FILE="$AGENTS_SCOPE/verifier.md"
 VERIFIER_MAP_FIRST='"*": "deny"'
 VERIFIER_MAP_ENV_DENY='"* *.env*": "deny"'
 VERIFIER_MAP_PUSH_DENY='"git push*": "deny"'
+VERIFIER_MAP_ENTRY_COUNT=58
 
 check_verifier_map_order() {
 	assert_present "$VERIFIER_MAP_FILE"
 	awk -v file="$VERIFIER_MAP_FILE" -v first="$VERIFIER_MAP_FIRST" \
-		-v envdeny="$VERIFIER_MAP_ENV_DENY" -v pushdeny="$VERIFIER_MAP_PUSH_DENY" '
+		-v envdeny="$VERIFIER_MAP_ENV_DENY" -v pushdeny="$VERIFIER_MAP_PUSH_DENY" \
+		-v expected="$VERIFIER_MAP_ENTRY_COUNT" '
 	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
 	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
@@ -599,7 +612,7 @@ check_verifier_map_order() {
 			exit 1
 		}
 		if (entry[1] != first) {
-			printf "FAIL: %s:%d: first bash entry is \x27%s\x27; must be the catch-all deny \x27%s\x27 so every allow stays outranked by position\n", file, line[1], entry[1], first
+			printf "FAIL: %s:%d: first bash entry is \x27%s\x27; must be the catch-all deny \x27%s\x27 so the map stays deny-first: no rule precedes the floor, and any command no allow matches denies\n", file, line[1], entry[1], first
 			exit 1
 		}
 		envline = 0
@@ -623,6 +636,10 @@ check_verifier_map_order() {
 			if (entry[i] == pushdeny) sawpush = 1
 		if (!sawpush) {
 			printf "FAIL: %s:1: bash permission map lost the \x27%s\x27 entry\n", file, pushdeny
+			exit 1
+		}
+		if (n != expected) {
+			printf "FAIL: %s:1: bash permission map has %d entries; the count pin expects %d; changing the map requires a deliberate paired edit of VERIFIER_MAP_ENTRY_COUNT\n", file, n, expected
 			exit 1
 		}
 	}' "$VERIFIER_MAP_FILE"
