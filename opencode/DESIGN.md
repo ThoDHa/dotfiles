@@ -194,9 +194,13 @@ mid-run (the shared service log records the events; grep
 permission-map edits no longer wait for a newly started session. The
 manager's edit denial is the single architectural line, confining its
 edits to `.tasks/**` while bash stays open; the worker holds everything
-except push, history reshaping, gh writes, and subagent spawning; the
-verifier's bash is intentionally open so it can run tests. The reviewer
-and planner run deny-first maps: the reviewer's bash allows read-only git
+except push, history reshaping, gh writes, and subagent spawning; those
+two are the only allow-first maps. The verifier, reviewer, planner, and
+advisor run deny-first maps: the verifier's bash denies by default and
+allows only `make verify`, `tasks render`, the read-only git set
+(status, diff, log, show, rev-parse), `ls`, `cat`, and `grep`, with its
+edit, task, webfetch, and websearch channels denied outright; the
+reviewer's bash allows read-only git
 (status, diff, log, show, rev-parse, worktree list, plus the `git -C`
 forms for all but rev-parse), file inspection (`ls`, `cat`, `grep`, `wc`,
 head and tail withdrawn, the native read tool covering their case and
@@ -204,8 +208,9 @@ the base deny governing their shapes), and the single `tasks report`
 deposit channel, with its edit map opening only
 `/tmp/opencode/reports/**`; the planner
 pairs the same git set minus the `git -C` worktree-list form with the
-same inspection core and adds the two `tasks` channels, `make test`,
-`sqlite3 -readonly`, the opencode help and version probes, and the
+same inspection core and adds the two `tasks` channels, the
+containerized `make verify` and the docker-free `make lint-corpus`
+rung, `sqlite3 -readonly`, the opencode help and version probes, and the
 exact `opencode debug config` and `opencode debug agents` entries,
 with its edit map opening only `.tasks/**` for the planning carve-out
 and the direct `research/` deposit write; and the advisor copies the
@@ -214,8 +219,8 @@ service-log reading its reconciliation memos need), with its edit map
 opening `/tmp/opencode/reports/**` for the memo deposits instead of
 `.tasks/**`. The maps are guardrails
 against uninstructed behavior, not security boundaries, and the failure
-mode now splits by map shape: on the allow-first maps (manager, worker,
-verifier) a determined `sh -c` or `git -C` route slips past the prefixed
+mode now splits by map shape: on the two allow-first maps (manager,
+worker) a determined `sh -c` or `git -C` route slips past the prefixed
 denies, while the deny-first maps fail closed, an unrouted command
 denied outright, so the residual surface there is only the shapes that
 legitimately match an allow, recorded in the accepted-risk register
@@ -224,33 +229,40 @@ credential separation.
 
 ### Accepted-risk register
 
-The deny-first reviewer, planner, and advisor maps carry four accepted residual
-classes, accepted because withdrawing them would gut all three charters (diff
-inspection is the reviewer's core duty, cat and grep the standard
-inspection path). Single-command redirects are a pattern-level match:
-`cat file > /target` matches `cat *`, the same class for the other
-inspection commands and the git prefixes; the docs specify no redirect
-rule and any platform defense is unrecorded, so the claim states the
-conservative ceiling, able only to overstate the risk.
+The deny-first verifier, reviewer, planner, and advisor maps carry the
+accepted residual classes below, accepted because withdrawing them would
+gut the read-only charters (diff inspection is the reviewer's core duty,
+cat and grep the standard inspection path). Since the FLEET-1-7 wiring,
+verifier dispatches run through the containerized `make verify` gate:
+the recipe mounts the repo read-only, runs with the network off, and
+bounds writes to a designated per-run scratch, with the permission-layer
+allowlist kept as defense-in-depth; planner and advisor verify runs ride
+the same gate, closing the live-model spawn and host deployment checks
+neither charter names. Single-command redirects are a pattern-level
+match: `cat file > /target` matches `cat *`, the same class for the
+other inspection commands and the git prefixes, a residual now shared by
+the verifier map; the docs specify no redirect rule and any platform
+defense is unrecorded, so the claim states the conservative ceiling,
+able only to overstate the risk.
 Argument-level writes ride the diff, log, and show prefixes:
-`git diff --output=/path` needs no metacharacters. `.env` reads ride the
-inspection allows around the base policy's read defaults, which deny
-`.env` files (the `*.env.example` allow carve-out aside) and gate the
-read tool only, a different action: `cat .env Makefile` passes because
-the secret is not the trailing token a `cat *.env` deny requires, quoted
-forms like `cat ".env"` pass because the raw command string does not
-match the deny pattern, and grep and `git show *` read env files and
-blobs like `HEAD:.env` outright. Piped compounds reject in headless
+`git diff --output=/path` needs no metacharacters. The former `.env`
+read class is closed: the contains-form `"* *.env*"` deny placed last in
+all four maps matches the padding (`cat .env Makefile`), mid-argument,
+quoted, and `git show HEAD:.env` blob forms the earlier suffix-anchored
+pairs left open. Piped compounds reject in headless
 sessions even when every segment individually matches an allow (observed
-live); the docs do not specify the compound rule. Status as of the
-hardening batch: the direct cat forms of the `.env` class are closed by
-the landed `cat *.env` and `cat *.env.*` deny pairs, everything else
-open. The hardening shape is deny entries placed after the allows, which
-win by position; asks are the wrong tool there because headless sessions
-auto-reject them, and the structural complete fix for the cat class,
-dropping `cat *` for named reads, is the recorded option if the threat
-model changes. The acceptance guard is the read-only charters plus
-transcript visibility: every open residual is a read or a redirect
+live); the docs do not specify the compound rule. Two residuals sit
+outside the maps: the launcher exposure, the whole verify recipe plus
+Makefile parse-time shell executing host-side with the payload alone
+container-bounded, parked as the out-of-repo wrapper user decision under
+Blocks (b) of the FLEET-1-7 wiring fix; and the docker daemon as the
+verification single point of failure. The hardening shape is deny
+entries placed after the allows, which
+win by position; asks are the wrong tool in headless sessions because
+they auto-reject, and the structural option for the cat class, dropping
+`cat *` for named reads, stays recorded if the threat model changes.
+The acceptance guard is the read-only charters plus
+transcript visibility: every residual is a read or a redirect
 visible in the session transcript, and pattern syntax is no barrier to
 later narrowing, since literals like `>` and `=` are expressible in deny
 entries.

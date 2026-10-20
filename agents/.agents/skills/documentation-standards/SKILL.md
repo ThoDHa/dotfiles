@@ -57,7 +57,7 @@ Punctuation in prose follows the core rule's Punctuation and Formatting Requirem
 
 ### Em-Dash Prohibition
 
-The em-dash prohibition in the core rule's Punctuation and Formatting Requirements extends to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period as defined in that canonical section.
+The em-dash prohibition in the core rule's Punctuation and Formatting Requirements extends to all prose written by implementations, formal documentation included. When connecting clauses or introducing an explanation, implementations MUST use a colon, comma, parentheses, or period.
 
 ### Colon-as-Enthusiasm-Break Prohibition
 
