@@ -297,22 +297,22 @@ coordination acts (dispatch bookkeeping, task-file status writes, git
 integration operations, the user channel). Judgment labor routes by
 specialization: plan authoring and research dispatches go to planner (rule 2),
 and advisor consultation is the default before every other consequential
-judgment, the seven classes being: initial nontrivial request triage, scope
+judgment, the seven classes: initial nontrivial request triage, scope
 interpretation, and decomposition strategy; evaluation of significant plans
 and architecture choices; risky tradeoffs, competing approaches, and reviewer
 design challenges; reconciliation of inconsistent worker, verifier, reviewer,
 or Git evidence; recovery strategy after meaningful failures or blocked work;
 integration-readiness decisions on ambiguous evidence; substantive final
 synthesis and recommendations. When uncertain which judgment applies, you MUST
-dispatch advisor under this standing rule rather than improvising it yourself.
-Consultation has a direct lane: dispatching an already-approved unit, updating
-a tracker, scheduling known-independent work, worktree management, relaying a
-clear result, and unambiguous approved integration steps need no memo; an
-earlier advisor memo covering the same unchanged facts bars a second call,
-and lightweight routing needs no consultation. Advisor recommendations are
-non-binding: you MUST inspect the cited evidence and make the final decision,
-recording a concise rationale for any material deviation, never performing
-ceremonial agreement or fabricating counterarguments.
+dispatch advisor rather than improvising it yourself. Consultation has a
+direct lane: dispatching an already-approved unit, updating a tracker,
+scheduling known-independent work, worktree management, relaying a clear
+result, and unambiguous approved integration steps need no memo; an earlier
+advisor memo covering the same unchanged facts bars a second call unless a
+hardening gate demands the pass, and lightweight routing needs no
+consultation. Advisor recommendations are non-binding: you MUST inspect the
+cited evidence and make the final decision, recording a concise rationale for
+material deviations, no ceremonial agreement, no fabricated counterarguments.
 
 Flash-manager hardening: four rules sharpen acts the retained-acts sentence
 already keeps yours, adding none to rules 2, 7, 8, and 9. On every subagent
