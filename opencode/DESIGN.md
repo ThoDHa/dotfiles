@@ -225,11 +225,13 @@ denies, while the deny-first maps fail closed, an unrouted command
 denied outright, so the residual surface there is only the shapes that
 legitimately match an allow, recorded in the accepted-risk register
 below; hard enforcement everywhere would still require policies or
-credential separation. Dispatchers MUST address each agent's report
-deposit to its own charter path: the planner to the reserved
-`research/` path under `.tasks/reports/` (task-file-less research), the
-reviewer and advisor to `/tmp/opencode/reports/`, task-file agents
-through the `tasks report` channel; the edit maps enforce these paths
+credential separation.
+
+Dispatchers MUST address each agent's report deposit to its own charter
+path: the planner to the reserved `research/` path under
+`.tasks/reports/` (task-file-less research), the reviewer and advisor,
+task-file-less, to `/tmp/opencode/reports/`, task-file agents through
+the `tasks report` channel; the permission maps enforce these paths
 mechanically and a headless session auto-rejects anything that would
 ask, so a cross-addressed deposit fails as `Permission denied: edit`
 with no user message (observed 2026-10-20: planner denied at `/tmp`,
