@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Corpus lint: mechanical drift checks over the tracked documentation
-# corpus (corpus-review finding 16). Eight checks run in order and the
+# corpus (corpus-review finding 16). Nine checks run in order and the
 # lint fails fast on the first finding, printing `FAIL: <file>:<line>:
 # <what>`:
 #
@@ -28,7 +28,12 @@
 #   7. bash map identity      the planner and advisor `permission:`
 #                             `bash:` blocks stay byte-identical; a
 #                             missing or empty block fails too
-#   8. verify-recipe pin      the Makefile verify recipe keeps its
+#   8. verifier bash order    the verifier `permission:` `bash:` map
+#                             keeps its order-dependent posture: the
+#                             catch-all deny first, the lexical `.env`
+#                             deny last, no allow after it, and the
+#                             `git push*` deny present
+#   9. verify-recipe pin      the Makefile verify recipe keeps its
 #                             docker flags verbatim: the repo read-only
 #                             mount, --network none, and the scratch
 #                             plus git-common-dir mount shapes
@@ -185,7 +190,7 @@ check_em_dashes() {
 		assert_present "$file"
 		scan_em_dashes "$file"
 	done < <(md_corpus_files; printf '%s\n' "$MAKEFILE")
-	echo "  1/8 em-dash sweep: clean"
+	echo "  1/9 em-dash sweep: clean"
 }
 
 heading_slugs() { # file; prints GitHub-style anchor slugs for its headings
@@ -284,7 +289,7 @@ check_links() {
 			fi
 		done < <(extract_links "$file")
 	done < <(md_corpus_files)
-	echo "  2/8 link liveness: clean"
+	echo "  2/9 link liveness: clean"
 }
 
 scan_headings() { # file
@@ -329,7 +334,7 @@ check_headings() {
 		assert_present "$file"
 		scan_headings "$file"
 	done < <(md_corpus_files)
-	echo "  3/8 heading structure: clean"
+	echo "  3/9 heading structure: clean"
 }
 
 parse_inventory() { # emits C<class> and E<entry> records
@@ -420,7 +425,7 @@ check_inventory_counts() {
 				"class '<$name>' heading count ${INV_COUNT[$name]} != list length ${INV_ENTRY_TOTAL[$name]}"
 		fi
 	done
-	echo "  4/8 INVENTORY heading counts: clean"
+	echo "  4/9 INVENTORY heading counts: clean"
 }
 
 inventory_corpus_docs_members() {
@@ -454,7 +459,7 @@ check_inventory_membership() {
 				"membership drift in class '<$name>' vs $source_desc: missing [$missing] extra [$extra]"
 		fi
 	done
-	echo "  5/8 INVENTORY membership: clean"
+	echo "  5/9 INVENTORY membership: clean"
 }
 
 check_line_budgets() {
@@ -493,7 +498,7 @@ check_line_budgets() {
 		is_tracked "$file" || fail_at "$file" 1 \
 			"line budget mapped for a file that is not tracked; remove or rename the entry"
 	done
-	echo "  6/8 line budgets: clean"
+	echo "  6/9 line budgets: clean"
 }
 
 # Map-identity check: the planner and advisor files carry one shared
@@ -553,7 +558,75 @@ check_map_identity() {
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
-	echo "  7/8 bash map identity: clean"
+	echo "  7/9 bash map identity: clean"
+}
+
+# Verifier bash-order pin: the verifier map is deny-first by entry
+# ORDER, not just by content, because opencode evaluates bash rules
+# last-match-wins: the catch-all deny must stay the first bash entry,
+# the lexical `.env` deny the final entry, every allow between them,
+# and the `git push*` deny present. A reorder that lets any allow
+# outrank a deny (a catch-all deny moved below another entry, an allow
+# moved after the `.env` guard) would quietly widen the map without
+# changing one byte of any entry, so the ordering itself is pinned.
+# Extraction is line-based like the map-identity check (same state
+# machine over the `  bash:` block inside the line-1 frontmatter, so a
+# body code fence cannot stand in for the map); entries are the
+# block's nonblank lines beyond the header, compared left-trimmed.
+VERIFIER_MAP_FILE="$AGENTS_SCOPE/verifier.md"
+VERIFIER_MAP_FIRST='"*": "deny"'
+VERIFIER_MAP_ENV_DENY='"* *.env*": "deny"'
+VERIFIER_MAP_PUSH_DENY='"git push*": "deny"'
+
+check_verifier_map_order() {
+	assert_present "$VERIFIER_MAP_FILE"
+	awk -v file="$VERIFIER_MAP_FILE" -v first="$VERIFIER_MAP_FIRST" \
+		-v envdeny="$VERIFIER_MAP_ENV_DENY" -v pushdeny="$VERIFIER_MAP_PUSH_DENY" '
+	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
+	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
+	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
+	in_frontmatter && $0 == "---" { in_frontmatter = 0 }
+	!done && in_frontmatter && /^  bash:$/ { in_block = 1 }
+	in_block && $0 !~ /^  bash:$/ && $0 ~ /[^[:space:]]/ {
+		n++
+		entry[n] = $0
+		sub(/^[[:space:]]+/, "", entry[n])
+		line[n] = FNR
+	}
+	END {
+		if (n == 0) {
+			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); the order-dependent deny-first posture needs pinning\n", file
+			exit 1
+		}
+		if (entry[1] != first) {
+			printf "FAIL: %s:%d: first bash entry is \x27%s\x27; must be the catch-all deny \x27%s\x27 so every allow stays outranked by position\n", file, line[1], entry[1], first
+			exit 1
+		}
+		envline = 0
+		for (i = 1; i <= n; i++)
+			if (entry[i] == envdeny) envline = line[i]
+		if (envline == 0) {
+			printf "FAIL: %s:1: bash permission map lost the \x27%s\x27 entry that must stay final\n", file, envdeny
+			exit 1
+		}
+		for (i = 1; i <= n; i++)
+			if (line[i] > envline && entry[i] ~ /"allow"$/) {
+				printf "FAIL: %s:%d: allow entry \x27%s\x27 sits after the \x27%s\x27 deny at line %d; the deny must be the final entry so it outranks every allow\n", file, line[i], entry[i], envdeny, envline
+				exit 1
+			}
+		if (entry[n] != envdeny) {
+			printf "FAIL: %s:%d: last bash entry is \x27%s\x27; must be the \x27%s\x27 deny so no allow outranks it\n", file, line[n], entry[n], envdeny
+			exit 1
+		}
+		sawpush = 0
+		for (i = 1; i <= n; i++)
+			if (entry[i] == pushdeny) sawpush = 1
+		if (!sawpush) {
+			printf "FAIL: %s:1: bash permission map lost the \x27%s\x27 entry\n", file, pushdeny
+			exit 1
+		}
+	}' "$VERIFIER_MAP_FILE"
+	echo "  8/9 verifier bash map ordering: clean"
 }
 
 # Verify-recipe pin: the containerized make verify gate is the
@@ -580,7 +653,7 @@ check_verify_recipe_pin() {
 		[[ "$recipe" == *"$flag"* ]] || fail_at "$MAKEFILE" 1 \
 			"verify recipe lost the docker flag '$flag'; the FLEET-1-7 review DC1 rationale pins the container gate's isolation shape verbatim"
 	done
-	echo "  8/8 verify-recipe docker pin: clean"
+	echo "  9/9 verify-recipe docker pin: clean"
 }
 
 check_preflight() { # the structural basis every later check assumes
@@ -606,8 +679,9 @@ main() {
 	check_inventory_membership
 	check_line_budgets
 	check_map_identity
+	check_verifier_map_order
 	check_verify_recipe_pin
-	echo "Corpus lint passed: 8 checks clean"
+	echo "Corpus lint passed: 9 checks clean"
 }
 
 main "$@"
