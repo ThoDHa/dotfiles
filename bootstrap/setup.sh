@@ -524,8 +524,8 @@ _pi_installed_version() {
 # git-managed config repo to ~/.pi/agent and point the repo's git at its
 # own .githooks (whose pre-commit hook guards secrets).
 step_pi() {
-    # pi needs a recent Node; warn only, since npm still refuses to run
-    # on its own terms. A missing or unparseable node degrades to no warning.
+    # pi needs a recent Node; warn only — npm still installs, but pi may
+    # fail at runtime. A missing or unparseable node degrades to no warning.
     local node_version node_major
     node_version=$(node --version 2>/dev/null || true)
     node_major="${node_version#v}"
