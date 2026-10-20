@@ -507,20 +507,49 @@ step_claude_stow() {
     fi
 }
 
+# Print pi's latest version from its update feed; empty on any fetch or
+# parse failure so callers can degrade gracefully.
+_pi_latest_version() {
+    curl -fsSL https://pi.dev/api/latest-version 2>/dev/null \
+        | grep -o '"version":"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true
+}
+
+# Print the installed pi version as bare X.Y.Z. Prints empty when the
+# binary is missing or fails.
+_pi_installed_version() {
+    pi --version 2>/dev/null | awk '{print $1}' || true
+}
+
 # Install or upgrade the pi coding agent via npm, then deploy its
 # git-managed config repo to ~/.pi/agent and point the repo's git at its
 # own .githooks (whose pre-commit hook guards secrets).
 step_pi() {
+    # pi needs a recent Node; warn only, since npm still refuses to run
+    # on its own terms. A missing or unparseable node degrades to no warning.
+    local node_version node_major
+    node_version=$(node --version 2>/dev/null || true)
+    node_major="${node_version#v}"
+    node_major="${node_major%%.*}"
+    case "$node_major" in
+        ''|*[!0-9]*) ;;
+        *)
+            [ "$node_major" -lt 22 ] \
+                && echo "  Warning: node $node_version is below pi's floor (>=22.19); pi may not run"
+            ;;
+    esac
+
     if ! command -v pi &>/dev/null; then
         echo "  Installing pi..."
         npm install -g --ignore-scripts @earendil-works/pi-coding-agent
     else
         local current latest
-        current=$(pi --version 2>/dev/null | awk '{print $1}' || true)
-        latest=$(curl -fsSL https://pi.dev/api/latest-version 2>/dev/null \
-            | grep -o '"version":"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        current=$(_pi_installed_version)
+        latest=$(_pi_latest_version)
         if [ -z "$latest" ]; then
             echo "  Could not fetch pi version — skipping update"
+        elif [ -z "$current" ]; then
+            echo "  Could not determine installed pi version — upgrading to $latest"
+            npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@$latest"
         elif [ "$current" = "$latest" ]; then
             echo "  pi $current is up to date"
         else
@@ -530,14 +559,20 @@ step_pi() {
     fi
 
     local pi_agent="$HOME/.pi/agent"
+    if [ -e "$pi_agent" ] && [ ! -d "$pi_agent" ]; then
+        echo "  Warning: $pi_agent exists but is not a directory — not cloning; adopt manually"
+        return 0
+    fi
     if [ -d "$pi_agent" ] && [ -n "$(ls -A "$pi_agent" 2>/dev/null)" ] \
         && [ ! -e "$pi_agent/.git" ]; then
         echo "  Warning: $pi_agent exists, is not empty, and is not a git repo — contents belong to pi or a manual install; not cloning; adopt manually"
         return 0
     fi
     # git_clone_or_pull pulls once the destination dir exists, so an empty
-    # leftover dir is removed here to let the first clone happen.
-    if [ -d "$pi_agent" ] && [ -z "$(ls -A "$pi_agent" 2>/dev/null)" ]; then
+    # leftover dir is removed here to let the first clone happen. The -L
+    # test keeps a symlinked path away from rmdir entirely.
+    if [ -d "$pi_agent" ] && [ ! -L "$pi_agent" ] \
+        && [ -z "$(ls -A "$pi_agent" 2>/dev/null)" ]; then
         rmdir "$pi_agent"
     fi
     git_clone_or_pull "pi config" "https://github.com/ThoDHa/pi.git" "$pi_agent"
@@ -735,7 +770,7 @@ echo "  1. Restart your shell:         exec zsh"
 echo "  2. Open tmux and press:        prefix + I  (install plugins)"
 echo "  3. Open nvim:                  Lazy will auto-install plugins"
 echo "  4. Activate docker (if new):   newgrp docker  (or log out and back in)"
-echo "  5. Start pi:                   run 'pi' (config in ~/.pi/agent)"
+[ "$WANT_PI" = "1" ] && echo "  5. Start pi:                   run 'pi' (config in ~/.pi/agent)"
 echo ""
 
 [ ${#FAILED_STEPS[@]} -eq 0 ]
