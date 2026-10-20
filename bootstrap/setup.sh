@@ -426,7 +426,10 @@ _install_opencode_v2() {
 # stow' is the explicit alternative (plain re-stow conflicts while a
 # real file occupies the target). Inside the container build
 # (SKIP_CHSH=1) there is no user to ask and the repo copy is canonical,
-# so the same repair runs directly. Never fails the step.
+# so the same repair runs directly; the host warning path never fails
+# the step, while a failed container repair fails the step there, at
+# the cause, rather than later at step_claude_stow with the migration
+# damage as the only symptom.
 _reconcile_opencode_stow() {
     if [ ! -L "$HOME/.config/opencode/opencode.json" ]; then
         if [ "${SKIP_CHSH:-0}" = "1" ]; then
