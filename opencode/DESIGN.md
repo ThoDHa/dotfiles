@@ -143,8 +143,10 @@ defer, or decline), because unbounded loops hide failures and unactioned
 suggestions get lost (rules 7 through 9 of the manager agent file; one
 combined seam review closes the batch). The reconciliation analysis
 behind rule 8's discrepancy handling and the position and disposition
-drafts behind rule 9 route to the advisor under the manager's fixed
-routing table; the manager keeps the dispositions and the decisions.
+drafts behind rule 9 route to the advisor under the class-based
+consultation routing, where advisor consultation is the default before
+every other consequential judgment; the manager keeps the dispositions
+and the decisions.
 
 Verified findings get fixed or dispatched; design arguments get answered
 or debated in search of the better design (taste-only findings labeled
