@@ -22,7 +22,7 @@
 #                             heading's directory; corpus-docs class:
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 390,
-#                             worker 145, verifier 65, reviewer 135,
+#                             worker 145, verifier 95, reviewer 135,
 #                             planner 120, advisor 90), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
 #   7. bash map identity      the planner and advisor `permission:`
