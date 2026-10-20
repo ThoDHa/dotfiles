@@ -525,15 +525,26 @@ _pi_installed_version() {
 # own .githooks (whose pre-commit hook guards secrets).
 step_pi() {
     # pi needs a recent Node; warn only — npm still installs, but pi may
-    # fail at runtime. A missing or unparseable node degrades to no warning.
-    local node_version node_major
+    # fail at runtime. The engines floor is >=22.19, so the minor counts
+    # when the major is exactly 22. A missing or unparseable node degrades
+    # to no warning.
+    local node_version node_major node_minor node_below=0
     node_version=$(node --version 2>/dev/null || true)
     node_major="${node_version#v}"
+    node_minor="${node_major#*.}"
     node_major="${node_major%%.*}"
+    node_minor="${node_minor%%.*}"
     case "$node_major" in
         ''|*[!0-9]*) ;;
         *)
-            [ "$node_major" -lt 22 ] \
+            if [ "$node_major" -lt 22 ]; then
+                node_below=1
+            elif [ "$node_major" -eq 22 ]; then
+                case "$node_minor" in
+                    [0-9]*) [ "$node_minor" -lt 19 ] && node_below=1 ;;
+                esac
+            fi
+            [ "$node_below" = "1" ] \
                 && echo "  Warning: node $node_version is below pi's floor (>=22.19); pi may not run"
             ;;
     esac
@@ -559,7 +570,7 @@ step_pi() {
     fi
 
     local pi_agent="$HOME/.pi/agent"
-    if [ -e "$pi_agent" ] && [ ! -d "$pi_agent" ]; then
+    if { [ -e "$pi_agent" ] || [ -L "$pi_agent" ]; } && [ ! -d "$pi_agent" ]; then
         echo "  Warning: $pi_agent exists but is not a directory — not cloning; adopt manually"
         return 0
     fi
