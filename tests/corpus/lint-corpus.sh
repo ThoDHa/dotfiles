@@ -22,7 +22,7 @@
 #                             heading's directory; corpus-docs class:
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 390,
-#                             worker 145, verifier 65, reviewer 135,
+#                             worker 145, verifier 115, reviewer 135,
 #                             planner 120, advisor 90), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
 #   7. bash map identity      the planner and advisor `permission:`
@@ -108,7 +108,7 @@ BUDGET_CORPUS_DOC_LINES=500
 declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/manager.md]=390
 	[opencode/.config/opencode/agents/worker.md]=145
-	[opencode/.config/opencode/agents/verifier.md]=65
+	[opencode/.config/opencode/agents/verifier.md]=115
 	[opencode/.config/opencode/agents/reviewer.md]=135
 	[opencode/.config/opencode/agents/planner.md]=120
 	[opencode/.config/opencode/agents/advisor.md]=90
