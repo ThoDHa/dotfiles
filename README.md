@@ -115,9 +115,10 @@ The `bootstrap/setup.sh` script sets up a complete development environment:
 - eza, Docker, and optional OpenCode / Claude Code installs
   (the OpenCode install clones the context-manager plugin into
   `~/.config/opencode/opencode-context-manager/`)
-- pi coding agent (`@earendil-works/pi-coding-agent`) via npm under NVM,
-  with its configuration cloned from [ThoDHa/pi](https://github.com/ThoDHa/pi)
-  into `~/.pi/agent` (same pattern as the nvim config)
+- optional pi coding agent (`@earendil-works/pi-coding-agent`) via npm
+  under NVM (prompted, host-only), with its configuration cloned from
+  [ThoDHa/pi](https://github.com/ThoDHa/pi) into `~/.pi/agent` (same
+  pattern as the nvim config)
 
 Installer scripts fetch the latest upstream version on each run (oh-my-zsh
 master, the latest installer URLs, the latest font release).
