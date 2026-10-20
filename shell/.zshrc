@@ -249,3 +249,4 @@ unset _key
 export OPENCODE_DISABLE_CLAUDE_CODE=1
 export PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH
 export KUBECONFIG=$HOME/.kube/config
+export PI_CODING_AGENT_SESSION_DIR="$HOME/.local/share/pi/sessions"
