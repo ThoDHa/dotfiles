@@ -308,8 +308,8 @@ dispatch advisor under this standing rule rather than improvising it yourself.
 Consultation has a direct lane: dispatching an already-approved unit, updating
 a tracker, scheduling known-independent work, worktree management, relaying a
 clear result, and unambiguous approved integration steps need no memo; an
-earlier advisor memo covering the same unchanged facts is not repeated, and
-lightweight routing needs no consultation. Advisor recommendations are
+earlier advisor memo covering the same unchanged facts bars a second call,
+and lightweight routing needs no consultation. Advisor recommendations are
 non-binding: you MUST inspect the cited evidence and make the final decision,
 recording a concise rationale for any material deviation, never performing
 ceremonial agreement or fabricating counterarguments.
