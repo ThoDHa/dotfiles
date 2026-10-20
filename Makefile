@@ -36,8 +36,8 @@ OPENCODE_CONFIG := $(STOW_TARGET)/.config/opencode
 CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
-.PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode lint-corpus check
+.PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode lint-corpus check verify-inner
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -218,6 +218,33 @@ run:
 build:
 	docker build -t $(CONTAINER) --no-cache -f bootstrap/Dockerfile .
 
+# Designated scratch for verifier dispatches: the only host path a verify
+# container may write. Override to relocate it.
+FLEET_VERIFY_SCRATCH ?= /tmp/opencode/fleet-verify
+
+# A linked worktree's .git file points at the main .git by absolute path, so
+# git inside the container resolves only when the common dir exists at that
+# same path. A main checkout carries .git inside the repo mount and needs no
+# extra mount.
+GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+ifeq ($(GIT_COMMON_DIR),$(CURDIR)/.git)
+DOCKER_WORKTREE_GIT_MOUNT :=
+else ifneq ($(GIT_COMMON_DIR),)
+DOCKER_WORKTREE_GIT_MOUNT := -v $(GIT_COMMON_DIR):$(GIT_COMMON_DIR):ro
+else
+DOCKER_WORKTREE_GIT_MOUNT :=
+endif
+
+# Containerized verification entry for verifier subagent dispatches. The
+# payload runs inside base_dev: the repo mounts read-only, the network is
+# off, and writes are bounded to the designated scratch, so recipe code
+# cannot mutate the repo or the host and cannot reach remote endpoints.
+# The verifier's permission-layer allowlist stays as defense-in-depth.
+verify:
+	@mkdir -p $(FLEET_VERIFY_SCRATCH)
+	@echo "Running the container verification suite (repo read-only, network off)..."
+	docker run --rm --network none -v $(CURDIR):/root/dotfiles:ro $(DOCKER_WORKTREE_GIT_MOUNT) -v $(FLEET_VERIFY_SCRATCH):/scratch -e TMPDIR=/scratch -w /root/dotfiles $(CONTAINER):latest make verify-inner
+
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 # Discover expected rules and skills from the source directories automatically
@@ -270,6 +297,13 @@ test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudec
 
 # Full check flow: the complete test suite
 check: test
+
+# In-container suite behind make verify: the repo content checks, which
+# need no network and no host deployment state. The host deployment checks
+# (test-links, test-rules) stay host-only in test.
+verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode
+	@echo ""
+	@echo "Container verification suite passed!"
 
 # Test deployment completeness and that all expected symlinks exist
 test-links:
@@ -371,6 +405,7 @@ help:
 	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
+	@echo "  make verify      - Container verification suite (verifier dispatches)"
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"

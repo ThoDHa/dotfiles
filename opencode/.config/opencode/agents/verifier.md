@@ -7,8 +7,7 @@ permission:
   bash:
     "*": "deny"
     "git push*": "deny"
-    "make test": "allow"
-    "make lint-corpus": "allow"
+    "make verify": "allow"
     "tasks render": "allow"
     "git status *": "allow"
     "git diff *": "allow"
@@ -17,9 +16,9 @@ permission:
     "git rev-parse *": "allow"
     "ls *": "allow"
     "cat *": "allow"
-    "cat *.env": "deny"
-    "cat *.env.*": "deny"
     "grep *": "allow"
+    "* *.env": "deny"
+    "* *.env.*": "deny"
   task: deny
   webfetch: deny
   websearch: deny
