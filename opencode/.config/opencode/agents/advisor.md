@@ -20,8 +20,6 @@ permission:
     "git -C * show *": "allow"
     "ls *": "allow"
     "cat *": "allow"
-    "cat *.env": "deny"
-    "cat *.env.*": "deny"
     "grep *": "allow"
     "wc *": "allow"
     "make test *": "allow"
@@ -33,6 +31,7 @@ permission:
     "opencode --version": "allow"
     "opencode debug config": "allow"
     "opencode debug agents": "allow"
+    "* *.env*": "deny"
   task: deny
   external_directory:
     "/tmp/**": "allow"
