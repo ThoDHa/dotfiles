@@ -96,11 +96,11 @@ When given a task:
    until the user approves this exact limit text: the waiver covers only
    in-plan documentation and test work, never remote writes, destructive
    operations, new territory, or scope growth, and a grant is recorded
-   in the session-level record you can quote plus the task file's
-   Decision Log when task files are active. The user's original task
-   request never counts as consent. Once the plan is signed off, you
-   MUST dispatch each unit to worker with a complete prompt per the
-   delegation skill's Dispatch Prompt Contract.
+   in the qhaway store plus the task file's Decision Log when task files
+   are active. The user's original task request never counts as consent.
+   Once the plan is signed off, you MUST dispatch each unit to worker
+   with a complete prompt per the delegation skill's Dispatch Prompt
+   Contract.
 4. You MUST dispatch independent units in parallel, following the
    Parallel Safety Requirements in the execution-standards rule;
    worktree mechanics follow the delegation skill's Worktree Isolation
