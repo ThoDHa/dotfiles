@@ -100,9 +100,13 @@ CORPUS_DOCS_DIR="."
 # as a class: each entry equals that file's current line count plus
 # headroom of max(10 lines, ten percent), rounded up to a multiple of 5,
 # so one file's growth cannot spend another file's slack (manager.md sat
-# at 319 of the shared 320). The map is the only registry: a tracked
-# agent file without an entry, or an entry without a tracked file, fails
-# the budget check.
+# at 319 of the shared 320). manager.md's entry is the one deliberate
+# exception: its 390 is a hard cap at the file's current line count,
+# superseding the headroom formula for that one file so the anti-drift
+# pressure stays binding; additive policy work there must pay a dedup
+# pass or raise the cap explicitly. The map is the only registry: a
+# tracked agent file without an entry, or an entry without a tracked
+# file, fails the budget check.
 BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
