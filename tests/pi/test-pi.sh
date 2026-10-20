@@ -73,6 +73,20 @@ fi
 assert_contains "step_verify's pi block is gated on WANT_PI=1 and the deployed clone" "$setup" \
 	'[ "$WANT_PI" = "1" ] && [ -e "$HOME/.pi/agent/.git" ]'
 
+# Supply-chain posture and step_verify interior, pinned inside the
+# extracted blocks so the needles cannot be satisfied from elsewhere in
+# the script.
+step_pi_fn="$(extract_fn step_pi "$SETUP_SH")"
+step_verify_fn="$(extract_fn step_verify "$SETUP_SH")"
+assert_contains "step_pi installs pi with scripts disabled" "$step_pi_fn" \
+	"--ignore-scripts @earendil-works/pi-coding-agent"
+assert_contains "step_pi upgrades to the fetched version instead of floating" "$step_pi_fn" \
+	'@earendil-works/pi-coding-agent@$latest'
+assert_contains "step_verify's pi block checks the clone's origin URL" "$step_verify_fn" \
+	"remote.origin.url"
+assert_contains "step_verify's pi block checks settings.json is tracked" "$step_verify_fn" \
+	"--error-unmatch settings.json"
+
 echo "== update-feed parser (real function, fake curl) =="
 latest_fn="$(extract_fn _pi_latest_version "$SETUP_SH")"
 if [[ -n "$latest_fn" ]]; then
@@ -85,19 +99,32 @@ assert_contains "feed parser picks the first version key" "$latest_fn" "grep -o 
 assert_contains "feed parser takes one line" "$latest_fn" "head -1"
 assert_contains "feed parser strips to the bare value" "$latest_fn" "sed -E 's/.*\"([^\"]+)\".*/\\1/'"
 
-# Fake curl: cats a fixture payload file, so a missing file doubles as
-# the fetch-failure case (its stderr is eaten by the function's own
-# 2>/dev/null, mirroring a real network error).
+# Fake curl: exits nonzero without output on the CURL_FAIL marker, and
+# otherwise cats the fixture payload file, so a missing file is a
+# naturally failing curl. Both shapes are real fetch failures: the
+# function's own 2>/dev/null eats the noise and its `|| true` must
+# degrade the pipeline to empty output.
 feed_bin="$ROOT/feedbin"
 mkdir -p "$feed_bin"
-printf '#!/bin/sh\ncat "%s"\n' "$ROOT/feed.json" >"$feed_bin/curl"
+cat >"$feed_bin/curl" <<EOF
+#!/bin/sh
+[ "\$(cat "$ROOT/feed.json" 2>/dev/null)" = "CURL_FAIL" ] && exit 1
+cat "$ROOT/feed.json"
+EOF
 chmod +x "$feed_bin/curl"
 
+# The payload is what the fake curl serves; the empty sentinel leaves
+# the feed file missing, and the CURL_FAIL marker makes curl exit
+# nonzero without writing anything.
 run_feed_parser() { # payload; prints the real _pi_latest_version output
-	printf '%s\n' "$1" >"$ROOT/feed.json"
+	if [[ -n "$1" ]]; then
+		printf '%s\n' "$1" >"$ROOT/feed.json"
+	else
+		rm -f "$ROOT/feed.json"
+	fi
 	(
 		PATH="$feed_bin:$PATH"
-		eval "$(extract_fn _pi_latest_version "$SETUP_SH")"
+		eval "$latest_fn"
 		_pi_latest_version
 	)
 }
@@ -107,12 +134,13 @@ assert_eq "feed parser survives sibling keys" "4.5.6" \
 	"$(run_feed_parser '{"ok":true,"version":"4.5.6","url":"https://pi.dev"}')"
 assert_eq "feed parser takes the first version when several are present" "7.0.0" \
 	"$(run_feed_parser $'{"version":"7.0.0"}\n{"version":"8.0.0"}')"
-rm -f "$ROOT/feed.json"
-[[ -z "$(run_feed_parser 'unused')" ]] \
-	&& ok "feed parser degrades to empty on a fetch failure" \
-	|| bad "feed parser degrades to empty on a fetch failure"
-printf 'no version key here\n' >"$ROOT/feed.json"
-[[ -z "$(run_feed_parser 'unused')" ]] \
+[[ -z "$(run_feed_parser 'CURL_FAIL')" ]] \
+	&& ok "feed parser degrades to empty when curl exits nonzero" \
+	|| bad "feed parser degrades to empty when curl exits nonzero"
+[[ -z "$(run_feed_parser '')" ]] \
+	&& ok "feed parser degrades to empty when the feed file is missing" \
+	|| bad "feed parser degrades to empty when the feed file is missing"
+[[ -z "$(run_feed_parser 'no version key here')" ]] \
 	&& ok "feed parser degrades to empty on an unparseable payload" \
 	|| bad "feed parser degrades to empty on an unparseable payload"
 
@@ -149,7 +177,7 @@ run_installed_parser() { # simulated `pi --version` output, or "missing" for no 
 			PATH="$pi_bin:$PATH"
 			export FAKE_PI_VERSION="$simulated"
 		fi
-		eval "$(extract_fn _pi_installed_version "$SETUP_SH")"
+		eval "$installed_fn"
 		_pi_installed_version
 	)
 }
@@ -330,9 +358,15 @@ build_seed_fixture "$FIXTURE"
 probe_seed_repo "$FIXTURE" "fixture"
 
 echo "== origin fidelity (network-gated) =="
-if timeout 20 git ls-remote "$SEED_ORIGIN" >/dev/null 2>&1; then
+# Two-probe gate: a generic reachability probe first, so a failing
+# git ls-remote while the network is up is a loud bad (upstream deleted
+# or renamed) instead of an offline skip. Clone and checkout get their
+# own timeouts, matching the gate's idiom.
+if curl -fsI --max-time 10 https://github.com >/dev/null 2>&1; then
 	origin="$ROOT/pi-seed-origin"
-	if git clone -q "$SEED_ORIGIN" "$origin" && git -C "$origin" checkout -q "$SEED_COMMIT"; then
+	if timeout 20 git ls-remote "$SEED_ORIGIN" >/dev/null 2>&1 \
+		&& timeout 60 git clone -q "$SEED_ORIGIN" "$origin" \
+		&& timeout 20 git -C "$origin" checkout -q "$SEED_COMMIT"; then
 		ok "origin serves the settled seed commit $SEED_COMMIT"
 		for f in .gitignore .githooks/pre-commit settings.json; do
 			if cmp -s "$origin/$f" "$FIXTURE/$f"; then
@@ -344,8 +378,7 @@ if timeout 20 git ls-remote "$SEED_ORIGIN" >/dev/null 2>&1; then
 		assert_eq "origin hook is tracked executable (100755)" "100755" \
 			"$(git -C "$origin" ls-files -s .githooks/pre-commit | awk '{print $1}')"
 	else
-		bad "origin serves the settled seed commit $SEED_COMMIT"
-		skip_test "origin byte-fidelity (seed commit unreachable)"
+		bad "upstream unreachable or seed commit $SEED_COMMIT missing while the network is up (deleted, renamed, or rewritten?)"
 	fi
 else
 	skip_test "origin fidelity battery (network unreachable; verify-inner runs network-off)"
