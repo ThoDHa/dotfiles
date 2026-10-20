@@ -37,7 +37,7 @@ CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode test-pi lint-corpus check verify-inner
 .PHONY: sync-claudecode stow-claudecode
 
 # Default target
@@ -299,7 +299,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -309,7 +309,7 @@ check: test
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
 # (test-links, test-rules) stay host-only in test.
-verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode
+verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -383,6 +383,16 @@ test-claudecode:
 	@echo "Testing Claude Code sync (CLAUDE.md vs opencode rules)..."
 	@bash tests/claudecode/test-sync.sh
 
+# Test the pi integration contract: setup.sh's pi functions and gates,
+# the .zshrc session-dir export, and the seed config repo's whitelist
+# and pre-commit secrets guard against a local fixture replica. Hermetic:
+# the feed and the pi binary are faked on PATH, and the ThoDHa/pi origin
+# is probed only when the network is reachable, so the suite runs green
+# network-off (verify-inner) with the origin section announced as skipped.
+test-pi:
+	@echo "Testing the pi integration contract..."
+	@bash tests/pi/test-pi.sh
+
 # Help
 help:
 	@echo "Dotfiles Management"
@@ -410,7 +420,7 @@ help:
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode)"
+	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode + pi)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
 	@echo "  make verify      - Container verification suite (verifier dispatches)"
@@ -419,6 +429,7 @@ help:
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
 	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
+	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
