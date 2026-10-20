@@ -113,6 +113,22 @@ cat "$ROOT/feed.json"
 EOF
 chmod +x "$feed_bin/curl"
 
+# Shim self-test: the fake must fail on a missing feed and on the
+# marker, or the degradation cases below would pass on empty outputs
+# without any failure having occurred.
+rm -f "$ROOT/feed.json"
+if "$feed_bin/curl" </dev/null >/dev/null 2>&1; then
+	bad "fake curl fails when the feed file is missing"
+else
+	ok "fake curl fails when the feed file is missing"
+fi
+printf 'CURL_FAIL\n' >"$ROOT/feed.json"
+if "$feed_bin/curl" </dev/null >/dev/null 2>&1; then
+	bad "fake curl fails on the CURL_FAIL marker"
+else
+	ok "fake curl fails on the CURL_FAIL marker"
+fi
+
 # The payload is what the fake curl serves; the empty sentinel leaves
 # the feed file missing, and the CURL_FAIL marker makes curl exit
 # nonzero without writing anything.
@@ -140,6 +156,9 @@ assert_eq "feed parser takes the first version when several are present" "7.0.0"
 [[ -z "$(run_feed_parser '')" ]] \
 	&& ok "feed parser degrades to empty when the feed file is missing" \
 	|| bad "feed parser degrades to empty when the feed file is missing"
+[[ ! -f "$ROOT/feed.json" ]] \
+	&& ok "the missing-feed sentinel leaves no feed file behind" \
+	|| bad "the missing-feed sentinel leaves no feed file behind"
 [[ -z "$(run_feed_parser 'no version key here')" ]] \
 	&& ok "feed parser degrades to empty on an unparseable payload" \
 	|| bad "feed parser degrades to empty on an unparseable payload"
