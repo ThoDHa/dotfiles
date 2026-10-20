@@ -219,9 +219,13 @@ build:
 	docker build -t $(CONTAINER) --no-cache -f bootstrap/Dockerfile .
 
 # Designated scratch for verifier dispatches: the only host path a verify
-# container may write. Per-run unique so concurrent verifier dispatches
-# never share a scratch dir; override to relocate the family.
-FLEET_VERIFY_SCRATCH ?= /tmp/opencode/fleet-verify-$(shell date +%s%N)
+# container may write. Unique per make invocation so concurrent verifier
+# dispatches never share a scratch dir; evaluated once at parse time so
+# the mkdir and the docker mount bind the same directory. Override to
+# relocate the family.
+ifeq ($(origin FLEET_VERIFY_SCRATCH),undefined)
+FLEET_VERIFY_SCRATCH := /tmp/opencode/fleet-verify-$(shell date +%s%N)
+endif
 
 # A linked worktree's .git file points at the main .git by absolute path, so
 # git inside the container resolves only when the common dir exists at that
