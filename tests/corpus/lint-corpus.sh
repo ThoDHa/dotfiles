@@ -24,9 +24,9 @@
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 390,
 #                             worker 145, verifier 65, reviewer 135,
-#                             planner 120, analyst 85), rules 190,
+#                             planner 120, advisor 90), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
-#   7. bash map identity      the planner and analyst `permission:`
+#   7. bash map identity      the planner and advisor `permission:`
 #                             `bash:` blocks stay byte-identical; a
 #                             missing or empty block fails too
 #
@@ -112,16 +112,16 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/verifier.md]=65
 	[opencode/.config/opencode/agents/reviewer.md]=135
 	[opencode/.config/opencode/agents/planner.md]=120
-	[opencode/.config/opencode/agents/analyst.md]=85
+	[opencode/.config/opencode/agents/advisor.md]=90
 )
 
 # The two agent files that share one read-only bash permission map,
 # pinned byte-identical by the map-identity check. Exactly this pair:
 # not a registry, and not generalized to edit: or the other
 # frontmatter maps, which deliberately differ (planner edits .tasks/**,
-# analyst /tmp/opencode/reports/**).
+# advisor /tmp/opencode/reports/**).
 MAP_ID_PLANNER="$AGENTS_SCOPE/planner.md"
-MAP_ID_ANALYST="$AGENTS_SCOPE/analyst.md"
+MAP_ID_ADVISOR="$AGENTS_SCOPE/advisor.md"
 
 EM_DASH="$(printf '\xe2\x80\x94')"
 EN_DASH="$(printf '\xe2\x80\x93')"
@@ -501,7 +501,7 @@ check_line_budgets() {
 	echo "  6/7 line budgets: clean"
 }
 
-# Map-identity check: the planner and analyst files carry one shared
+# Map-identity check: the planner and advisor files carry one shared
 # read-only bash permission map, and a drift in either file breaks the
 # shared contract, so neither side is authoritative and any difference
 # fails the pair. Extraction is line-based like every other check here
@@ -516,8 +516,8 @@ check_line_budgets() {
 # vacuously.
 check_map_identity() {
 	assert_present "$MAP_ID_PLANNER"
-	assert_present "$MAP_ID_ANALYST"
-	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ANALYST" '
+	assert_present "$MAP_ID_ADVISOR"
+	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ADVISOR" '
 	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
 	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
@@ -557,7 +557,7 @@ check_map_identity() {
 			printf "FAIL: %s:%d: bash permission map diverges from %s:%d at map line %d: blocks have %d vs %d lines\n", pf, start[pf] + shared, af, start[af] + shared, shared + 1, count[pf], count[af]
 			exit 1
 		}
-	}' "$MAP_ID_PLANNER" "$MAP_ID_ANALYST"
+	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
 	echo "  7/7 bash map identity: clean"
 }
 
