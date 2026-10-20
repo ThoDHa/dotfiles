@@ -1,7 +1,7 @@
 # OpenCode Orchestration Design
 
 This note documents the manager, worker, verifier, reviewer, planner,
-and analyst agent pipeline, the git authority model, the task-file
+and advisor agent pipeline, the git authority model, the task-file
 integration, and the verification chain. The agent files under the
 opencode config carry the normative requirements in RFC 2119 form; this
 note explains the architecture and the reasoning, pointing at each
@@ -16,7 +16,7 @@ requirement's canonical home (file plus section heading or rule number).
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | glm-5.3 | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond its deny-first read-only map plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/opencode/reports/` artifact otherwise) |
 | planner | subagent | glm-5.3 | Planning and research labor: dedicated research dispatches (territory reconnaissance, codebase investigation, findings reports through the `tasks report` channel for task-file dispatches or the reserved `research/` deposit path for task-file-less ones), drafting the Triage task file's planning sections ahead of the manager's Triage → Ready approval, shared recon deposits, no implementation |
-| analyst | subagent | glm-5.3 | Judgment labor behind the manager's decisions: evaluation memos for plan approvals, discrepancy reconciliation analysis, design-challenge position drafts, reviewer-finding disposition drafts, incoming-request triage, closing-report synthesis, git-reshape design; read-only repos and logs, evidence stated with anchors, one memo deposit per dispatch, never authoring what it judges |
+| advisor | subagent | glm-5.3 | Judgment labor behind the manager's decisions: evaluation memos for plan approvals, discrepancy reconciliation analysis, design-challenge position drafts, reviewer-finding disposition drafts, incoming-request triage, closing-report synthesis, git-reshape design; read-only repos and logs, evidence stated with anchors, one memo deposit per dispatch, never authoring what it judges |
 
 The manager is a coordinator, not an implementer: it holds no implementation
 duty (it never authors implementation content), and its file edits are
@@ -26,7 +26,7 @@ checkpoints on the branches the manager assigned them. The division of
 labor between the dispatch targets is explicit: the worker is the
 code-writing agent, the planner is the destination for research and
 planning dispatches (planning labor, dedicated exploration,
-investigation, and findings reports), and the analyst is the
+investigation, and findings reports), and the advisor is the
 destination for judgment dispatches (evaluation memos, reconciliation
 analysis, disposition and position drafts, request triage, synthesis
 drafting), so research-grade context building and judgment work
@@ -37,7 +37,7 @@ take, and the command freedom exists to unblock and steer the fleet
 (scouting a dispatch, unblocking a worker, checking a unit's result); any
 duty that grows into sustained work of its own is dispatched to a fleet
 agent rather than absorbed (research-grade exploration to the planner,
-judgment memos to the analyst, code writing to the worker), since
+judgment memos to the advisor, code writing to the worker), since
 capability never reduces the delegation
 duty.
 
@@ -46,11 +46,11 @@ transcription of command results is mechanical and runs on the flash model,
 while code review and result interpretation need the full model. The model
 pins follow the same line: an unpinned subagent inherits the parent
 session's model, and the manager session itself runs flash, so the
-judgment roles (reviewer, planner, analyst) carry explicit glm-5.3 pins
+judgment roles (reviewer, planner, advisor) carry explicit glm-5.3 pins
 while the mechanical roles (worker, verifier) keep their flash pins. The
 verifier reports exit statuses, the runner's own counts, and verbatim
 failure output; interpretation happens in the reconciliation chain
-(analyst memo, manager decision), never inside the verifier.
+(advisor memo, manager decision), never inside the verifier.
 
 ## Git authority
 
@@ -143,13 +143,13 @@ defer, or decline), because unbounded loops hide failures and unactioned
 suggestions get lost (rules 7 through 9 of the manager agent file; one
 combined seam review closes the batch). The reconciliation analysis
 behind rule 8's discrepancy handling and the position and disposition
-drafts behind rule 9 route to the analyst under the manager's fixed
+drafts behind rule 9 route to the advisor under the manager's fixed
 routing table; the manager keeps the dispositions and the decisions.
 
 Verified findings get fixed or dispatched; design arguments get answered
 or debated in search of the better design (taste-only findings labeled
 and not debatable): the manager answers before declining, drafting its
-position papers through the analyst, the reviewer
+position papers through the advisor, the reviewer
 concedes promptly or strengthens with new argument only, exactly one
 exchange ends the debate, and a disagreement still unresolved after that
 exchange escalates verbatim to the user rather than dropping silently; a
@@ -206,7 +206,7 @@ same inspection core and adds the two `tasks` channels, `make test`,
 `sqlite3 -readonly`, the opencode help and version probes, and the
 exact `opencode debug config` and `opencode debug agents` entries,
 with its edit map opening only `.tasks/**` for the planning carve-out
-and the direct `research/` deposit write; and the analyst copies the
+and the direct `research/` deposit write; and the advisor copies the
 planner's bash map rule for rule (its `grep` allow already covers the
 service-log reading its reconciliation memos need), with its edit map
 opening `/tmp/opencode/reports/**` for the memo deposits instead of
@@ -222,7 +222,7 @@ credential separation.
 
 ### Accepted-risk register
 
-The deny-first reviewer, planner, and analyst maps carry four accepted residual
+The deny-first reviewer, planner, and advisor maps carry four accepted residual
 classes, accepted because withdrawing them would gut all three charters (diff
 inspection is the reviewer's core duty, cat and grep the standard
 inspection path). Single-command redirects are a pattern-level match:
@@ -267,7 +267,7 @@ pointing at the `.tsx` twin, inert under v2, followed in the same batch;
 each stanza is preserved verbatim in its removal commit's diff for the
 plugin-port task to restore deliberately. tui.json keeps only
 its keybinds; the `sidebarSubagents: true` option that listed the fleet's
-child sessions (worker, verifier, reviewer, planner, analyst) in the
+child sessions (worker, verifier, reviewer, planner, advisor) in the
 sidebar's LRU group rode the removed entry and returns with the port. The
 tripwire for the `.tsx` twin lives here: after any future v2 upgrade,
 grep the shared service log for a WARN line naming `tui.tsx` (baseline
@@ -289,7 +289,7 @@ the `.tsx` path would surface as just such a WARN line.
   is its backstop. The no-implementation and territory-scoping
   restraints on research dispatches routed to the same planner are
   likewise prompt-soft, and the manager's review of the findings is
-  their backstop. The analyst's no-authorship and evidence-anchoring
+  their backstop. The advisor's no-authorship and evidence-anchoring
   restraints are prompt-soft the same way: the manager's review of each
   memo, and its final yes/no on everything the memo informs, are the
   backstop. The plan-review gate on high-cost plans is advisory
