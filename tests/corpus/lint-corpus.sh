@@ -7,8 +7,7 @@
 #
 #   1. em-dash sweep          no U+2014 and no space-flanked U+2013 in
 #                             corpus prose (Makefile included; code spans
-#                             and fences excluded; the two definitional
-#                             rule lines allowlisted)
+#                             and fences excluded)
 #   2. link liveness          every relative file link and #anchor
 #                             resolves (GitHub slug rules; external
 #                             http(s) out of scope; fence contents and
@@ -81,14 +80,6 @@ RULES_SCOPE="opencode/.config/opencode/rules"
 INVENTORY="INVENTORY.md"
 MAKEFILE="Makefile"
 CORPUS_SCOPES=("$SKILL_SCOPE" "$AGENTS_SCOPE" "$RULES_SCOPE" "README.md" "opencode/DESIGN.md" "$INVENTORY")
-
-# Definitional allowlist: the two rule lines that must show the very
-# characters they ban (core.md names U+2014 bare in parentheses; the
-# documentation-standards en-dash rule shows U+2013 in code spans).
-ALLOWLIST_CORE_FILE="opencode/.config/opencode/rules/core.md"
-ALLOWLIST_CORE_LINE="MUST NEVER use em dashes"
-ALLOWLIST_DOCSTAND_FILE="agents/.agents/skills/documentation-standards/SKILL.md"
-ALLOWLIST_DOCSTAND_LINE="An en-dash"
 
 # The corpus-docs class names no directory in its heading; the parser
 # marks it with this placeholder and the membership check switches to
@@ -166,14 +157,10 @@ is_tracked() { [[ -n "${TRACKED[$1]+x}" ]]; }
 
 scan_em_dashes() { # file
 	awk -v file="$1" -v em="$EM_DASH" -v en="$EN_DASH" \
-		-v allow_core_file="$ALLOWLIST_CORE_FILE" -v allow_core_line="$ALLOWLIST_CORE_LINE" \
-		-v allow_docstand_file="$ALLOWLIST_DOCSTAND_FILE" -v allow_docstand_line="$ALLOWLIST_DOCSTAND_LINE" \
 		"${FENCE_AWK}"'
 		{
 			if (fence_toggle($0)) next
 			if (in_fence()) next
-			if (file == allow_core_file && index($0, allow_core_line) > 0) next
-			if (file == allow_docstand_file && index($0, allow_docstand_line) > 0) next
 			line = $0
 			while (match(line, /`[^`]*`/))
 				line = substr(line, 1, RSTART - 1) substr(line, RSTART + RLENGTH)
