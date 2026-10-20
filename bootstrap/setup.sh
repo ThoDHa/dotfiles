@@ -414,19 +414,27 @@ _install_opencode_v2() {
     fi
 }
 
-# Warn (non-fatal) when the stowed opencode config is no longer a symlink.
-# v2's one-time config migration rename-replaces
-# ~/.config/opencode/opencode.json with a real translated file, and the
-# Makefile stows before the installer runs, so a fresh machine's first v2
-# invocation can be this bootstrap's own installer and silently break the
-# deployment. Call after every installer invocation; the up-to-date path
-# never calls it. 'make readopt' from the dotfiles repo re-adopts the file
-# and restores the symlink; 'make clean-stow stow' is the explicit
-# alternative (plain re-stow conflicts while a real file occupies the
-# target). Never fails the step.
-_warn_opencode_config_shadowed() {
+# Reconcile the stow deployment after the opencode v2 installer. v2's
+# one-time config migration rename-replaces the stow-owned links under
+# ~/.config/opencode (opencode.json plus the rules/ and agents/ links)
+# with real files, and the Makefile stows before the installer runs, so
+# a fresh machine's first v2 invocation can be this bootstrap's own
+# installer and silently break the deployment. Call after every
+# installer invocation; the up-to-date path never calls it. On a host
+# this warns non-fatally and leaves the repair to the user: 'make
+# readopt' re-adopts the file and restores the symlink; 'make clean-stow
+# stow' is the explicit alternative (plain re-stow conflicts while a
+# real file occupies the target). Inside the container build
+# (SKIP_CHSH=1) there is no user to ask and the repo copy is canonical,
+# so the same repair runs directly. Never fails the step.
+_reconcile_opencode_stow() {
     if [ ! -L "$HOME/.config/opencode/opencode.json" ]; then
-        echo "  Warning: ~/.config/opencode/opencode.json is not a stow symlink (opencode v2 migration replaces it) — run 'make readopt' or 'make clean-stow stow' in $DOTFILES_DIR to repair"
+        if [ "${SKIP_CHSH:-0}" = "1" ]; then
+            echo "  Repairing container stow shadowed by the opencode v2 migration (clean-stow + stow)..."
+            make -C "$DOTFILES_DIR" clean-stow stow
+        else
+            echo "  Warning: ~/.config/opencode/opencode.json is not a stow symlink (opencode v2 migration replaces it) — run 'make readopt' or 'make clean-stow stow' in $DOTFILES_DIR to repair"
+        fi
     fi
 }
 
@@ -434,7 +442,7 @@ step_opencode() {
     if ! command -v opencode &>/dev/null; then
         echo "  Installing opencode v2..."
         _install_opencode_v2
-        _warn_opencode_config_shadowed
+        _reconcile_opencode_stow
         return
     fi
     local current latest major
@@ -443,7 +451,7 @@ step_opencode() {
     if [ "$major" = "1" ]; then
         echo "  Migrating opencode v1 $current → opencode v2..."
         _install_opencode_v2
-        _warn_opencode_config_shadowed
+        _reconcile_opencode_stow
         # Clean up an npm-installed v1 alongside the binary migration; a
         # missing npm or a missing package is not an error.
         if command -v npm &>/dev/null && npm ls -g opencode-ai &>/dev/null; then
@@ -458,13 +466,13 @@ step_opencode() {
     elif [ -z "$current" ]; then
         echo "  opencode version unknown, reinstalling"
         _install_opencode_v2
-        _warn_opencode_config_shadowed
+        _reconcile_opencode_stow
     elif [ "$current" = "$latest" ]; then
         echo "  opencode $current is up to date"
     else
         echo "  Upgrading opencode $current → $latest (opencode v2)..."
         _install_opencode_v2
-        _warn_opencode_config_shadowed
+        _reconcile_opencode_stow
     fi
 }
 
