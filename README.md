@@ -115,6 +115,10 @@ The `bootstrap/setup.sh` script sets up a complete development environment:
 - eza, Docker, and optional OpenCode / Claude Code installs
   (the OpenCode install clones the context-manager plugin into
   `~/.config/opencode/opencode-context-manager/`)
+- optional pi coding agent (`@earendil-works/pi-coding-agent`) via npm
+  under NVM (prompted, host-only), with its configuration cloned from
+  [ThoDHa/pi](https://github.com/ThoDHa/pi) into `~/.pi/agent` (same
+  pattern as the nvim config)
 
 Installer scripts fetch the latest upstream version on each run (oh-my-zsh
 master, the latest installer URLs, the latest font release).
@@ -123,6 +127,26 @@ OpenCode and Claude Code are optional: the script asks whether to install
 (or update) each one, and `make stow` only links their config packages when
 the tool is present (override with `FORCE_OPENCODE=1` / `FORCE_CLAUDECODE=1`).
 Non-interactive runs take the default answer for both prompts.
+
+pi is prompted with the other optional tools (`WANT_PI`) and is host-only:
+containers skip it.
+
+**pi (coding agent):**
+- Needs Node >= 22.19 (the NVM step above satisfies it); npm installs
+  land in the active Node version's bin, so after switching Node
+  versions, re-run bootstrap or install with
+  `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
+- The config repo ignores everything until allowlisted (whitelist
+  `.gitignore`), and a pre-commit guard (`core.hooksPath .githooks`,
+  activated by bootstrap) rejects `auth.json` and `sessions/` paths as a
+  second layer
+- Session history lives outside the repo: the shell exports
+  `PI_CODING_AGENT_SESSION_DIR="$HOME/.local/share/pi/sessions"`
+- pi consumes the shared skills corpus at `~/.agents/skills` natively, no
+  configuration needed
+- Updates feed-compare against
+  [the pi.dev feed](https://pi.dev/api/latest-version) and reinstall
+  pinned to the feed version
 
 The script is idempotent: safe to run multiple times.
 
@@ -170,6 +194,8 @@ make stow        # Create fresh symlinks
 - **Permission denied**: Run bootstrap with appropriate permissions for system packages
 - **NeoVim plugins don't install**: Open nvim manually after bootstrap. Lazy will prompt to install plugins  
 - **Zsh not default shell**: Log out and back in, or run `exec zsh`
+- **pi config not cloned**: Bootstrap skips the `~/.pi/agent` clone when that directory already holds non-git content; adopt it into a git clone manually
+- **pi updates blocked**: A dirty `~/.pi/agent` clone blocks updates until committed or stashed
 
 ## Dependencies
 
@@ -187,3 +213,6 @@ The bootstrap script installs all required dependencies, but for reference:
 
 **NeoVim configuration:**
 - Managed in separate repository: [ThoDHa/nvim](https://github.com/ThoDHa/nvim)
+
+**pi configuration:**
+- Managed in separate repository: [ThoDHa/pi](https://github.com/ThoDHa/pi)
