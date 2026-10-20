@@ -17,8 +17,7 @@ permission:
     "ls *": "allow"
     "cat *": "allow"
     "grep *": "allow"
-    "* *.env": "deny"
-    "* *.env.*": "deny"
+    "* *.env*": "deny"
   task: deny
   webfetch: deny
   websearch: deny
