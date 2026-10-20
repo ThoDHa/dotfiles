@@ -507,6 +507,43 @@ step_claude_stow() {
     fi
 }
 
+# Install or upgrade the pi coding agent via npm, then deploy its
+# git-managed config repo to ~/.pi/agent and point the repo's git at its
+# own .githooks (whose pre-commit hook guards secrets).
+step_pi() {
+    if ! command -v pi &>/dev/null; then
+        echo "  Installing pi..."
+        npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+    else
+        local current latest
+        current=$(pi --version 2>/dev/null | awk '{print $1}' || true)
+        latest=$(curl -fsSL https://pi.dev/api/latest-version 2>/dev/null \
+            | grep -o '"version":"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        if [ -z "$latest" ]; then
+            echo "  Could not fetch pi version — skipping update"
+        elif [ "$current" = "$latest" ]; then
+            echo "  pi $current is up to date"
+        else
+            echo "  Upgrading pi $current → $latest..."
+            npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@$latest"
+        fi
+    fi
+
+    local pi_agent="$HOME/.pi/agent"
+    if [ -d "$pi_agent" ] && [ -n "$(ls -A "$pi_agent" 2>/dev/null)" ] \
+        && [ ! -e "$pi_agent/.git" ]; then
+        echo "  Warning: $pi_agent exists, is not empty, and is not a git repo — contents belong to pi or a manual install; not cloning; adopt manually"
+        return 0
+    fi
+    # git_clone_or_pull pulls once the destination dir exists, so an empty
+    # leftover dir is removed here to let the first clone happen.
+    if [ -d "$pi_agent" ] && [ -z "$(ls -A "$pi_agent" 2>/dev/null)" ]; then
+        rmdir "$pi_agent"
+    fi
+    git_clone_or_pull "pi config" "https://github.com/ThoDHa/pi.git" "$pi_agent"
+    git -C "$pi_agent" config core.hooksPath .githooks
+}
+
 # Clone the context-manager plugin directly into the opencode config dir,
 # where opencode.json/tui.json reference it. Floating on latest for now;
 # pin to a sha once the plugin API stabilizes. HTTPS (not SSH) so fresh
@@ -594,6 +631,28 @@ step_verify() {
         _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.ts"       "context-manager plugin"
         _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.tui.tsx" "context-manager TUI plugin"
     fi
+    # pi checks run only when selected and the deployed clone is present:
+    # a failed clone is already reported through FAILED_STEPS.
+    if [ "$WANT_PI" = "1" ] && [ -d "$HOME/.pi/agent" ]; then
+        if command -v pi &>/dev/null || compgen -G "$HOME/.nvm/versions/node/*/bin/pi" &>/dev/null; then
+            echo "    ✓ pi binary"
+        else
+            echo "    ✗ pi binary — NOT FOUND"
+            missing+=("pi binary")
+        fi
+        if [ "$(git -C "$HOME/.pi/agent" config --get remote.origin.url 2>/dev/null)" = "https://github.com/ThoDHa/pi.git" ]; then
+            echo "    ✓ pi config origin (ThoDHa/pi)"
+        else
+            echo "    ✗ pi config origin — NOT ThoDHa/pi"
+            missing+=("pi config origin")
+        fi
+        if git -C "$HOME/.pi/agent" ls-files --error-unmatch settings.json &>/dev/null; then
+            echo "    ✓ pi settings.json tracked"
+        else
+            echo "    ✗ pi settings.json — NOT TRACKED"
+            missing+=("pi settings.json")
+        fi
+    fi
 
     if [ ${#missing[@]} -gt 0 ]; then
         print_error "Missing: ${missing[*]}"
@@ -616,9 +675,18 @@ if command -v opencode &>/dev/null; then q="Update OpenCode?"; else q="Install O
 if prompt_yes_no "$q"; then WANT_OPENCODE=1; else WANT_OPENCODE=0; fi
 if command -v claude &>/dev/null; then q="Update Claude Code?"; else q="Install Claude Code?"; fi
 if prompt_yes_no "$q"; then WANT_CLAUDE=1; else WANT_CLAUDE=0; fi
+# pi is host-only: SKIP_CHSH=1 (the container-build marker, see step_zsh)
+# forces it off instead of prompting.
+if [ "${SKIP_CHSH:-0}" = "1" ]; then
+    WANT_PI=0
+else
+    if command -v pi &>/dev/null; then q="Update pi?"; else q="Install pi?"; fi
+    if prompt_yes_no "$q"; then WANT_PI=1; else WANT_PI=0; fi
+fi
 echo ""
 echo "  OpenCode:    $([ "$WANT_OPENCODE" = "1" ] && echo yes || echo no)"
 echo "  Claude Code: $([ "$WANT_CLAUDE" = "1" ] && echo yes || echo no)"
+echo "  pi:          $([ "$WANT_PI" = "1" ] && echo yes || echo no)"
 echo ""
 
 run_step "Stow dotfiles"          step_stow
@@ -638,6 +706,7 @@ if [ "$WANT_OPENCODE" = "1" ]; then run_step "OpenCode"           step_opencode;
 if [ "$WANT_OPENCODE" = "1" ]; then run_step "Context manager plugin" step_context_manager; else echo "  Skipping context manager plugin (OpenCode not selected)"; fi
 if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code"        step_claude;    else echo "  Skipping Claude Code (not selected)"; fi
 if [ "$WANT_CLAUDE"   = "1" ]; then run_step "Claude Code config" step_claude_stow; else echo "  Skipping Claude Code config (not selected)"; fi
+if [ "$WANT_PI"       = "1" ]; then run_step "pi coding agent"    step_pi;        else echo "  Skipping pi coding agent (not selected)"; fi
 run_step "Docker"                 step_docker
 run_step "Verification"           step_verify
 
@@ -665,6 +734,7 @@ echo "  1. Restart your shell:         exec zsh"
 echo "  2. Open tmux and press:        prefix + I  (install plugins)"
 echo "  3. Open nvim:                  Lazy will auto-install plugins"
 echo "  4. Activate docker (if new):   newgrp docker  (or log out and back in)"
+echo "  5. Start pi:                   run 'pi' (config in ~/.pi/agent)"
 echo ""
 
 [ ${#FAILED_STEPS[@]} -eq 0 ]
