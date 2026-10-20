@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Corpus lint: mechanical drift checks over the tracked documentation
-# corpus (corpus-review finding 16). Seven checks run in order and the
+# corpus (corpus-review finding 16). Eight checks run in order and the
 # lint fails fast on the first finding, printing `FAIL: <file>:<line>:
 # <what>`:
 #
@@ -28,6 +28,10 @@
 #   7. bash map identity      the planner and advisor `permission:`
 #                             `bash:` blocks stay byte-identical; a
 #                             missing or empty block fails too
+#   8. verify-recipe pin      the Makefile verify recipe keeps its
+#                             docker flags verbatim: the repo read-only
+#                             mount, --network none, and the scratch
+#                             plus git-common-dir mount shapes
 #
 # Reads only tracked files (git ls-files basis), so the result is
 # reproducible locally and in CI. The lint's own files (this script, the
@@ -181,7 +185,7 @@ check_em_dashes() {
 		assert_present "$file"
 		scan_em_dashes "$file"
 	done < <(md_corpus_files; printf '%s\n' "$MAKEFILE")
-	echo "  1/7 em-dash sweep: clean"
+	echo "  1/8 em-dash sweep: clean"
 }
 
 heading_slugs() { # file; prints GitHub-style anchor slugs for its headings
@@ -280,7 +284,7 @@ check_links() {
 			fi
 		done < <(extract_links "$file")
 	done < <(md_corpus_files)
-	echo "  2/7 link liveness: clean"
+	echo "  2/8 link liveness: clean"
 }
 
 scan_headings() { # file
@@ -325,7 +329,7 @@ check_headings() {
 		assert_present "$file"
 		scan_headings "$file"
 	done < <(md_corpus_files)
-	echo "  3/7 heading structure: clean"
+	echo "  3/8 heading structure: clean"
 }
 
 parse_inventory() { # emits C<class> and E<entry> records
@@ -416,7 +420,7 @@ check_inventory_counts() {
 				"class '<$name>' heading count ${INV_COUNT[$name]} != list length ${INV_ENTRY_TOTAL[$name]}"
 		fi
 	done
-	echo "  4/7 INVENTORY heading counts: clean"
+	echo "  4/8 INVENTORY heading counts: clean"
 }
 
 inventory_corpus_docs_members() {
@@ -450,7 +454,7 @@ check_inventory_membership() {
 				"membership drift in class '<$name>' vs $source_desc: missing [$missing] extra [$extra]"
 		fi
 	done
-	echo "  5/7 INVENTORY membership: clean"
+	echo "  5/8 INVENTORY membership: clean"
 }
 
 check_line_budgets() {
@@ -489,7 +493,7 @@ check_line_budgets() {
 		is_tracked "$file" || fail_at "$file" 1 \
 			"line budget mapped for a file that is not tracked; remove or rename the entry"
 	done
-	echo "  6/7 line budgets: clean"
+	echo "  6/8 line budgets: clean"
 }
 
 # Map-identity check: the planner and advisor files carry one shared
@@ -549,7 +553,34 @@ check_map_identity() {
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
-	echo "  7/7 bash map identity: clean"
+	echo "  7/8 bash map identity: clean"
+}
+
+# Verify-recipe pin: the containerized make verify gate is the
+# load-bearing isolation layer for verifier dispatches, so the recipe's
+# docker flags are pinned verbatim and silent posture drift (a dropped
+# read-only repo mount, network isolation, or scratch/git-common-dir
+# mount shape) fails the lint instead of quietly reintroducing host
+# mutation or network reach. Rationale: the FLEET-1-7 review's DC1
+# ruling promoting the container gate to owned, lint-pinned work.
+VERIFY_RECIPE_REQUIRED_FLAGS=(
+	'-v $(CURDIR):/root/dotfiles:ro'
+	'--network none'
+	'-v $(FLEET_VERIFY_SCRATCH):/scratch'
+	'$(DOCKER_WORKTREE_GIT_MOUNT)'
+)
+
+check_verify_recipe_pin() {
+	local flag recipe
+	# The recipe is the tab-indented block following the `verify:` target.
+	recipe="$(awk '/^verify:/{found = 1; next} found && !/^\t/{found = 0} found' "$MAKEFILE")"
+	[[ -n "$recipe" ]] || fail_at "$MAKEFILE" 1 \
+		"no verify recipe found; the FLEET-1-7 review DC1 rationale pins the container gate's docker flags verbatim"
+	for flag in "${VERIFY_RECIPE_REQUIRED_FLAGS[@]}"; do
+		[[ "$recipe" == *"$flag"* ]] || fail_at "$MAKEFILE" 1 \
+			"verify recipe lost the docker flag '$flag'; the FLEET-1-7 review DC1 rationale pins the container gate's isolation shape verbatim"
+	done
+	echo "  8/8 verify-recipe docker pin: clean"
 }
 
 check_preflight() { # the structural basis every later check assumes
@@ -575,7 +606,8 @@ main() {
 	check_inventory_membership
 	check_line_budgets
 	check_map_identity
-	echo "Corpus lint passed: 7 checks clean"
+	check_verify_recipe_pin
+	echo "Corpus lint passed: 8 checks clean"
 }
 
 main "$@"
