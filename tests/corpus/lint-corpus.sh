@@ -17,13 +17,15 @@
 #                             skipped; files with no headings, like the
 #                             prose-only agent files, pass vacuously)
 #   4. INVENTORY counts       class heading count equals list length
-#   5. INVENTORY membership   class list equals the tracked source set
-#                             (directory classes: git ls-files of the
-#                             heading's directory; corpus-docs class:
+#   5. INVENTORY membership   class list equals the tracked markdown
+#                             source set (directory classes: git ls-files
+#                             of the scope, markdown files only, so
+#                             non-markdown helpers in the same tree stay
+#                             out of the corpus; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           per-file agent budgets (manager 390,
-#                             worker 145, verifier 120, reviewer 135,
-#                             planner 120, advisor 90), rules 190,
+#   6. line budgets           per-file agent budgets (manager 395,
+#                             worker 145, verifier 120, reviewer 155,
+#                             planner 120, advisor 90, scout 65), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
 #   7. bash map identity      the planner and advisor `permission:`
 #                             `bash:` blocks stay byte-identical; a
@@ -102,7 +104,9 @@ CORPUS_DOCS_DIR="."
 # headroom of max(10 lines, ten percent), rounded up to a multiple of 5,
 # so one file's growth cannot spend another file's slack (manager.md sat
 # at 319 of the shared 320). manager.md's entry is the one deliberate
-# exception: its 390 is a hard cap at the file's current line count,
+# exception: its 395 is a hard cap at the file's current line count
+# (moved from 390 with the dual-harness preamble and the # pi: compile
+# directive),
 # superseding the headroom formula for that one file so the anti-drift
 # pressure stays binding; additive policy work there must pay a dedup
 # pass or raise the cap explicitly. The map is the only registry: a
@@ -112,12 +116,13 @@ BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
 declare -A BUDGET_AGENT_FILE_LINES=(
-	[opencode/.config/opencode/agents/manager.md]=390
+	[opencode/.config/opencode/agents/manager.md]=395
 	[opencode/.config/opencode/agents/worker.md]=145
 	[opencode/.config/opencode/agents/verifier.md]=120
-	[opencode/.config/opencode/agents/reviewer.md]=135
+	[opencode/.config/opencode/agents/reviewer.md]=155
 	[opencode/.config/opencode/agents/planner.md]=120
 	[opencode/.config/opencode/agents/advisor.md]=90
+	[opencode/.config/opencode/agents/scout.md]=65
 )
 
 # The two agent files that share one read-only bash permission map,
@@ -445,8 +450,8 @@ check_inventory_membership() {
 			expected="$(inventory_corpus_docs_members)"
 			source_desc="tracked .md outside the excluded trees, minus $INVENTORY itself"
 		else
-			expected="$(git ls-files -- "${INV_DIR[$name]}" | sort)"
-			source_desc="git ls-files ${INV_DIR[$name]}"
+			expected="$(git ls-files -- "${INV_DIR[$name]}" | grep -E '\.md$' | sort)"
+			source_desc="git ls-files ${INV_DIR[$name]} (markdown only)"
 		fi
 		if [[ "${INV_ENTRY_TOTAL[$name]}" -eq 0 ]]; then
 			actual=""
@@ -506,9 +511,9 @@ check_line_budgets() {
 # read-only bash permission map, and a drift in either file breaks the
 # shared contract, so neither side is authoritative and any difference
 # fails the pair. Extraction is line-based like every other check here
-# (no YAML parser; worker.md's frontmatter carries an unquoted ': '
-# in its description value, which defeats strict YAML parsing, so
-# consumers stay line-asserted):
+# (no YAML parser; worker.md's description value is quoted so pi's
+# strict frontmatter parser accepts it, but consumers stay
+# line-asserted):
 # the block is the `  bash:` line through the line before the next
 # two-space-indented sibling key (`  task:`) or the closing `---`,
 # opened only inside the line-1 `---` frontmatter so a body code

@@ -23,6 +23,8 @@ CLAUDECODE_STOW   := $(if $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT)),claudecode
 STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
 SKIPPED_PACKAGES  := $(filter-out $(STOW_PACKAGES),$(STOW_PACKAGES_ALL))
 CLAUDE_SYNC       := $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT))
+PI_PRESENT        := $(shell command -v pi >/dev/null 2>&1 && echo 1)
+PI_SYNC           := $(or $(FORCE_PI),$(PI_PRESENT))
 
 # Rules target path (after stow): used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
@@ -36,9 +38,12 @@ OPENCODE_CONFIG := $(STOW_TARGET)/.config/opencode
 CLAUDECODE_SRC       := $(CURDIR)/claudecode/.claude
 CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 
+# pi agent generator (compiled from the opencode fleet agents)
+PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-agents.sh
+
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
 .PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode test-pi lint-corpus check verify-inner
-.PHONY: sync-claudecode stow-claudecode
+.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents
 
 # Default target
 all: help
@@ -70,6 +75,11 @@ ifneq ($(CLAUDE_SYNC),)
 else
 	@echo "Skipping Claude Code sync (claude not installed)"
 endif
+ifneq ($(PI_SYNC),)
+	@$(MAKE) sync-pi-agents
+else
+	@echo "Skipping pi agents sync (pi not installed)"
+endif
 
 # Unstow all packages (full list, so configs of uninstalled tools are removed)
 unstow:
@@ -90,6 +100,11 @@ ifneq ($(CLAUDE_SYNC),)
 	@$(MAKE) sync-claudecode
 else
 	@echo "Skipping Claude Code sync (claude not installed)"
+endif
+ifneq ($(PI_SYNC),)
+	@$(MAKE) sync-pi-agents
+else
+	@echo "Skipping pi agents sync (pi not installed)"
 endif
 	@echo "Done! All packages restowed."
 
@@ -203,6 +218,15 @@ stow-claudecode:
 	@echo "Done! Claude Code configuration stowed."
 	@$(MAKE) sync-claudecode
 
+# Compile ~/.pi/agent/agents from the opencode fleet agents (single source
+# of truth; the pi frontmatter is constructed from each source's
+# "# pi:" directive, name, description, and body).
+sync-pi-agents:
+	@echo "Syncing pi agents from the opencode fleet..."
+	@test -f $(PI_AGENTS_GENERATOR) || (echo "ERROR: Generator script not found at $(PI_AGENTS_GENERATOR)" && exit 1)
+	@$(PI_AGENTS_GENERATOR)
+	@echo "Done! pi agents compiled from the opencode fleet."
+
 # Full bootstrap - install/update all dev tools
 bootstrap:
 	@./bootstrap/setup.sh
@@ -299,7 +323,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-pi
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-pi-agents test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -309,7 +333,7 @@ check: test
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
 # (test-links, test-rules) stay host-only in test.
-verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-pi
+verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-pi-agents test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -383,6 +407,11 @@ test-claudecode:
 	@echo "Testing Claude Code sync (CLAUDE.md vs opencode rules)..."
 	@bash tests/claudecode/test-sync.sh
 
+# Test that the generated pi agents match a fresh compilation of the fleet
+test-pi-agents:
+	@echo "Testing pi agents sync (generated files vs opencode fleet)..."
+	@bash tests/pi-agents/test-sync.sh
+
 # Test the pi integration contract: setup.sh's pi functions and gates,
 # the .zshrc session-dir export, and the seed config repo's whitelist
 # and pre-commit secrets guard against a local fixture replica. Hermetic:
@@ -419,6 +448,9 @@ help:
 	@echo "  make stow-claudecode    - Stow claudecode package (auto-syncs)"
 	@echo "  make unstow-claudecode  - Unstow claudecode package"
 	@echo ""
+	@echo "pi Agents:"
+	@echo "  make sync-pi-agents     - Compile ~/.pi/agent/agents from the opencode fleet"
+	@echo ""
 	@echo "Testing:"
 	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode + pi)"
 	@echo "  make check       - Alias for make test"
@@ -429,6 +461,7 @@ help:
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
 	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
+	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"

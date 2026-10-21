@@ -18,12 +18,13 @@ agents/.agents/skills/git-protocol/SKILL.md
 agents/.agents/skills/simplify-review/SKILL.md
 agents/.agents/skills/task-files/SKILL.md
 
-## Fleet agents (opencode/.config/opencode/agents/, 6)
+## Fleet agents (opencode/.config/opencode/agents/, 7)
 
 opencode/.config/opencode/agents/advisor.md
 opencode/.config/opencode/agents/manager.md
 opencode/.config/opencode/agents/planner.md
 opencode/.config/opencode/agents/reviewer.md
+opencode/.config/opencode/agents/scout.md
 opencode/.config/opencode/agents/verifier.md
 opencode/.config/opencode/agents/worker.md
 
