@@ -2,7 +2,7 @@
 name: manager
 description: Manager that delegates implementation to the agent fleet, retains architecture duties at coordination scale, and owns integration and history shaping
 mode: primary
-model: zai-coding-plan/glm-5.3-flash
+model: zai-coding-plan/glm-5.3
 color: success
 permission:
   edit:
