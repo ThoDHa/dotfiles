@@ -61,5 +61,8 @@
       "/tmp/**": "allow"
     },
     "doom_loop": "allow"
+  },
+  "experimental": {
+    "subagent_depth": 2
   }
 }
