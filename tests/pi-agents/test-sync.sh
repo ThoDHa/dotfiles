@@ -62,13 +62,22 @@ if "$GENERATOR" "$fresh" >/dev/null 2>&1; then
 else
 	bad "generator accepts an output-dir argument"
 fi
-expected_count="$(find "$REPO_ROOT/opencode/.config/opencode/agents" -maxdepth 1 -name '*.md' | wc -l)"
+# The anchor is intentionally loose (^# pi: without the trailing space):
+# a near-miss directive is counted here but skipped by the generator's
+# strict '^# pi: ' matcher, so the typo fails these assertions loudly
+# instead of dropping the file from the pi fleet with a green suite.
+expected_count="$(grep -lE '^# pi:' "$REPO_ROOT"/opencode/.config/opencode/agents/*.md | wc -l)"
 actual_count="$(find "$fresh" -maxdepth 1 -name '*.md' | wc -l)"
 [[ "$actual_count" -gt 0 ]] && ok "scratch run generates agent files ($actual_count)" \
 	|| bad "scratch run generates agent files ($actual_count)"
 [[ "$actual_count" -eq "$expected_count" ]] \
-	&& ok "one generated file per fleet source ($actual_count)" \
-	|| bad "one generated file per fleet source (expected $expected_count, got $actual_count)"
+	&& ok "one generated file per pi-targeted fleet source ($actual_count)" \
+	|| bad "one generated file per pi-targeted fleet source (expected $expected_count, got $actual_count)"
+expected_names="$(grep -lE '^# pi:' "$REPO_ROOT"/opencode/.config/opencode/agents/*.md | xargs -n1 basename | sort)"
+actual_names="$(find "$fresh" -maxdepth 1 -name '*.md' -exec basename {} \; | sort)"
+[[ "$actual_names" == "$expected_names" ]] \
+	&& ok "generated basename set matches the directive-bearing source set" \
+	|| bad "generated basename set matches the directive-bearing source set"
 if "$GENERATOR" "$fresh_again" >/dev/null 2>&1; then
 	ok "repeat generation to another dir succeeds"
 else
@@ -135,10 +144,10 @@ else
 	echo "== comparator self-test (doctored scratch copy, host untouched) =="
 	doctored="$ROOT/doctored-agents"
 	mkdir -p "$doctored"
-	grep -v '^model: ' "$fresh/manager.md" >"$doctored/manager.md"
+	grep -v '^model: ' "$fresh/worker.md" >"$doctored/worker.md"
 	# The command substitution is a subshell, so the probe's verdict lands
 	# in selftest_rc instead of the suite counters.
-	selftest_out="$(compare_fresh "comparator probe" "$fresh/manager.md" "$doctored/manager.md")"
+	selftest_out="$(compare_fresh "comparator probe" "$fresh/worker.md" "$doctored/worker.md")"
 	selftest_rc=$?
 	assert_eq "comparator detects a deleted line as stale" "1" "$selftest_rc"
 	assert_contains "stale report carries the remediation line" "$selftest_out" "$REMEDIATION"

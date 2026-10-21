@@ -2,7 +2,6 @@
 name: manager
 description: Manager that delegates implementation to the agent fleet, retains architecture duties at coordination scale, and owns integration and history shaping
 mode: primary
-# pi: model=glm-5.3-flash tools=read, bash, edit, write, subagent, todo
 model: zai-coding-plan/glm-5.3-flash
 color: success
 permission:
