@@ -2,7 +2,7 @@
 name: scout
 description: Fast codebase recon that returns compressed context for handoff to other agents
 mode: subagent
-# pi: model=glm-5.3-flash tools=read, bash
+# pi: model=glm-5.3-flash tools=read, bash detach=false
 model: zai-coding-plan/glm-5.3-flash
 permission:
   edit: deny

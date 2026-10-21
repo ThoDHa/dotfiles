@@ -5,7 +5,10 @@
 # Each dual-harness source carries a "# pi: model=<bare-id> tools=<list>"
 # comment in its frontmatter; this script compiles that comment together
 # with the name, description, and body into a real pi agent file under
-# ~/.pi/agent/agents. The pi frontmatter is constructed, never copied
+# ~/.pi/agent/agents. An optional trailing "detach=false" token (after the
+# tools list) additionally emits a "detach: false" frontmatter key, which
+# bars the agent from detached (background) subagent dispatch in pi. The pi
+# frontmatter is constructed, never copied
 # wholesale: pi's loader requires name and description, resolves bare
 # model ids against its default provider, and whitelists tools, while
 # opencode's per-file schema is closed (unknown keys, tools included,
@@ -76,6 +79,14 @@ for src in "$AGENT_SRC_DIR"/*.md; do
     model="$(sed -n 's/^# pi: model=\([^ ]*\).*$/\1/p' <<<"$pi_line")"
     tools="$(sed -n 's/^# pi: model=[^ ]* tools=//p' <<<"$pi_line")"
 
+    # Optional trailing "detach=false" directive token; it must be the last
+    # token, so anything else after "tools=" belongs to the tools list.
+    detach="true"
+    if [[ "$tools" == *" detach=false" ]]; then
+        detach="false"
+        tools="${tools%" detach=false"}"
+    fi
+
     missing=()
     if [[ -z "$name" ]]; then missing+=("name"); fi
     if [[ -z "$description" ]]; then missing+=("description"); fi
@@ -98,6 +109,9 @@ for src in "$AGENT_SRC_DIR"/*.md; do
         echo "description: $description"
         echo "model: $model"
         echo "tools: $tools"
+        if [[ "$detach" == "false" ]]; then
+            echo "detach: false"
+        fi
         echo "---"
         tail -n +"$((close_line + 1))" "$src"
     } > "$tmp"
