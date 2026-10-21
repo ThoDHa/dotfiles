@@ -1,6 +1,6 @@
 ---
 name: task-files
-description: Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode (a loading trigger only: the activation never creates task files, it triggers only the Large Task Offer gate), or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill.
+description: "Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode (a loading trigger only: the activation never creates task files, it triggers only the Large Task Offer gate), or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory in the project or in tool output does NOT activate this skill."
 ---
 
 > Manager Mode mechanics are defined in the `delegation` skill. Load it when Manager Mode activates.

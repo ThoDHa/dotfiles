@@ -1,6 +1,6 @@
 ---
 name: simplify-review
-description: Simplify and Review Loop covering the post-implementation convergence cycle: a simplify pass (reuse, dead code, redundancy, efficiency) followed by a review pass (correctness bugs, logic errors, edge cases, security), with fix semantics, loop control, convergence criteria, and an Analysis-Only Mode for consumers whose charter forbids edits. Use when any task, todo, or user request reaches completion, before reporting work complete, after implementation finishes, or when the user asks to simplify, clean up, or review completed changes.
+description: "Simplify and Review Loop covering the post-implementation convergence cycle: a simplify pass (reuse, dead code, redundancy, efficiency) followed by a review pass (correctness bugs, logic errors, edge cases, security), with fix semantics, loop control, convergence criteria, and an Analysis-Only Mode for consumers whose charter forbids edits. Use when any task, todo, or user request reaches completion, before reporting work complete, after implementation finishes, or when the user asks to simplify, clean up, or review completed changes."
 ---
 
 # Simplify and Review Loop

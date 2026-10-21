@@ -1,6 +1,6 @@
 ---
 name: debugging
-description: Debugging protocol covering systematic defect investigation: reliable reproduction, isolation and minimization, evidence-based hypothesis testing, root-cause diagnosis, minimal targeted fixes with mandatory regression tests, instrumentation cleanup, and escalation after failed hypotheses. Use when investigating bugs, errors, crashes, unexpected behavior, test or build failures, flaky tests, or when the user reports something not working.
+description: "Debugging protocol covering systematic defect investigation: reliable reproduction, isolation and minimization, evidence-based hypothesis testing, root-cause diagnosis, minimal targeted fixes with mandatory regression tests, instrumentation cleanup, and escalation after failed hypotheses. Use when investigating bugs, errors, crashes, unexpected behavior, test or build failures, flaky tests, or when the user reports something not working."
 ---
 
 # Debugging Protocol

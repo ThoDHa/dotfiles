@@ -1,6 +1,6 @@
 ---
 name: browser-testing
-description: Use when a task involves browser automation or browser test suites: Playwright, Puppeteer, scraping, verifying a running web UI, running browser tests locally or in Docker, or before installing any browser automation tooling. Covers the Playwright MCP versus Docker versus local-install selection rules and the Docker execution requirements. Do not use for non-browser Docker or testing work.
+description: "Use when a task involves browser automation or browser test suites: Playwright, Puppeteer, scraping, verifying a running web UI, running browser tests locally or in Docker, or before installing any browser automation tooling. Covers the Playwright MCP versus Docker versus local-install selection rules and the Docker execution requirements. Do not use for non-browser Docker or testing work."
 ---
 
 # Skill: Browser Testing
