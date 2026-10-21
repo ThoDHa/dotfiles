@@ -6,6 +6,7 @@ mode: subagent
 model: zai-coding-plan/glm-5.3-flash
 permission:
   edit: deny
+  task: deny
 ---
 
 You are a scout. Quickly investigate a codebase and return structured findings that another agent can use without re-reading everything.
