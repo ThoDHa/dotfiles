@@ -43,7 +43,7 @@ PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-ag
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
 .PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode test-pi lint-corpus check verify-inner
-.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents
+.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body
 
 # Default target
 all: help
@@ -412,6 +412,33 @@ test-pi-agents:
 	@echo "Testing pi agents sync (generated files vs opencode fleet)..."
 	@bash tests/pi-agents/test-sync.sh
 
+# Fleet manager source and its digest pin (see pin-manager-body; the digest
+# must match tests/pi-agents/test-sync.sh's manager_body_digest)
+FLEET_MANAGER_MD := opencode/.config/opencode/agents/manager.md
+MANAGER_BODY_PIN := tests/pi-agents/manager-body.sha256
+
+# Regenerate the manager body digest pin (keep the awk program identical to
+# the test's manager_body_digest). Refuses to write a vacuous pin: a missing
+# fleet manager.md, a digest pipeline that produced nothing, or an empty body
+# (an unclosed frontmatter extracts no lines, and empty input hashes to the
+# well-known empty digest) each fail loudly instead of pinning, which would
+# leave the sync guard dying vacuously after the next re-pin.
+pin-manager-body:
+	@test -f $(FLEET_MANAGER_MD) || { echo "ERROR: $(FLEET_MANAGER_MD) not found; nothing to pin" >&2; exit 1; }; \
+	digest=$$(awk '/^---$$/{c++; if (c == 2) { in_body = 1; next } } in_body { print }' $(FLEET_MANAGER_MD) | sha256sum | cut -d' ' -f1) || \
+		{ echo "ERROR: hashing the $(FLEET_MANAGER_MD) body failed" >&2; exit 1; }; \
+	[ -n "$$digest" ] || { echo "ERROR: body extraction from $(FLEET_MANAGER_MD) produced no digest" >&2; exit 1; }; \
+	empty_digest=$$(printf '' | sha256sum | cut -d' ' -f1) || \
+		{ echo "ERROR: computing the empty-input reference digest failed" >&2; exit 1; }; \
+	if [ "$$digest" = "$$empty_digest" ]; then \
+		echo "ERROR: $(FLEET_MANAGER_MD) body is empty (digest $$digest matches empty input);" >&2; \
+		echo "  the frontmatter is probably missing or never closes with a second ---. Fix the file, then rerun." >&2; \
+		exit 1; \
+	fi; \
+	printf '# sha256 of the fleet manager body (everything below the frontmatter closing ---); refresh: make pin-manager-body\n' > $(MANAGER_BODY_PIN); \
+	printf '%s\n' "$$digest" >> $(MANAGER_BODY_PIN); \
+	echo "Pinned the $(FLEET_MANAGER_MD) body digest to $(MANAGER_BODY_PIN)"
+
 # Test the pi integration contract: setup.sh's pi functions and gates,
 # the .zshrc session-dir export, and the seed config repo's whitelist
 # and pre-commit secrets guard against a local fixture replica. Hermetic:
@@ -450,6 +477,7 @@ help:
 	@echo ""
 	@echo "pi Agents:"
 	@echo "  make sync-pi-agents     - Compile ~/.pi/agent/agents from the opencode fleet"
+	@echo "  make pin-manager-body   - Regenerate the manager body digest pin (rejects missing or empty body)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode + pi)"

@@ -39,6 +39,20 @@ compare_fresh() { # label fresh actual; ok on byte-identity, bad plus summary ot
 	return 1
 }
 
+# manager_body_digest FILE; sha256 of the manager body: everything below
+# the frontmatter closing --- line. One definition shared by the pin
+# check below and make pin-manager-body (which re-derives it inline;
+# keep the two awk programs identical).
+manager_body_digest() {
+	awk '/^---$/{c++; if (c == 2) { in_body = 1; next } } in_body { print }' "$1" \
+		| sha256sum | cut -d' ' -f1
+}
+
+report_manager_drift() { # prints the reconcile duty and the refresh command
+	echo "  Fleet manager body drift: opencode/.config/opencode/agents/manager.md no longer matches tests/pi-agents/manager-body.sha256."
+	echo "  Reconcile ~/.pi/agent/manager.md with the new fleet body, then refresh tests/pi-agents/manager-body.sha256: make pin-manager-body"
+}
+
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
@@ -121,6 +135,30 @@ for f in "$fresh"/*.md; do
 		ok "$name.md model id is bare (no provider prefix)"
 	fi
 done
+
+# Fleet manager body pin: ~/.pi/agent/manager.md is hand-maintained and
+# shares normative delegation text with the fleet manager.md, so the two
+# bodies intentionally diverge (harness-specific preamble) and
+# byte-comparison is wrong. The pin guards only the FLEET side: any
+# fleet body change fails here and forces a conscious reconcile of the
+# pi copy plus a re-pin. Host charter divergence is notice-only. This
+# section is host-independent and runs everywhere (CI included).
+echo "== pin: fleet manager body digest =="
+HOST_CHARTER="$HOME/.pi/agent/manager.md"
+pinned="$(awk '!/^#/ && NF { print $1; exit }' "$REPO_ROOT/tests/pi-agents/manager-body.sha256")"
+current="$(manager_body_digest "$REPO_ROOT/opencode/.config/opencode/agents/manager.md")"
+if [[ "$current" == "$pinned" ]]; then
+	ok "fleet manager body matches the pinned digest"
+else
+	bad "fleet manager body matches the pinned digest"
+	report_manager_drift
+fi
+if [[ -f "$HOST_CHARTER" ]]; then
+	host_charter_digest="$(manager_body_digest "$HOST_CHARTER")"
+	[[ "$host_charter_digest" == "$pinned" ]] \
+		&& ok "host ~/.pi/agent/manager.md body digest matches the pin (notice only)" \
+		|| ok "host ~/.pi/agent/manager.md body digest diverges from the pin (notice only; drift is allowed, reconcile when you touch it)"
+fi
 
 if [[ ! -d "$HOST_DIR" ]]; then
 	skip_test "no ~/.pi/agent/agents on this host; host sync check skipped"
