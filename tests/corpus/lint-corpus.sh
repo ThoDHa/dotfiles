@@ -91,7 +91,7 @@ AGENTS_SCOPE="opencode/.config/opencode/agents"
 RULES_SCOPE="opencode/.config/opencode/rules"
 INVENTORY="INVENTORY.md"
 MAKEFILE="Makefile"
-CORPUS_SCOPES=("$SKILL_SCOPE" "$AGENTS_SCOPE" "$RULES_SCOPE" "README.md" "opencode/DESIGN.md" "$INVENTORY")
+CORPUS_SCOPES=("$SKILL_SCOPE" "$AGENTS_SCOPE" "$RULES_SCOPE" "README.md" "opencode/DESIGN.md" "pi/DESIGN.md" "$INVENTORY")
 
 # The corpus-docs class names no directory in its heading; the parser
 # marks it with this placeholder and the membership check switches to
@@ -437,8 +437,14 @@ check_inventory_counts() {
 inventory_corpus_docs_members() {
 	# Corpus-docs derivation (task contract): tracked .md outside the
 	# stowed config and non-corpus trees, minus the manifest itself.
+	# pi/extensions is excluded as a deployed-artifact tree: its
+	# markdown is the vendored manager-body.md sidecar, a byte-pin of
+	# the fleet manager body already registered under Fleet agents,
+	# pin-covered (tests/pi-agents/manager-body.sha256, enforced by
+	# tests/pi-extensions/test-sync.sh), not an independently editable
+	# corpus document.
 	git ls-files '*.md' | awk \
-		'$0 != inv && $0 !~ /^(agents\/|opencode\/\.config\/|bootstrap\/|reference\/|tests\/|\.github\/)/' \
+		'$0 != inv && $0 !~ /^(agents\/|opencode\/\.config\/|bootstrap\/|reference\/|tests\/|pi\/extensions\/|\.github\/)/' \
 		inv="$INVENTORY" - | sort
 }
 
@@ -482,13 +488,13 @@ check_line_budgets() {
 				;;
 			"$RULES_SCOPE"/*.md) budget=$BUDGET_RULE_LINES ;;
 			"$SKILL_SCOPE"/*/SKILL.md) budget=$BUDGET_SKILL_LINES ;;
-			README.md | opencode/DESIGN.md) budget=$BUDGET_CORPUS_DOC_LINES ;;
+			README.md | opencode/DESIGN.md | pi/DESIGN.md) budget=$BUDGET_CORPUS_DOC_LINES ;;
 		esac
 		[[ -n "$budget" ]] || continue
 		assert_present "$file"
 		lines="$(wc -l < "$file")"
 		case "$file" in
-			README.md | opencode/DESIGN.md)
+			README.md | opencode/DESIGN.md | pi/DESIGN.md)
 				((lines < budget)) || fail_at "$file" "$lines" \
 					"file has $lines lines; corpus docs must stay under $budget"
 				;;
