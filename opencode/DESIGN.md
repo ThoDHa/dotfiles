@@ -198,12 +198,14 @@ Bash matching semantics deserve their own statement because two properties decid
 Dispatchers MUST address each agent's report deposit to its own charter
 path: the planner to the reserved `research/` path under
 `.tasks/reports/` (task-file-less research), the reviewer and advisor,
-task-file-less, to `/tmp/opencode/reports/`, task-file agents through
-the `tasks report` channel; the permission maps enforce these paths
-mechanically and a headless session auto-rejects anything that would
-ask, so a cross-addressed deposit fails as `Permission denied: edit`
-with no user message (observed 2026-10-20: planner denied at `/tmp`,
-reviewer denied at `.tasks/reports/research`, both correct denials).
+task-file-less, to `/tmp/llm/reports/` by direct write, both carrying
+the `tasks report` channel when a dispatch names a task file, and
+task-file agents through the `tasks report` channel; the permission
+maps enforce these paths mechanically and a headless session
+auto-rejects anything that would ask, so a cross-addressed deposit
+fails as `Permission denied: edit` with no user message (observed
+2026-10-20: planner denied at `/tmp`, reviewer denied at
+`.tasks/reports/research`, both correct denials).
 
 ### Accepted-risk register
 
