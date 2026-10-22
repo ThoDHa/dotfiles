@@ -1,6 +1,7 @@
 # Shared test harness for the repo's Result-line suites:
 # tests/tasks/test-tasks.sh, tests/oc-continue/test-oc-continue.sh,
-# tests/claudecode/test-sync.sh, and tests/agents-md/test-sync.sh. lint-corpus.sh runs a different contract
+# tests/pi-continue/test-pi-continue.sh, tests/claudecode/test-sync.sh,
+# and tests/agents-md/test-sync.sh. lint-corpus.sh runs a different contract
 # (fail-fast lint, no counters) and is out of bounds here. Sourcing it
 # defines the per-suite pass/fail/skip counters, the ok/bad/skip_test
 # printers, the assert_eq/assert_contains/assert_not_contains family, and

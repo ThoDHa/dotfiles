@@ -45,7 +45,7 @@ PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-ag
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode test-pi lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-pi-continue test-claudecode test-pi lint-corpus check verify-inner
 .PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md
 
 # Default target
@@ -333,7 +333,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-agents-md test-pi-agents test-pi
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -343,7 +343,7 @@ check: test
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
 # (test-links, test-rules) stay host-only in test.
-verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-agents-md test-pi-agents test-pi
+verify-inner: lint-corpus test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -411,6 +411,12 @@ test-tasks:
 test-oc-continue:
 	@echo "Testing oc-continue runner..."
 	@bash tests/oc-continue/test-oc-continue.sh
+
+# Test the pi-continue runner (quota-riding supervisor: session lockstep,
+# marker protocol, hermetic fake pi)
+test-pi-continue:
+	@echo "Testing pi-continue runner..."
+	@bash tests/pi-continue/test-pi-continue.sh
 
 # Test that the generated CLAUDE.md matches a fresh generation of the rules
 test-claudecode:
@@ -496,7 +502,7 @@ help:
 	@echo "  make pin-manager-body   - Regenerate the manager body digest pin (rejects missing or empty body)"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + claudecode + pi)"
+	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + pi-continue + claudecode + pi)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
 	@echo "  make verify      - Container verification suite (verifier dispatches)"
@@ -504,6 +510,7 @@ help:
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
+	@echo "  make test-pi-continue - Verify the pi-continue runner (quota-riding supervisor)"
 	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
 	@echo "  make test-agents-md - Verify ~/.pi/agent/AGENTS.md matches a fresh generation of the opencode rules"
 	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
