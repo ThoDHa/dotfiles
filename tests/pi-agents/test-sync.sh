@@ -136,6 +136,16 @@ for f in "$fresh"/*.md; do
 	fi
 done
 
+# Detach policy pin: scout must stay blocking, so the generated file has
+# to carry the generator's optional fifth key. Without this assertion the
+# one silent regression path stays green: a generator that keeps the
+# " detach=false" token strip but loses the conditional emission block
+# produces byte-identical files for every other agent while the policy
+# quietly vanishes from scout.
+grep -q '^detach: false$' "$fresh/scout.md" \
+	&& ok "scout.md carries detach: false (scout stays blocking)" \
+	|| bad "scout.md carries detach: false (scout stays blocking)"
+
 # Fleet manager body pin: ~/.pi/agent/manager.md is hand-maintained and
 # shares normative delegation text with the fleet manager.md, so the two
 # bodies intentionally diverge (harness-specific preamble) and
