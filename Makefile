@@ -41,9 +41,12 @@ CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 # pi agent generator (compiled from the opencode fleet agents)
 PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-agents.sh
 
+# pi AGENTS.md generator (compiled from the opencode rules)
+AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
+
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
 .PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-claudecode test-pi lint-corpus check verify-inner
-.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body
+.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md
 
 # Default target
 all: help
@@ -227,6 +230,13 @@ sync-pi-agents:
 	@$(PI_AGENTS_GENERATOR)
 	@echo "Done! pi agents compiled from the opencode fleet."
 
+# Generate ~/.pi/agent/AGENTS.md from the opencode rules
+sync-agents-md:
+	@echo "Syncing pi AGENTS.md with opencode rules..."
+	@test -f $(AGENTS_MD_GENERATOR) || (echo "ERROR: Generator script not found at $(AGENTS_MD_GENERATOR)" && exit 1)
+	@$(AGENTS_MD_GENERATOR)
+	@echo "Done! pi now shares opencode configuration."
+
 # Full bootstrap - install/update all dev tools
 bootstrap:
 	@./bootstrap/setup.sh
@@ -323,7 +333,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-pi-agents test-pi
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-claudecode test-agents-md test-pi-agents test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -333,7 +343,7 @@ check: test
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
 # (test-links, test-rules) stay host-only in test.
-verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-pi-agents test-pi
+verify-inner: lint-corpus test-tasks test-oc-continue test-claudecode test-agents-md test-pi-agents test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -407,6 +417,11 @@ test-claudecode:
 	@echo "Testing Claude Code sync (CLAUDE.md vs opencode rules)..."
 	@bash tests/claudecode/test-sync.sh
 
+# Test that the generated pi AGENTS.md matches a fresh generation of the rules
+test-agents-md:
+	@echo "Testing pi AGENTS.md sync (~/.pi/agent/AGENTS.md vs opencode rules)..."
+	@bash tests/agents-md/test-sync.sh
+
 # Test that the generated pi agents match a fresh compilation of the fleet
 test-pi-agents:
 	@echo "Testing pi agents sync (generated files vs opencode fleet)..."
@@ -477,6 +492,7 @@ help:
 	@echo ""
 	@echo "pi Agents:"
 	@echo "  make sync-pi-agents     - Compile ~/.pi/agent/agents from the opencode fleet"
+	@echo "  make sync-agents-md     - Generate ~/.pi/agent/AGENTS.md from the opencode rules"
 	@echo "  make pin-manager-body   - Regenerate the manager body digest pin (rejects missing or empty body)"
 	@echo ""
 	@echo "Testing:"
@@ -489,6 +505,7 @@ help:
 	@echo "  make test-tasks  - Verify the tasks board tool"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
 	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
+	@echo "  make test-agents-md - Verify ~/.pi/agent/AGENTS.md matches a fresh generation of the opencode rules"
 	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo ""
