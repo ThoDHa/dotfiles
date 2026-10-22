@@ -35,7 +35,9 @@ concentrate in full-model agents instead of eroding the flash worker's
 focus. The architect grant
 follows the same line: the manager delegates as much work as the fleet can
 take, and the command freedom exists to unblock and steer the fleet
-(scouting a dispatch, unblocking a worker, checking a unit's result); any
+(unblocking a worker, checking a unit's result, with dispatch scouting
+routed to scout as question-bounded verbatim lookups feeding an
+immediate dispatch); any
 duty that grows into sustained work of its own is dispatched to a fleet
 agent rather than absorbed (research-grade exploration to the planner,
 judgment memos to the advisor, code writing to the worker), since
