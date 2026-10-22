@@ -1,0 +1,885 @@
+#!/usr/bin/env zsh
+# pi-continue: scheduling and event-driven continuation for headless pi
+# runs that hit provider quota windows. A port of oc-continue's engine
+# with the pi coupling surface retrained: text print-mode classification,
+# --session-id lockstep, full PI_CONTINUE_* env seams, a bare -- before
+# every prompt. Pure shell, no models.
+# State: ~/.local/share/pi/pi-continue/.
+#
+# Usage:
+#   pi-continue run [-n N] [--follow] [piflags] [prompt...]
+#                                        N = productive-cycle cap; without
+#                                        it the ride is unbounded. Cycle 1
+#                                        sends the prompt (the caller's
+#                                        words, or a truthful default),
+#                                        later cycles a short resumption
+#                                        note, and every prompt asks the
+#                                        session to end its final message
+#                                        with the terminal line
+#                                        PI-CONTINUE: COMPLETE only once
+#                                        nothing remains of the whole
+#                                        launched objective. A session
+#                                        ending in that marker earns one
+#                                        challenge session demanding an
+#                                        enumeration of remaining work;
+#                                        the ride stops on that
+#                                        challenge's own marker, a clean
+#                                        exit, a non-quota failure, or
+#                                        (with -n) the Nth productive
+#                                        cycle; consecutive no-progress
+#                                        attempts (default 90,
+#                                        PI_CONTINUE_NO_PROGRESS_LIMIT to
+#                                        tune) end the ride with a
+#                                        limit-never-reset report.
+#                                        Detaches immediately: parks and
+#                                        sessions happen in the background.
+#                                        --follow: stay in the foreground and
+#                                        tail the live output after
+#                                        detaching; Ctrl-C stops the
+#                                        follower, the engine keeps running.
+#   pi-continue at HH:MM [piflags] [prompt...]     Run once at a wall-clock
+#                                        time (rolls to tomorrow if past).
+#                                        Detaches immediately: the countdown
+#                                        and run happen in the background.
+#   pi-continue in DURATION [piflags] [prompt...]  Run once after DURATION
+#                                        (e.g. 90, 5m, 2h, 1d). One-shot: a
+#                                        rate-limit hit just fails; `run`
+#                                        rides windows. Detaches immediately.
+#   pi-continue stop                     Kill a running engine and its child.
+#   pi-continue status                   Running pid, the ride's session id,
+#                                        tail, the consecutive no-progress
+#                                        ("failed") streak, and which
+#                                        per-session outputs are retained.
+#   pi-continue clean                    Remove state (log, live and retained
+#                                        output, stale pid); refuses while
+#                                        running.
+#   pi-continue follow                   tail -F the live run output; survives
+#                                        quota parks, and shows the last
+#                                        session's output once idle.
+#
+# Every launching command returns at once; watch with `pi-continue follow`,
+# check with `status`, cancel with `stop`. For a foreground run right now,
+# call `pi -p` directly.
+#
+# Sessions: one session id per ride, generated as
+# pi-continue-<YYYYmmddTHHMMSS>-<pid> (matches pi's documented id pattern),
+# stored in $STATE_DIR/session.id, and passed to every invocation as
+# `pi -p --session-id <id> [flags] -- <prompt>`, so pi appends to one
+# session across quota windows. The supervisor never uses cwd-based
+# --continue or --resume lookup. `status` shows the id.
+#
+# Retention: each invocation's complete output is kept at
+# $STATE_DIR/last.N.out (N = the invocation's number across the run;
+# every pi invocation gets its own file, no-progress retries included);
+# last.out stays the live current-session file that `follow` tails,
+# truncated at each session boundary, never merged across sessions.
+# Every file opens with a timestamped `pi-continue: invoking pi (session N,
+# TIMESTAMP)` stamp line, so `follow` shows when each retry actually fired;
+# the classifiers treat the stamp as metadata, never as progress or a quota
+# signal. The consecutive no-progress ("failed") streak persists in
+# $STATE_DIR/failed.count, so `status` reports it mid-ride; any productive
+# session, a successful ride end (challenge-confirmed marker or clean exit),
+# and a fresh engine start zero it, and the limit-never-reset quit leaves
+# the count visible.
+#
+# Flag contract: pi-continue declares its own flags in the PI_RUN_* tables
+# (-n, --follow); they are parsed and consumed anywhere in the leading flag
+# zone and never forwarded to pi. The declared table governs `run` only:
+# `at` and `in` declare none, so --follow there forwards verbatim today.
+# Every other dash-prefixed arg before the prompt passes through to pi
+# verbatim, so `pi-continue run --provider openai --model gpt-4o-mini fix
+# it` works. Known value-taking flags (PI_VALUE_FLAGS, tracked against
+# `pi --help`) consume their value token; others can use --flag=value.
+# -n is pi-continue's: pi spells session naming `--name, -n <name>`, and on
+# overlap the supervisor wins, so -n never reaches pi and callers name
+# sessions with the long form --name.
+#
+# Rejections and parser traps: the leading-flag zone rejects (rc 2, before
+# detaching) --mode json and --mode rpc plus their =-forms (non-text modes
+# change the output shape the classifiers and the completion marker check
+# assume; --mode text passes), the session-identity flags --session,
+# --session-id, --continue, -c, --resume, -r, and --no-session (the
+# supervisor owns session identity via its own --session-id lockstep), and
+# -p / --print (the supervisor already invokes pi in print mode). A bare
+# `--` forces everything after it to be prompt, including dash-leading
+# prompts and anything rejection-shaped. The guard is not cosmetic: pi's
+# parser lets a trailing valueless -p swallow the next token as the first
+# message, and an unknown bare long flag consumes the next non-flag token
+# as its value, so without `--` a forwarded unknown flag adjacent to the
+# prompt could eat the prompt and run with zero messages. Unknown or
+# =-form flags are still forwarded verbatim (pi knows its surface better
+# than this script); against real pi they surface as pi's own clear
+# startup error, classified as a non-quota failure. No prompt given: the
+# resume-the-interrupted-turn default is used.
+#
+# Permission gate: rides load the user's pi config and extensions. The
+# user-level permission-gate extension blocks dangerous bash when
+# headless; blocked calls surface as tool errors inside the session
+# rather than ride failures, and the ride continues. The supervisor never
+# bypasses the gate.
+#
+# Models: pi-continue never injects a model; pi's own config governs. An
+# explicit --model passes through; pi has no -m shorthand.
+#
+# Output buffering: pi print mode emits a session's text only when the
+# invocation finishes, so `follow` shows a session's stamp while it runs
+# and its text at the end; a session that ends in a provider error prints
+# the raw error to stderr (retained in the same file) and nothing to
+# stdout.
+#
+# Truncation: pi exits 1 with `Response was truncated: the model reached
+# its output token limit.` when a session hits the output token limit;
+# that classifies as a non-quota failure and stops the ride with the
+# partial output retained.
+#
+# Examples:
+#   pi-continue run                          ride this project's session in
+#                                            the background until it reports
+#                                            completion
+#   pi-continue run -n 4                     background, capped at 4
+#                                            productive cycles
+#   pi-continue run -n 3 --follow "ship it"  background, tailing live output
+#                                            in this terminal until Ctrl-C
+#   pi-continue run --model zai-coding-plan/glm-5.3 fix tui, model override
+#                                            passed through to pi
+#   pi-continue at 22:30                     one-shot tonight at 22:30
+#   pi-continue in 45m "run the test suite"  one-shot after a 45m pause
+#   pi-continue follow                       tail live output from anywhere
+#   pi-continue status | stop | clean        inspect, cancel, wipe state
+#
+# Environment overrides:
+#   PI_CONTINUE_BIN            pi binary (default: pi; tests use a fake)
+#   PI_CONTINUE_WAIT_UNTIL     HH:MM known window-reset time; overrides the
+#                              default 10m park
+#   PI_CONTINUE_WAIT_SECONDS   fixed park length (testing; bypasses window
+#                              math)
+#   PI_CONTINUE_MIN_PROGRESS_SECONDS  progress wall-time floor in seconds
+#                              (default 20; testing): a quota fail whose
+#                              output holds nothing beyond the error still
+#                              counts as productive once it outlasts this
+#                              many seconds. For real pi this floor is the
+#                              primary productive signal: a failed call
+#                              prints no stdout at all, so wall time is
+#                              what distinguishes a worked-then-hit session
+#                              from a dead window.
+#   PI_CONTINUE_NO_PROGRESS_LIMIT  consecutive no-progress quota fails
+#                              tolerated before the engine concludes the
+#                              limit never reset (default 90: about 15h at
+#                              the default 10m park); a productive session
+#                              resets the count
+#   PI_CONTINUE_STATE_DIR      state directory override (testing)
+
+set -u
+# The per-session tee (last.out plus last.N.out) rides multios onto the
+# pi append below; the session stamp is written directly, so an
+# inherited NO_MULTIOS would leave last.out holding only its stamp while
+# the child output lands in last.N.out alone.
+setopt multios
+
+STATE_DIR="${PI_CONTINUE_STATE_DIR:-$HOME/.local/share/pi/pi-continue}"
+LOG_FILE="$STATE_DIR/engine.log"
+PID_FILE="$STATE_DIR/run.pid"
+OUT_FILE="$STATE_DIR/last.out"
+FAILED_FILE="$STATE_DIR/failed.count"
+SESSION_FILE="$STATE_DIR/session.id"
+# Top level on purpose: inside a zsh function $0 is the function's name,
+# not this script's path.
+SCRIPT_PATH="$0"
+PI_BIN="${PI_CONTINUE_BIN:-pi}"
+SECONDS_PER_DAY=86400
+PARK_SECONDS=600     # 10m: probe cadence while the quota window is up
+TAIL_LINES=40
+READY_POLLS=20       # x READY_POLL_INTERVAL: how long launch waits for the
+READY_POLL_INTERVAL=0.1   # engine's pid file before reporting failure
+# Progress-fallback floor: governs only quota-hit sessions whose entire
+# output matched the exclusions, so no content line survived; such a
+# session still counts as productive once it outlasted this many seconds.
+MIN_PROGRESS_SECONDS="${PI_CONTINUE_MIN_PROGRESS_SECONDS:-20}"
+# Consecutive no-progress quota fails tolerated before the engine
+# concludes the limit never reset and quits; a productive session or a
+# clean completion resets the count.
+NO_PROGRESS_LIMIT="${PI_CONTINUE_NO_PROGRESS_LIMIT:-90}"
+# Anchored so a bare 429 inside a number or a timestamp must not read as
+# a quota event; the word alternatives are oc-continue's proven list plus
+# pi-ai's non-retryable billing strings (available balance, out of
+# budget, billing), which is exactly the set pi fails fast on.
+QUOTA_REGEX='(^|[^0-9])429([^0-9]|$)|quota|rate.?limit|usage.?limit|available balance|out of budget|billing|credits? (exhausted|exceeded)|exceeded your'
+# The session-start stamp cmd_run/cmd_once write atop each invocation's
+# output: metadata, never progress, so both classifiers skip it. The
+# literal '(' is escaped for ERE.
+SESSION_START_REGEX='^pi-continue: invoking pi \('
+# pi's first-use session warning: print mode prints it to stderr on the
+# first use of a session id and the engine merges stderr into the
+# retained output, so it is retained metadata like the stamp and both
+# classifiers skip it; its embedded session id must never read as quota
+# either.
+SESSION_WARNING_REGEX='^Warning: No project session found with id '
+ANSI_ESC=$'\e'
+# The terminal line a ride session must end its final message with once
+# nothing remains; a session ending in it arms one challenge session,
+# and the engine stops the ride only when that challenge itself ends in
+# it.
+COMPLETE_MARKER='PI-CONTINUE: COMPLETE'
+# The whole-objective completion instruction appended to a caller prompt
+# (cycle 1 only, skipped when the prompt already carries the marker) and
+# built into the default and resumption prompts: the terminal line is
+# earned only when nothing remains anywhere on the launched objective's
+# todo list or task board, never after a single step or unit.
+MARKER_INSTRUCTION='When nothing remains of the entire launched objective (not just the current step or unit, but every remaining item on the todo list or task board), do a terse final verification (no new work) and end your final message with the single terminal line: PI-CONTINUE: COMPLETE. If any part of the objective remains, end without that line.'
+# The no-prompt default, sent verbatim as the cycle-1 ride default and by
+# the one-shot at/in commands: truthful about the interruption, no
+# re-orientation from scratch, no redoing of finished steps.
+DEFAULT_PROMPT='Your last turn was cut off by a provider rate limit, not by finished work. Resume the interrupted turn: check the todo list and the current state of the files on disk, then finish the remaining work without redoing completed steps. Do not claim the quota is fresh beyond that.'
+# Cycles 2 and up never re-send the original prompt, only this note (plus
+# the marker instruction).
+RESUME_NOTE='The quota window reset mid-work; resume from where your last turn stopped, do not re-orient from scratch, and do not repeat finished steps.'
+RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
+# The single challenge a completion claim earns: it forces an enumeration
+# of remaining work instead of a confirmation, and only an empty list may
+# re-earn the terminal line.
+CHALLENGE_PROMPT='Your last turn claimed completion. List every remaining item from the todo list or task board you have been tracking. If and only if that list is empty, do a terse final verification (no new work) and end your final message with the single terminal line: PI-CONTINUE: COMPLETE. Otherwise continue the listed work without redoing finished steps.'
+# pi flags that consume a separate value token, for passthrough, tracked
+# against `pi --help`; bare flags and --flag=value forms need no entry
+# here. --session, --session-id, --fork, and --mode sit in the table for
+# token pairing ("needs a value" detection) while the rejection branch
+# intercepts the session-identity ones and the json/rpc modes. -n is
+# deliberately absent: the supervisor declares it (PI_RUN_VALUE_FLAGS).
+PI_VALUE_FLAGS=(--provider --model --api-key --system-prompt --append-system-prompt --name --session --session-id --fork --session-dir --models --tui-mode --tools --exclude-tools --thinking --export --extension --skill --prompt-template --theme --use-theme --mode -t -xt -e)
+# pi-continue's declared flag table: names split_run_args parses and
+# consumes itself, never forwarding them to pi. -n collides with pi's
+# `--name, -n <name>` short form; on overlap the supervisor wins, so
+# callers reach session naming via the long form --name. On any other
+# name overlap with pi's documented flags pi-continue wins, so never
+# adopt a declared name from that set; tests pin both tables against
+# live `pi --help`.
+PI_RUN_VALUE_FLAGS=(-n)
+PI_RUN_BOOL_FLAGS=(--follow)
+pi_declared=false
+run_follow=false
+
+log_line() {
+    mkdir -p "$STATE_DIR"
+    printf '%s %s\n' "$(date -Iseconds)" "$*" >> "$LOG_FILE"
+}
+
+# Open an invocation's two output files (the live $OUT_FILE and the
+# retained per-session file $2) with the session-start stamp for session
+# $1: two sequential plain truncating writes, one redirection per
+# statement, so the stamp never depends on multios tee ordering across
+# the pair.
+write_session_stamp() {
+    local stamp
+    stamp="pi-continue: invoking pi (session $1, $(date -Iseconds))"
+    printf '%s\n' "$stamp" > "$OUT_FILE"
+    printf '%s\n' "$stamp" > "$2"
+}
+
+running_pid() {
+    [[ -f "$PID_FILE" ]] || return 1
+    local pid
+    pid=$(cat "$PID_FILE" 2>/dev/null) || return 1
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    print -r -- "$pid"
+}
+
+epoch_of() { date -d "$1" +%s 2>/dev/null || return 1 }
+
+park_seconds() {
+    if [[ -n "${PI_CONTINUE_WAIT_SECONDS:-}" ]]; then
+        print -r -- "$PI_CONTINUE_WAIT_SECONDS"
+        return 0
+    fi
+    if [[ -n "${PI_CONTINUE_WAIT_UNTIL:-}" ]]; then
+        local target now
+        target=$(epoch_of "$PI_CONTINUE_WAIT_UNTIL") || return 1
+        now=$(date +%s)
+        if (( target > now )); then
+            print -r -- $(( target - now ))
+        else
+            print -r -- 60
+        fi
+        return 0
+    fi
+    print -r -- "$PARK_SECONDS"
+}
+
+looks_like_quota() {
+    # The session-start stamp and pi's first-use session warning are
+    # metadata: a 429 inside a session number or inside a warning line's
+    # session id (session 429, 1429, ...) must not read as a quota event.
+    tail -n "$TAIL_LINES" "$1" 2>/dev/null | command grep -vE "${SESSION_START_REGEX}|${SESSION_WARNING_REGEX}" \
+        | command grep -qiE "$QUOTA_REGEX"
+}
+
+# Classify a quota-hit session as productive or no-progress, from its
+# retained last.N.out ($1) and its elapsed seconds ($2). ANSI escape
+# sequences are stripped before every exclusion: they carry no content,
+# so an escape-only line must not read as progress. Content signal: one
+# surviving line with non-whitespace content after the quota-filter and
+# metadata exclusions (the stamp and pi's first-use session warning are
+# metadata, so neither alone ever reads as progress; pi's text mode adds
+# no other transcript noise, so a surviving stdout line is genuine
+# content). Elapsed signal: reached only
+# when the entire output matched the exclusions, and the primary one for
+# real pi runs, where a failed provider call prints no stdout at all, so
+# wall time is what distinguishes a worked-then-hit session from a dead
+# window: the session counts as productive once it outlasted
+# MIN_PROGRESS_SECONDS.
+made_progress() {
+    local session_out="$1" elapsed="$2"
+    if sed "s/${ANSI_ESC}\[[0-9;:?]*[A-Za-z]//g" "$session_out" 2>/dev/null \
+        | command grep -ivE "${QUOTA_REGEX}|${SESSION_START_REGEX}|${SESSION_WARNING_REGEX}" \
+        | command grep -qE '[^[:space:]]'; then
+        return 0
+    fi
+    (( elapsed >= MIN_PROGRESS_SECONDS ))
+}
+
+# The cycle-1 prompt of a ride: the caller's words verbatim when given,
+# plus the marker instruction unless the prompt already carries the
+# marker; otherwise the truthful default. It is re-sent after every
+# no-progress attempt, which spends no cycle, and cycles 2 and up never
+# re-send any of this, only the resumption prompt.
+cycle_one_prompt() {
+    local caller="${1:-}"
+    if [[ -z "$caller" ]]; then
+        print -r -- "$DEFAULT_PROMPT
+$MARKER_INSTRUCTION"
+    elif [[ "$caller" == *"$COMPLETE_MARKER"* ]]; then
+        print -r -- "$caller"
+    else
+        print -r -- "$caller
+$MARKER_INSTRUCTION"
+    fi
+}
+
+# True when the session's output ends with the exact completion marker:
+# the last non-empty line, ANSI-stripped and edge-whitespace-trimmed,
+# equals COMPLETE_MARKER. A marker mention mid-output does not match.
+session_completed() {
+    local session_out="$1" last
+    last="$(sed "s/${ANSI_ESC}\[[0-9;:?]*[A-Za-z]//g" "$session_out" 2>/dev/null \
+        | command grep -E '[^[:space:]]' | tail -n 1)"
+    last="${last#"${last%%[^[:space:]]*}"}"
+    last="${last%"${last##*[^[:space:]]}"}"
+    [[ "$last" == "$COMPLETE_MARKER" ]]
+}
+
+# True when the leading tokens ($1, $2) name a rejected non-text output
+# mode: prints the pointed message and returns 0 exactly then. --mode
+# text and --mode=<other> pass (harmless, explicit).
+reject_bad_mode() {
+    local flag="$1" val
+    if [[ "$flag" == --mode ]]; then
+        val="$2"
+    elif [[ "$flag" == --mode=* ]]; then
+        val="${flag#--mode=}"
+    else
+        return 1
+    fi
+    if [[ "$val" == json || "$val" == rpc ]]; then
+        if [[ "$flag" == --mode ]]; then
+            printf 'pi-continue: --mode %s is rejected: non-text modes change the output shape, breaking the completion marker and quota classification; see the header\n' "$val" >&2
+        else
+            printf 'pi-continue: %s is rejected: non-text modes change the output shape, breaking the completion marker and quota classification; see the header\n' "$flag" >&2
+        fi
+        return 0
+    fi
+    return 1
+}
+
+# Split a launching command's args into pi flags (with their value
+# tokens) and the prompt words that follow. Declared flags (PI_RUN_*_FLAGS,
+# gated by pi_declared so only `run` consumes them) are stripped into
+# pi_declared_args with their value pairings and never forwarded. The
+# rejection set exits rc 2 before any detaching: non-text modes, the
+# session-identity flags the supervisor owns or that conflict with its
+# lockstep, and -p/--print (print mode is forced). A bare `--` forces
+# everything after it to be prompt, so dash-leading prompts and
+# rejection-shaped tokens after it stay passable.
+split_run_args() {
+    pi_flags=()
+    prompt_words=()
+    pi_declared_args=()
+    while (( $# )); do
+        case "$1" in
+            --)
+                shift
+                prompt_words+=("$@")
+                return 0
+                ;;
+            -*)
+                if [[ "$pi_declared" == true ]] && (( ${PI_RUN_VALUE_FLAGS[(Ie)$1]} )); then
+                    if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                        pi_declared_args+=("$1" "$2")
+                        shift 2
+                    else
+                        printf 'pi-continue: %s needs a value\n' "$1" >&2
+                        return 2
+                    fi
+                elif [[ "$pi_declared" == true ]] && (( ${PI_RUN_BOOL_FLAGS[(Ie)$1]} )); then
+                    pi_declared_args+=("$1")
+                    shift
+                elif reject_bad_mode "$1" "${2:-}"; then
+                    # Before the valueless rejection below, so --mode names
+                    # its own hazard, not a missing value.
+                    return 2
+                elif [[ "$1" == --session || "$1" == --session-id || "$1" == --continue || "$1" == -c || "$1" == --resume || "$1" == -r || "$1" == --no-session ]]; then
+                    printf 'pi-continue: %s is rejected: the supervisor owns session identity (--session-id lockstep); see the header\n' "$1" >&2
+                    return 2
+                elif [[ "$1" == -p || "$1" == --print ]]; then
+                    printf 'pi-continue: %s is rejected: the supervisor already invokes pi in print mode; see the header\n' "$1" >&2
+                    return 2
+                elif (( $# == 1 )) && (( ${PI_VALUE_FLAGS[(Ie)$1]} )); then
+                    printf 'pi-continue: %s needs a value\n' "$1" >&2
+                    return 2
+                else
+                    pi_flags+=("$1")
+                    if [[ -n "${2:-}" && "${2:-}" != -* ]] && \
+                       (( ${PI_VALUE_FLAGS[(Ie)$1]} )); then
+                        shift
+                        pi_flags+=("$1")
+                    fi
+                    shift
+                fi
+                ;;
+            *)
+                prompt_words+=("$@")
+                return 0
+                ;;
+        esac
+    done
+}
+
+# Give the declared flags split_run_args consumed their meaning: -n caps
+# productive cycles (left unset the ride is unbounded, until the
+# completion marker or another stop condition), --follow requests
+# launch-plus-tail. The single place a declared name gains semantics; a
+# new declared flag needs its PI_RUN_* table entry and its case here.
+interpret_run_flags() {
+    run_sessions=""
+    run_follow=false
+    local i
+    for (( i=1; i <= ${#pi_declared_args}; i++ )); do
+        case "${pi_declared_args[i]}" in
+            -n)
+                [[ "${pi_declared_args[i+1]}" =~ ^[0-9]+$ ]] || \
+                    { printf 'pi-continue: -n needs a number\n' >&2; return 2; }
+                run_sessions="${pi_declared_args[i+1]}"
+                (( i += 1 ))
+                ;;
+            --follow)
+                run_follow=true
+                ;;
+        esac
+    done
+    return 0
+}
+
+start_engine() {
+    local existing
+    if existing=$(running_pid); then
+        printf 'pi-continue: already running (pid %s); pi-continue stop first\n' "$existing" >&2
+        return 1
+    fi
+    mkdir -p "$STATE_DIR"
+    # Drop the previous run's retained sessions so status never presents a
+    # longer old run's tail as current; `clean` stays the explicit wipe.
+    rm -f "$STATE_DIR"/last.<->.out(N)
+    persist_failed 0
+    # One session id per ride: pi appends to it across quota windows (the
+    # deterministic analog of oc-continue's --continue), and every
+    # invocation passes the same --session-id. The engine pid keeps ids
+    # unique per ride; the shape matches pi's documented id pattern.
+    RIDE_ID="pi-continue-$(date +%Y%m%dT%H%M%S)-$$"
+    print -r -- "$RIDE_ID" > "$SESSION_FILE"
+    print -r -- $$ > "$PID_FILE"
+}
+
+# Mirror the consecutive no-progress streak ($1) to $STATE_DIR/failed.count
+# for `status`; every write to the file routes through here. Callers pass
+# 0 wherever the streak zeroes: a fresh engine start, a productive
+# session, or a successful ride end.
+persist_failed() {
+    print -r -- "$1" > "$FAILED_FILE"
+}
+
+cmd_run() {
+    pi_declared=true
+    split_run_args "$@" || return 2
+    interpret_run_flags || return 2
+    # Empty means unbounded: the ride runs until a challenge-confirmed
+    # completion marker, a clean exit, a non-quota failure, or the
+    # never-reset bound.
+    local sessions="$run_sessions"
+    local caller_prompt="${prompt_words[*]:-}"
+
+    start_engine || return 1
+    local ride="$RIDE_ID"
+
+    # cycles counts productive quota hits and work-finding challenge
+    # sessions against the cap when one is set; no_progress counts
+    # consecutive no-progress quota fails against NO_PROGRESS_LIMIT,
+    # resets on any productive session, and is mirrored to $FAILED_FILE
+    # for `status` on every change. challenged arms the single challenge
+    # session a completion claim earns.
+    local session=1 cycles=0 no_progress=0 challenged=0
+    if [[ -n "$sessions" ]]; then
+        log_line "run start (pid $$): budget $sessions productive cycle(s), pi=${PI_BIN} ${pi_flags[*]}"
+        printf 'pi-continue: starting; budget %s productive cycle(s)\n' "$sessions"
+    else
+        log_line "run start (pid $$): unbounded, until $COMPLETE_MARKER, pi=${PI_BIN} ${pi_flags[*]}"
+        printf 'pi-continue: starting; unbounded, until %s\n' "$COMPLETE_MARKER"
+    fi
+
+    local rc is_quota wait_s session_out start_s elapsed prompt
+    local was_challenge hit_kind resume_head
+    while :; do
+        session_out="$STATE_DIR/last.$session.out"
+        # An armed claim outranks everything: the next session re-asks
+        # the claimed completion with $CHALLENGE_PROMPT, which demands an
+        # enumeration of remaining work, and the flag survives the
+        # no-progress re-park so a quota-eaten challenge is retried.
+        # Every other session follows the normal cycle differentiation,
+        # and until the first productive cycle lands each invocation
+        # re-sends the cycle-1 prompt, because a no-progress attempt
+        # means the model may never have consumed those words.
+        if (( challenged == 1 )); then
+            prompt="$CHALLENGE_PROMPT"
+        elif (( cycles == 0 )); then
+            prompt=$(cycle_one_prompt "$caller_prompt")
+        else
+            prompt="$RESUME_PROMPT"
+        fi
+        : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+        log_line "session $session: invoking pi"
+        write_session_stamp "$session" "$session_out"
+        printf 'pi-continue: %s -p --session-id %s %s -- %s\n' "$PI_BIN" "$ride" "${pi_flags[*]}" "$prompt"
+        start_s=$SECONDS
+        "$PI_BIN" -p --session-id "$ride" ${pi_flags[@]+"${pi_flags[@]}"} -- "$prompt" >> "$OUT_FILE" >> "$session_out" 2>&1
+        rc=$?
+        elapsed=$(( SECONDS - start_s ))
+        is_quota=false
+        (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
+
+        # A completion claim never ends the ride outright: the first
+        # claim arms exactly one challenge session, and only a challenge
+        # that itself ends with the marker confirms the stop. The flag
+        # clears only when the challenge produced classifiable content:
+        # the confirmed marker below, or work found or a progress-passing
+        # quota hit in the productive tail. A quota fail that eats the
+        # challenge re-parks with it still armed, so the retry re-asks
+        # the enumeration instead of dropping it, bounded by the
+        # never-reset limit.
+        was_challenge=false
+        if (( challenged == 1 )); then
+            was_challenge=true
+            if session_completed "$session_out"; then
+                persist_failed 0
+                log_line "session $session: work complete ($COMPLETE_MARKER, rc=$rc, challenge confirmed)"
+                printf 'pi-continue: work complete (%s, challenge confirmed)\n' "$COMPLETE_MARKER"
+                return 0
+            fi
+        elif session_completed "$session_out"; then
+            # A claim session is productive (marker content ends it,
+            # whatever the child's rc): the streak zeroes with it, so
+            # the bound counts only hits after the claim.
+            no_progress=0
+            persist_failed 0
+            challenged=1
+            session=$(( session + 1 ))
+            log_line "session $(( session - 1 )): completion marker claimed; challenging the claim in session $session"
+            printf 'pi-continue: completion marker claimed; one challenge session follows (session %s)\n' "$session"
+            continue
+        fi
+
+        if [[ "$was_challenge" == false ]] && (( rc == 0 )); then
+            persist_failed 0
+            log_line "session $session: run completed cleanly"
+            printf 'pi-continue: completed cleanly (session %s)\n' "$session"
+            return 0
+        fi
+
+        if (( rc != 0 )) && [[ "$is_quota" != true ]]; then
+            log_line "session $session: non-quota failure rc=$rc; not retrying"
+            printf 'pi-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
+            return "$rc"
+        fi
+
+        if (( rc != 0 )) && ! made_progress "$session_out" "$elapsed"; then
+            no_progress=$(( no_progress + 1 ))
+            persist_failed "$no_progress"
+            if (( no_progress >= NO_PROGRESS_LIMIT )); then
+                log_line "session $session: no-progress quota hit $no_progress consecutive; limit never reset, quitting"
+                printf 'pi-continue: limit never reset (%s consecutive no-progress attempts); quitting; output: %s, events: %s\n' \
+                    "$no_progress" "$OUT_FILE" "$LOG_FILE"
+                return 0
+            fi
+            wait_s=$(park_seconds) || { printf 'pi-continue: bad PI_CONTINUE_WAIT_UNTIL\n' >&2; return 2; }
+            session=$(( session + 1 ))
+            log_line "session $(( session - 1 )): no-progress quota hit $no_progress of $NO_PROGRESS_LIMIT consecutive; no budget consumed; re-parking ${wait_s}s until session $session"
+            printf 'pi-continue: quota window still up (no-progress attempt %s of %s); re-parked %ss, then session %s (pi-continue stop to cancel)\n' \
+                "$no_progress" "$NO_PROGRESS_LIMIT" "$wait_s" "$session"
+            sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
+            continue
+        fi
+
+        # Shared productive tail: a quota hit that made progress, or a
+        # challenge that found remaining work (rc 0 without the marker);
+        # both count one cycle under the same rules. The challenge
+        # produced classifiable content here, so a pending claim was
+        # either confirmed or found wanting: the flag clears and the
+        # next session runs the normal cycle. The kinds part ways after
+        # the budget check: a quota window needs waiting out, work found
+        # does not.
+        no_progress=0
+        persist_failed "$no_progress"
+        challenged=0
+        cycles=$(( cycles + 1 ))
+        hit_kind='productive quota hit'
+        resume_head='rate limit hit after progress'
+        if (( rc == 0 )); then
+            hit_kind='productive challenge'
+            resume_head='challenge found remaining work'
+        fi
+        if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
+            log_line "session $session: $hit_kind $cycles of budget $sessions; budget spent, quitting"
+            printf 'pi-continue: budget spent (%s productive cycle(s)); quitting after hit %s\n' "$sessions" "$cycles"
+            return 0
+        fi
+
+        if [[ "$was_challenge" == true ]] && (( rc == 0 )); then
+            # Work found, no quota signal: the enumeration just proved
+            # remaining work exists, so no window needs waiting out and
+            # the next session follows at once.
+            session=$(( session + 1 ))
+            if [[ -n "$sessions" ]]; then
+                log_line "session $(( session - 1 )): $hit_kind $cycles of budget $sessions; work found, continuing immediately with session $session"
+                printf 'pi-continue: %s (cycle %s of %s); session %s proceeding now (pi-continue stop to cancel)\n' \
+                    "$resume_head" "$cycles" "$sessions" "$session"
+            else
+                log_line "session $(( session - 1 )): $hit_kind $cycles; unbounded ride continues; work found, continuing immediately with session $session"
+                printf 'pi-continue: %s (cycle %s); session %s proceeding now (pi-continue stop to cancel)\n' \
+                    "$resume_head" "$cycles" "$session"
+            fi
+            continue
+        fi
+
+        wait_s=$(park_seconds) || { printf 'pi-continue: bad PI_CONTINUE_WAIT_UNTIL\n' >&2; return 2; }
+        session=$(( session + 1 ))
+        if [[ -n "$sessions" ]]; then
+            log_line "session $(( session - 1 )): $hit_kind $cycles of budget $sessions; parking ${wait_s}s until session $session"
+            printf 'pi-continue: %s (cycle %s of %s); parked %ss, then session %s (pi-continue stop to cancel)\n' \
+                "$resume_head" "$cycles" "$sessions" "$wait_s" "$session"
+        else
+            log_line "session $(( session - 1 )): $hit_kind $cycles; unbounded ride continues; parking ${wait_s}s until session $session"
+            printf 'pi-continue: %s (cycle %s); parked %ss, then session %s (pi-continue stop to cancel)\n' \
+                "$resume_head" "$cycles" "$wait_s" "$session"
+        fi
+        sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
+    done
+}
+
+cmd_once() {
+    local sleep_for="$1"; shift
+    pi_declared=false
+    split_run_args "$@" || return 2
+    local prompt="${prompt_words[*]:-$DEFAULT_PROMPT}"
+
+    start_engine || return 1
+    local ride="$RIDE_ID"
+
+    log_line "one-shot start (pid $$): pi=${PI_BIN} ${pi_flags[*]} after ${sleep_for}"
+    printf 'pi-continue: runs in %s (pi-continue stop to cancel)\n' "$sleep_for"
+    sleep "$sleep_for" || { log_line 'wait interrupted'; return 1; }
+
+    : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
+    log_line 'one-shot: invoking pi'
+    write_session_stamp 1 "$STATE_DIR/last.1.out"
+    printf 'pi-continue: %s -p --session-id %s %s -- %s\n' "$PI_BIN" "$ride" "${pi_flags[*]}" "$prompt"
+    "$PI_BIN" -p --session-id "$ride" ${pi_flags[@]+"${pi_flags[@]}"} -- "$prompt" >> "$OUT_FILE" >> "$STATE_DIR/last.1.out" 2>&1
+    local rc=$?
+    if (( rc == 0 )); then
+        log_line 'one-shot: run completed cleanly'
+        printf 'pi-continue: completed cleanly\n'
+        return 0
+    fi
+    if looks_like_quota "$OUT_FILE"; then
+        log_line "one-shot: quota hit (rc $rc); not retrying"
+        printf 'pi-continue: rate limit hit; one-shot, not retrying (run rides windows); output: %s\n' "$OUT_FILE"
+    else
+        log_line "one-shot: non-quota failure rc=$rc"
+        printf 'pi-continue: non-quota failure (rc %s); output: %s, events: %s\n' "$rc" "$OUT_FILE" "$LOG_FILE"
+    fi
+    return "$rc"
+}
+
+cmd_at() {
+    [[ -n "${1:-}" ]] || { printf 'pi-continue: at needs HH:MM\n' >&2; return 2; }
+    local schedule="$1"; shift
+    local target now
+    target=$(epoch_of "$schedule") || { printf 'pi-continue: bad time %s\n' "$schedule" >&2; return 2; }
+    now=$(date +%s)
+    (( target > now )) || target=$(( target + SECONDS_PER_DAY ))
+    cmd_once "$(( target - now ))" "$@"
+}
+
+cmd_in() {
+    [[ "${1:-}" =~ ^[0-9]+([smhd])?$ ]] || { printf 'pi-continue: in needs DURATION (e.g. 90, 5m, 2h, 1d)\n' >&2; return 2; }
+    local duration="$1"; shift
+    cmd_once "$duration" "$@"
+}
+
+cmd_stop() {
+    local pid
+    if ! pid=$(running_pid); then
+        printf 'pi-continue: not running\n'
+        rm -f "$PID_FILE" 2>/dev/null
+        return 0
+    fi
+    command pkill -P "$pid" 2>/dev/null
+    kill "$pid" 2>/dev/null
+    rm -f "$PID_FILE"
+    log_line "stopped by user (pid $pid)"
+    printf 'pi-continue: stopped (pid %s)\n' "$pid"
+    return 0
+}
+
+cmd_status() {
+    local pid retained name names failed_count='' ride
+    retained=("$STATE_DIR"/last.<->.out(N))
+    if ! pid=$(running_pid); then
+        printf 'pi-continue: not running\n'
+        [[ -f "$LOG_FILE" ]] && tail -n 3 "$LOG_FILE"
+    else
+        printf 'pi-continue: running (pid %s)\n' "$pid"
+        [[ -f "$LOG_FILE" ]] && tail -n 5 "$LOG_FILE"
+    fi
+    if [[ -f "$SESSION_FILE" ]]; then
+        ride="$(cat "$SESSION_FILE" 2>/dev/null)"
+        [[ -n "$ride" ]] && printf 'pi-continue: session id: %s\n' "$ride"
+    fi
+    if [[ -f "$FAILED_FILE" ]]; then
+        failed_count="$(cat "$FAILED_FILE" 2>/dev/null)"
+    fi
+    if [[ "$failed_count" =~ ^[0-9]+$ ]]; then
+        printf 'pi-continue: failed runs: %s\n' "$failed_count"
+    fi
+    if (( ${#retained} )); then
+        names=''
+        for name in "${retained[@]}"; do
+            names="${names:+$names }${name:t}"
+        done
+        printf 'pi-continue: retained session output: %s\n' "$names"
+    fi
+    return 0
+}
+
+cmd_follow() {
+    mkdir -p "$STATE_DIR"
+    [[ -f "$OUT_FILE" ]] || : > "$OUT_FILE"
+    exec tail -n "$TAIL_LINES" -F "$OUT_FILE"
+}
+
+cmd_clean() {
+    local pid
+    if pid=$(running_pid); then
+        printf 'pi-continue: running (pid %s); pi-continue stop first\n' "$pid" >&2
+        return 1
+    fi
+    rm -rf "$STATE_DIR"
+    printf 'pi-continue: cleaned %s\n' "$STATE_DIR"
+    return 0
+}
+
+# Preflight the user-facing errors in the caller's terminal: the detached
+# child's stderr goes to /dev/null, so anything the caller got wrong must be
+# reported here, before forking. For `run` this also computes run_follow so
+# the launcher knows whether to tail after spawning.
+validate_launch() {
+    local sub="$1"; shift
+    case "$sub" in
+        run)
+            pi_declared=true
+            ;;
+        at)
+            pi_declared=false
+            [[ -n "${1:-}" ]] || { printf 'pi-continue: at needs HH:MM\n' >&2; return 2; }
+            epoch_of "$1" >/dev/null || { printf 'pi-continue: bad time %s\n' "$1" >&2; return 2; }
+            shift
+            ;;
+        in)
+            pi_declared=false
+            [[ "${1:-}" =~ ^[0-9]+([smhd])?$ ]] || { printf 'pi-continue: in needs DURATION (e.g. 90, 5m, 2h, 1d)\n' >&2; return 2; }
+            shift
+            ;;
+    esac
+    split_run_args "$@" || return 2
+    [[ "$sub" != run ]] || interpret_run_flags || return 2
+}
+
+launch() {
+    validate_launch "$@" || return 2
+    local sub="$1"; shift
+    local existing
+    if existing=$(running_pid); then
+        printf 'pi-continue: already running (pid %s); pi-continue stop first\n' "$existing" >&2
+        return 1
+    fi
+    if command -v setsid >/dev/null 2>&1; then
+        PI_CONTINUE_DETACHED=1 setsid nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+    else
+        PI_CONTINUE_DETACHED=1 nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+    fi
+    # Report readiness, not just spawn: setsid may fork, so $! is not
+    # reliably the engine pid. Wait for the engine to arm its pid file and
+    # print that; a child that dies before arming surfaces as a failure.
+    local polls=0
+    while (( polls < READY_POLLS )); do
+        [[ -f "$PID_FILE" ]] && break
+        sleep "$READY_POLL_INTERVAL"
+        polls=$(( polls + 1 ))
+    done
+    if [[ -f "$PID_FILE" ]]; then
+        if [[ "$run_follow" == true ]]; then
+            printf 'pi-continue: %s detached (pid %s); following live output, Ctrl-C stops following only (pi-continue stop cancels)\n' \
+                "$sub" "$(cat "$PID_FILE" 2>/dev/null)"
+            cmd_follow
+        fi
+        printf 'pi-continue: %s detached (pid %s; pi-continue follow to watch, pi-continue stop to cancel)\n' \
+            "$sub" "$(cat "$PID_FILE" 2>/dev/null)"
+    else
+        printf 'pi-continue: %s failed to start (engine never armed; waited %.1fs)\n' \
+            "$sub" $(( READY_POLLS * READY_POLL_INTERVAL )) >&2
+        return 1
+    fi
+    exit 0
+}
+
+# Armed only in the engine child, at true top level: zsh runs function-set
+# EXIT traps at function return and restores trap resets on function return,
+# either of which would delete the pid file while the engine lives. The
+# parent launcher arms no traps at all, so it can never disturb the engine's.
+if [[ -n "${PI_CONTINUE_DETACHED:-}" ]]; then
+    trap 'rm -f "$PID_FILE"' EXIT INT TERM
+fi
+
+case "${1:-}" in
+    run|at|in)
+            sub="$1"; shift
+            if [[ -n "${PI_CONTINUE_DETACHED:-}" ]]; then
+                case "$sub" in
+                    run) cmd_run "$@" ;;
+                    at)  cmd_at "$@" ;;
+                    in)  cmd_in "$@" ;;
+                esac
+            else
+                launch "$sub" "$@"
+            fi ;;
+    stop)   cmd_stop ;;
+    status) cmd_status ;;
+    clean)  cmd_clean ;;
+    follow) cmd_follow ;;
+    *) printf 'Usage: pi-continue run [-n N] [--follow] [prompt...] | at HH:MM [prompt...] | in DURATION [prompt...]\n       pi-continue stop | status | clean | follow\n' >&2; exit 2 ;;
+esac
