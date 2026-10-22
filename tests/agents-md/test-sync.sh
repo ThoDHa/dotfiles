@@ -3,9 +3,10 @@
 # Staleness check for the generated pi instruction file: regenerates
 # AGENTS.md into a temp scratch dir through the generator's output-path
 # argument and diffs it against ~/.pi/agent/AGENTS.md. The generator's
-# output-path contract runs on every host (scratch-only); only the host
-# compare and the comparator self-test skip when ~/.pi/agent/AGENTS.md
-# is absent (CI has no pi deployment and no artifact). The staleness
+# output-path contract runs on every host (scratch-only); the host compare
+# and the comparator self-test skip only when ~/.pi/agent does not exist
+# at all (CI has no pi deployment and no artifact), while a ~/.pi/agent
+# missing just AGENTS.md fails with the sync remediation. The staleness
 # check fails with a summarized diff and the sync remediation when
 # stale. The comparator is self-tested against a doctored scratch copy
 # so a comparator that can no longer detect drift fails loudly instead
@@ -18,6 +19,7 @@ GENERATOR="$REPO_ROOT/pi/generate-agents-md.sh"
 HOST_FILE="$HOME/.pi/agent/AGENTS.md"
 REMEDIATION="run make sync-agents-md"
 DIFF_SUMMARY_LINES=12
+RULE_BASENAMES=(core.md coding-standards.md execution-standards.md qhaway-memory.md)
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
@@ -42,7 +44,8 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 # Pre-generation snapshot for the host-untouched assertion below; unset
-# on hosts without the file, which skip the host section that uses it.
+# on hosts without the file, which skip or fail in the host section that
+# uses it.
 if [[ -f "$HOST_FILE" ]]; then
 	host_before="$(cat "$HOST_FILE")"
 fi
@@ -90,6 +93,11 @@ cmp -s "$first_pass" "$fresh" \
 header="$(sed -n '3p' "$fresh")"
 assert_contains "provenance paragraph names make sync-agents-md" "$header" "make sync-agents-md"
 assert_contains "provenance paragraph names make test-agents-md" "$header" "make test-agents-md"
+# The provenance paragraph must name every source rule, so a rule set
+# change that forgets a header mention fails here too.
+for rule_basename in "${RULE_BASENAMES[@]}"; do
+	assert_contains "provenance header mentions rule source $rule_basename" "$header" "$rule_basename"
+done
 
 # Section order: the four rule bodies appear in the documented fixed
 # order. The actual sequence is derived at test time from the rules
@@ -98,7 +106,19 @@ assert_contains "provenance paragraph names make test-agents-md" "$header" "make
 # added to the rules dir fails too: the doc's contract is the named four,
 # so widening it must be a deliberate spec change.
 rules_dir="$(sed -n 's/^[[:space:]]*Rules source: //p' <<<"$overwrite_out")"
-expected_order="core.md"$'\n'"coding-standards.md"$'\n'"execution-standards.md"$'\n'"qhaway-memory.md"
+# Precondition of the join: the generator concatenates rule bodies and
+# separates sections with one blank line, which only produces the
+# documented layout while every rule file ends with a single trailing
+# newline.
+for rule_basename in "${RULE_BASENAMES[@]}"; do
+	rule_path="$rules_dir/$rule_basename"
+	if [[ -s "$rule_path" ]] && [[ -z "$(tail -c 1 "$rule_path")" ]]; then
+		ok "rule file ends with a trailing newline: $rule_basename"
+	else
+		bad "rule file must end with a trailing newline: $rules_dir/$rule_basename (the generator joins rule bodies with exactly one blank line, which requires every rule file to end with a single trailing newline)"
+	fi
+done
+expected_order="$(printf '%s\n' "${RULE_BASENAMES[@]}")"
 actual_order="$(for rule_path in "$rules_dir"/*.md; do
 	[[ -e "$rule_path" ]] || continue
 	anchor="$(head -n 1 "$rule_path")"
@@ -108,8 +128,10 @@ done | sort -n | cut -d' ' -f2)"
 assert_eq "rule bodies follow the documented fixed order" \
 	"$expected_order" "$actual_order"
 
-if [[ ! -f "$HOST_FILE" ]]; then
-	skip_test "no ~/.pi/agent/AGENTS.md on this host; host sync check skipped"
+if [[ ! -d "$HOME/.pi/agent" ]]; then
+	skip_test "no ~/.pi/agent on this host; host sync check skipped"
+elif [[ ! -f "$HOST_FILE" ]]; then
+	bad "$HOME/.pi/agent exists but AGENTS.md is missing; $REMEDIATION to create it"
 else
 	echo "== sync: regenerated file matches the host copy =="
 	assert_eq "host AGENTS.md untouched by the scratch runs" \
