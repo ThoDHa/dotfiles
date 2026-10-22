@@ -11,25 +11,7 @@ not restate the rules it points at.
 
 ## Writeless posture
 
-The pi manager holds no edit/write tool use: on activation the mode removes both
-tools from the advertised surface and denies any edit/write call that still
-arrives, so file-content authoring is barred at two layers. The sanctioned
-writes are exactly two families. The five `tasks` CLI channels (`tasks log`,
-`tasks report`, `tasks edit`, `tasks set`, `tasks claim`) carry the
-protocol-record writes; the serialization, ownership, and channel rules are
-normative in the [task-files skill](../agents/.agents/skills/task-files/SKILL.md).
-Git history shaping carries integration: commit, push, and amend/fixup are
-retained manager duties, governed by the
-[git-protocol skill](../agents/.agents/skills/git-protocol/SKILL.md) and
-granted by the injected manager body's git-authority section, with force
-pushes guarded by the skill's
-[Force Push Protection](../agents/.agents/skills/git-protocol/SKILL.md#force-push-protection)
-requirement of explicit user confirmation. The shared mode semantics (the mode
-definition, activation and deactivation phrases, and the pure-coordinator branch
-of failure semantics) live in the
-[delegation skill](../agents/.agents/skills/delegation/SKILL.md), which both
-harnesses load; everything beyond the sanctioned writes moves through the fleet
-rather than through the manager's own hands.
+The pi manager holds no edit/write tool use: on activation the mode removes both tools from the advertised surface and denies any edit/write call that still arrives, so file-content authoring is barred at two layers. The sanctioned writes are exactly two families. The five `tasks` CLI channels (`tasks log`, `tasks report`, `tasks edit`, `tasks set`, `tasks claim`) carry the protocol-record writes; the serialization, ownership, and channel rules are normative in the [task-files skill](../agents/.agents/skills/task-files/SKILL.md). `tasks new` sits outside the named five and is not a sixth manager-held write channel: it stamps only the template scaffold with canonical header fields, and the body prose is delegated drafting labor dispatched to the planner under the injected body's rule 2. Git history shaping carries integration: commit, push, and amend/fixup are retained manager duties, governed by the [git-protocol skill](../agents/.agents/skills/git-protocol/SKILL.md) and granted by the injected manager body's git-authority section, with force pushes guarded by the skill's [Force Push Protection](../agents/.agents/skills/git-protocol/SKILL.md#force-push-protection) requirement of explicit user confirmation. The shared mode semantics (the mode definition, activation and deactivation phrases, and the pure-coordinator branch of failure semantics) live in the [delegation skill](../agents/.agents/skills/delegation/SKILL.md), which both harnesses load; everything beyond the sanctioned writes moves through the fleet rather than through the manager's own hands.
 
 ## Single behavioral source
 
@@ -54,18 +36,7 @@ injected body first and this note second.
 
 ## Default-on activation
 
-Every pi session, interactive and headless, activates Manager Mode at startup
-with no user action: a fresh session is writeless and manager-governed from turn
-one, making the posture the visible norm rather than an opted-in special case.
-Deactivation is per-session: "/manager off" (with "stand down" and "solo"
-honored as the same command's synonyms) restores the full tool surface for that
-session only, and the next session reasserts the default. The "solo" argument
-means only deactivate-to-normal here: it restores the surface and drops the
-injected body, and it is distinct from the delegation skill's Manager Mode
-(Solo), the direct-execution state that keeps the mode's structure, which a
-writeless pi manager cannot enter. An off state is not
-sticky across sessions, and activation never depends on the user remembering to
-switch anything on.
+Every pi session, interactive and headless, activates Manager Mode at startup with no user action: a fresh session is writeless and manager-governed from turn one, making the posture the visible norm rather than an opted-in special case. Deactivation is per-session: "/manager off" (with "stand down" and "solo" honored as the same command's synonyms) restores the full tool surface for that session only, and the next session reasserts the default. The "solo" argument means only deactivate-to-normal here: it restores the surface and drops the injected body, and it is distinct from the delegation skill's Manager Mode (Solo), the direct-execution state that keeps the mode's structure, which a writeless pi manager cannot enter. Conversational Solo-class resource answers route to the off-decision: the delegation skill's resource table maps "just me" and "I'm alone" to Manager Mode (Solo), and since a writeless pi manager cannot enter that state, such an answer lands on deactivate-to-normal, exactly as the "solo" argument does. An off state is not sticky across sessions, and activation never depends on the user remembering to switch anything on.
 
 ## Child exclusion
 
