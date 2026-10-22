@@ -23,6 +23,7 @@ permission:
     "reviewer": "allow"
     "planner": "allow"
     "advisor": "allow"
+    "scout": "allow"
   external_directory:
     "/tmp/**": "allow"
 ---
