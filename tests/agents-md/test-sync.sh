@@ -112,10 +112,14 @@ rules_dir="$(sed -n 's/^[[:space:]]*Rules source: //p' <<<"$overwrite_out")"
 # newline.
 for rule_basename in "${RULE_BASENAMES[@]}"; do
 	rule_path="$rules_dir/$rule_basename"
-	if [[ -s "$rule_path" ]] && [[ -z "$(tail -c 1 "$rule_path")" ]]; then
-		ok "rule file ends with a trailing newline: $rule_basename"
+	# Exactly one newline in the last two bytes: the last byte must be a
+	# newline (missing-newline check) and the two-byte tail must not be a
+	# doubled newline. wc -l counts newline bytes in the two-byte tail, so
+	# a doubled tail counts 2 and fails.
+	if [[ -s "$rule_path" ]] && [[ -z "$(tail -c 1 "$rule_path")" ]] && [[ "$(tail -c 2 "$rule_path" | wc -l)" -eq 1 ]]; then
+		ok "rule file ends with a single trailing newline: $rule_basename"
 	else
-		bad "rule file must end with a trailing newline: $rules_dir/$rule_basename (the generator joins rule bodies with exactly one blank line, which requires every rule file to end with a single trailing newline)"
+		bad "rule file must end with a single trailing newline (missing or doubled): $rules_dir/$rule_basename (the generator joins rule bodies with exactly one blank line, which requires every rule file to end with a single trailing newline)"
 	fi
 done
 expected_order="$(printf '%s\n' "${RULE_BASENAMES[@]}")"
