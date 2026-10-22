@@ -36,14 +36,14 @@ permission:
     "gh workflow view*": "allow"
     "gh label list*": "allow"
     "make test*": "allow"
-    "mktemp /tmp/opencode/*": "allow"
-    "mktemp -d /tmp/opencode/*": "allow"
+    "mktemp /tmp/llm/*": "allow"
+    "mktemp -d /tmp/llm/*": "allow"
   task: deny
   external_directory:
     "/tmp/**": "allow"
 ---
 
-Dual-harness note: you run under opencode and under pi. The tasks CLI and the task-files protocol are absent in pi, so interim logs and the final report deposit fall back to the /tmp/opencode/reports/ file form the body already defines for the non-protocol case; a skill the session does not advertise (simplify-review and git-protocol included) is loaded by reading its SKILL.md under ~/.agents/skills/ directly.
+Dual-harness note: you run under opencode and under pi. The tasks CLI and the task-files protocol are absent in pi, so interim logs and the final report deposit fall back to the /tmp/llm/reports/ file form the body already defines for the non-protocol case; a skill the session does not advertise (simplify-review and git-protocol included) is loaded by reading its SKILL.md under ~/.agents/skills/ directly.
 
 You are the implementation agent and the fleet's code-writing agent:
 doing the actual coding work the manager delegates to you is your job.
@@ -92,7 +92,7 @@ When dispatched:
      Report File Template Blocks section). Reply with a
      brief summary that points at the deposited report path.
    - Otherwise: write the full report to
-     /tmp/opencode/reports/<unit-name>.md (create the directory if
+     /tmp/llm/reports/<unit-name>.md (create the directory if
      needed) in this format: Base commit (the HEAD hash recorded in
      step 2); Commits (hashes and messages of any commits you made);
      Changes (files modified and what was done in each); Claims

@@ -248,7 +248,7 @@ build:
 # the mkdir and the docker mount bind the same directory. Override to
 # relocate the family.
 ifeq ($(origin FLEET_VERIFY_SCRATCH),undefined)
-FLEET_VERIFY_SCRATCH := /tmp/opencode/fleet-verify-$(shell date +%s%N)
+FLEET_VERIFY_SCRATCH := /tmp/llm/fleet-verify-$(shell date +%s%N)
 endif
 
 # A linked worktree's .git file points at the main .git by absolute path, so
@@ -376,11 +376,11 @@ test-rules:
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
 	@opencode run --auto "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
-		tee /tmp/opencode-rules-test.txt >/dev/null
-	@grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/opencode-rules-test.txt || \
-		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
-	@grep -qiE "delegation|git-protocol|task-files" /tmp/opencode-rules-test.txt || \
-		(echo "FAIL: Skills not detected in response (expected delegation, git-protocol, or task-files). Output:" && cat /tmp/opencode-rules-test.txt && exit 1)
+		tee /tmp/llm-rules-test.txt >/dev/null
+	@grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/llm-rules-test.txt || \
+		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/llm-rules-test.txt && exit 1)
+	@grep -qiE "delegation|git-protocol|task-files" /tmp/llm-rules-test.txt || \
+		(echo "FAIL: Skills not detected in response (expected delegation, git-protocol, or task-files). Output:" && cat /tmp/llm-rules-test.txt && exit 1)
 	@echo "  Rules loading confirmed!"
 	@echo "Rules test passed!"
 else

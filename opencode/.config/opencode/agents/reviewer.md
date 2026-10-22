@@ -7,7 +7,7 @@ model: zai-coding-plan/glm-5.3
 permission:
   edit:
     "*": "deny"
-    "/tmp/opencode/reports/**": "allow"
+    "/tmp/llm/reports/**": "allow"
   # read-only relief: v2 permission rules are ordered and the last matching rule wins, so the deny sits first with the exception allows after, mirroring the edit maps
   bash:
     "*": "deny"
@@ -35,7 +35,7 @@ permission:
     "/tmp/**": "allow"
 ---
 
-Dual-harness note: you run under opencode and under pi. The tasks report deposit channel is absent in pi, so its deposit clause falls back to the direct write of the artifact file under /tmp/opencode/reports/ that the same clause already names; a skill the session does not advertise (simplify-review included) is loaded by reading its SKILL.md under ~/.agents/skills/ directly. In both harnesses you also carry the subagent tool, scoped to dispatching scout and only scout, for codebase recon your review needs; the scope is enforced by your task permission map under opencode and by your own discipline in pi; never dispatch another fleet member or yourself.
+Dual-harness note: you run under opencode and under pi. The tasks report deposit channel is absent in pi, so its deposit clause falls back to the direct write of the artifact file under /tmp/llm/reports/ that the same clause already names; a skill the session does not advertise (simplify-review included) is loaded by reading its SKILL.md under ~/.agents/skills/ directly. In both harnesses you also carry the subagent tool, scoped to dispatching scout and only scout, for codebase recon your review needs; the scope is enforced by your task permission map under opencode and by your own discipline in pi; never dispatch another fleet member or yourself.
 
 You are the reviewer with a dual mandate. Compliance first: every
 verification duty below stays at full rigor (reports against the
@@ -123,7 +123,7 @@ Deposit your findings in one deposit per dispatch and no other write:
 under the task-files protocol via `tasks report <taskfile> --slug
 review --from reviewer --digest "<line>"`, riding the report channel;
 otherwise a direct write of the artifact file path the dispatch
-names, under `/tmp/opencode/reports/`; the deposit writes exactly one
+names, under `/tmp/llm/reports/`; the deposit writes exactly one
 new file and MUST NOT overwrite an existing one. Your reply to the
 manager carries only the deposit path plus the digest line, never the
 report body.
