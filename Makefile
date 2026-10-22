@@ -41,12 +41,16 @@ CLAUDECODE_GENERATOR := $(CLAUDECODE_SRC)/generate-claude-md.sh
 # pi agent generator (compiled from the opencode fleet agents)
 PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-agents.sh
 
+# pi manager-mode extension source, deployed verbatim by sync-pi-extensions
+PI_EXTENSIONS_SRC := $(CURDIR)/pi/extensions
+PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
+
 # pi AGENTS.md generator (compiled from the opencode rules)
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
 .PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-pi-continue test-claudecode test-pi lint-corpus check verify-inner
-.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md
+.PHONY: sync-claudecode stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
 all: help
@@ -80,6 +84,7 @@ else
 endif
 ifneq ($(PI_SYNC),)
 	@$(MAKE) sync-pi-agents
+	@$(MAKE) sync-pi-extensions
 else
 	@echo "Skipping pi agents sync (pi not installed)"
 endif
@@ -106,6 +111,7 @@ else
 endif
 ifneq ($(PI_SYNC),)
 	@$(MAKE) sync-pi-agents
+	@$(MAKE) sync-pi-extensions
 else
 	@echo "Skipping pi agents sync (pi not installed)"
 endif
@@ -230,6 +236,15 @@ sync-pi-agents:
 	@$(PI_AGENTS_GENERATOR)
 	@echo "Done! pi agents compiled from the opencode fleet."
 
+# Deploy the repo's pi extensions into ~/.pi/agent/extensions (verbatim
+# copies; the sync test pins the deployed bytes against this source).
+sync-pi-extensions:
+	@echo "Syncing pi extensions..."
+	@test -d $(PI_EXTENSIONS_SRC) || (echo "ERROR: $(PI_EXTENSIONS_SRC) not found; nothing to deploy" && exit 1)
+	@mkdir -p $(PI_EXTENSIONS_DIR)
+	@cp $(PI_EXTENSIONS_SRC)/*.ts $(PI_EXTENSIONS_SRC)/*.md $(PI_EXTENSIONS_DIR)/
+	@echo "Done! pi extensions deployed to $(PI_EXTENSIONS_DIR)."
+
 # Generate ~/.pi/agent/AGENTS.md from the opencode rules
 sync-agents-md:
 	@echo "Syncing pi AGENTS.md with opencode rules..."
@@ -333,7 +348,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi
+test: lint-corpus test-links test-rules test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -343,7 +358,7 @@ check: test
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
 # (test-links, test-rules) stay host-only in test.
-verify-inner: lint-corpus test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi
+verify-inner: lint-corpus test-tasks test-oc-continue test-pi-continue test-claudecode test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -433,6 +448,12 @@ test-pi-agents:
 	@echo "Testing pi agents sync (generated files vs opencode fleet)..."
 	@bash tests/pi-agents/test-sync.sh
 
+# Test that the deployed pi extensions match the repo source and that the
+# vendored manager body matches the fleet pin
+test-pi-extensions:
+	@echo "Testing pi extensions sync (deployed copies vs repo source)..."
+	@bash tests/pi-extensions/test-sync.sh
+
 # Fleet manager source and its digest pin (see pin-manager-body; the digest
 # must match tests/pi-agents/test-sync.sh's manager_body_digest)
 FLEET_MANAGER_MD := opencode/.config/opencode/agents/manager.md
@@ -498,6 +519,7 @@ help:
 	@echo ""
 	@echo "pi Agents:"
 	@echo "  make sync-pi-agents     - Compile ~/.pi/agent/agents from the opencode fleet"
+	@echo "  make sync-pi-extensions - Deploy pi/extensions into ~/.pi/agent/extensions"
 	@echo "  make sync-agents-md     - Generate ~/.pi/agent/AGENTS.md from the opencode rules"
 	@echo "  make pin-manager-body   - Regenerate the manager body digest pin (rejects missing or empty body)"
 	@echo ""
@@ -514,6 +536,7 @@ help:
 	@echo "  make test-claudecode - Verify CLAUDE.md matches a fresh generation of the opencode rules"
 	@echo "  make test-agents-md - Verify ~/.pi/agent/AGENTS.md matches a fresh generation of the opencode rules"
 	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
+	@echo "  make test-pi-extensions - Verify deployed pi extensions match the repo source and the body pin"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
