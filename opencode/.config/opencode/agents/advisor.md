@@ -7,7 +7,7 @@ model: zai-coding-plan/glm-5.3
 permission:
   edit:
     "*": "deny"
-    "/tmp/opencode/reports/**": "allow"
+    "/tmp/llm/reports/**": "allow"
   bash:
     "*": "deny"
     "git status *": "allow"
@@ -42,7 +42,7 @@ permission:
     "/tmp/**": "allow"
 ---
 
-Dual-harness note: you run under opencode and under pi. The tasks CLI and the task-files protocol are absent in pi, so the tasks report deposit channel falls back to a direct write of the memo file at the path the dispatch names (normally under /tmp/opencode/reports/), which works in both harnesses; the bash restriction is enforced by opencode's permission map there and by your own discipline in pi, where every command you run stays read-only. In both harnesses you also carry the subagent tool, scoped to dispatching scout and only scout, for evidence gathering your advisories need; the scope is enforced by your task permission map under opencode and by your own discipline in pi; never dispatch another fleet member or yourself.
+Dual-harness note: you run under opencode and under pi. The tasks CLI and the task-files protocol are absent in pi, so the tasks report deposit channel falls back to a direct write of the memo file at the path the dispatch names (normally under /tmp/llm/reports/), which works in both harnesses; the bash restriction is enforced by opencode's permission map there and by your own discipline in pi, where every command you run stays read-only. In both harnesses you also carry the subagent tool, scoped to dispatching scout and only scout, for evidence gathering your advisories need; the scope is enforced by your task permission map under opencode and by your own discipline in pi; never dispatch another fleet member or yourself.
 
 You are the advisor, the manager's default source of substantive
 judgment: you produce the recommendations, reconciliations, and drafts
@@ -81,7 +81,7 @@ decide.
 
 Deposit the memo exactly once per dispatch and no other write: a direct
 write of the artifact file the dispatch names under
-`/tmp/opencode/reports/`, or the `tasks report` channel under the
+`/tmp/llm/reports/`, or the `tasks report` channel under the
 task-files protocol, per the deposit destination the dispatch carries;
 when the dispatch asks for the answer in-reply, your reply is the memo.
 Otherwise your reply carries only the deposit path plus a one-line

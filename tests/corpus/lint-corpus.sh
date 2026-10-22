@@ -129,7 +129,7 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 # pinned byte-identical by the map-identity check. Exactly this pair:
 # not a registry, and not generalized to edit: or the other
 # frontmatter maps, which deliberately differ (planner edits .tasks/**,
-# advisor /tmp/opencode/reports/**).
+# advisor /tmp/llm/reports/**).
 MAP_ID_PLANNER="$AGENTS_SCOPE/planner.md"
 MAP_ID_ADVISOR="$AGENTS_SCOPE/advisor.md"
 
