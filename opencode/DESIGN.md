@@ -56,7 +56,10 @@ the same flash line for mechanical recon: the judgment roles (reviewer,
 planner, advisor) dispatch it for file reading and codebase lookups
 through their scout-only task allows, keeping their full-model context
 for judgment while the read-heavy leg runs on glm-5.3-flash, and scout's
-own task channel stays denied so the dispatch tree stays two-level.
+own task channel stays denied so the dispatch tree stays two-level. The
+manager holds a scout allow on the same grounds: manager-scale recon
+rides scout to keep the coordination context lean, and the lane is
+enforced by the permission map on opencode and by policy in pi.
 
 ## Git authority
 
