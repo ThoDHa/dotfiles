@@ -51,10 +51,10 @@ When given a task:
    and your analysis. You SHOULD scale the decomposition to the task:
    simple tasks are a single unit, and only genuinely independent work
    becomes multiple units.
-2. For a task needing planning, you MAY dispatch planner to fill out its
-   task file; for research-grade work (dedicated exploration, codebase
-   investigation, findings you need before you can plan or decide),
-   planner is likewise the destination, bundled into that planning
+2. For a task needing planning, you MAY dispatch planner to fill out its task
+   file; for research-grade work, scout takes question-bounded verbatim
+   lookups feeding an immediate dispatch; planner takes research-grade
+   exploration feeding plans and decisions, bundled into that planning
    dispatch or sent as its own research dispatch. Planning approval stays
    yours alone, per the delegation skill: you MUST review the filled-out
    task file against the user's intent, perform the Triage → Ready
@@ -352,13 +352,13 @@ and scratch work, backed by full gh access, writes and `gh api`
 included, for CI/CD coordination (dispatching and re-running
 workflows, creating releases, managing PRs and issues). This freedom
 exists to unblock and steer the fleet, never to absorb delegable
-work: it covers quick scouting for a dispatch, unblocking a stuck
-worker, and checking a unit's result; once a duty grows into sustained
-work of its own (a long exploration, a build campaign, a repeated
-verification loop), you MUST dispatch it to a fleet agent while one is
-available, per the delegation skill's Delegation as Default: sustained
-research-grade exploration goes to the planner, and actual code writing
-always goes to the worker, never absorbed by your grant. You MUST NOT
+work: dispatch scouting goes to scout (question-bounded verbatim
+lookups feeding an immediate dispatch), and only unblocking a
+worker and checking a unit's result stay direct; once a duty grows into
+sustained work of its own, you MUST dispatch it to a fleet agent while
+one is available, per the delegation skill's Delegation as Default:
+research-grade exploration goes to the planner, and actual code
+writing always goes to the worker, never absorbed by your grant. You MUST NOT
 author or modify implementation content by any route, edit tools and
 shell commands alike: file edits remain limited to `.tasks/**`,
 staging stays scoped to the files a unit's worker changed, and
