@@ -42,6 +42,14 @@ Implementations MUST separate unrelated changes into distinct commits.
 
 Each commit MUST represent one complete, coherent logical change.
 
+### Remediation Amend Rule
+
+Fixes arising from a unit's own verification or review cycle (reviewer findings, verifier-caught defects) MUST fold into that unit's commit rather than land as stacked follow-up commits. During multi-agent verification runs this is done either by the remediation dispatch instructing the worker to amend its own unpushed unit commit, or by the manager squashing the fix into the unit's commit at integration. The worker amends only a commit no other session has built upon; when sibling work sits on top, the fold goes through integration-time squash instead.
+
+The amend mechanism reaches unpushed commits only. A remediation arising after the unit commit is pushed follows the ordinary commit rules: a fixup folded by rebase before the next push where the history is still private, otherwise a follow-up commit. Pushed tips are never rewritten.
+
+The pushed history MUST carry one commit per logical change, and this rule does not override the coding-standards rule's "Separation of Code and Test Changes" section: its sanctioned ordered pair stays two commits, and its deliberate red-first intermediate MUST NOT be amended away. Intermediate verified states remain auditable through task records and agent reports, not through the git log.
+
 ### Relationship Preservation
 
 Related changes MUST be grouped together in the same commit:
