@@ -236,13 +236,45 @@ sync-pi-agents:
 	@$(PI_AGENTS_GENERATOR)
 	@echo "Done! pi agents compiled from the opencode fleet."
 
-# Deploy the repo's pi extensions into ~/.pi/agent/extensions (verbatim
-# copies; the sync test pins the deployed bytes against this source).
+# Deploy the repo's pi extensions into ~/.pi/agent/extensions as a
+# git-tracked prune: the deployed set becomes exactly the repo-tracked
+# set under the source dir (git ls-files, subdirs included), host files
+# at history-tracked paths the repo has since deleted are pruned, and
+# foreign host content is never touched. Host-created files at
+# history-tracked addresses count as drift and are pruned with an
+# echoed notice; foreign content means never-tracked addresses. The
+# verbatim copy corrects byte drift at tracked paths. Only enumerated
+# tracked paths are written or removed, so foreign files stay safe
+# without an rsync --delete sweep. The sync test canaries this contract
+# against a hermetic fixture (tests/pi-extensions/test-sync.sh).
 sync-pi-extensions:
 	@echo "Syncing pi extensions..."
 	@test -d $(PI_EXTENSIONS_SRC) || (echo "ERROR: $(PI_EXTENSIONS_SRC) not found; nothing to deploy" && exit 1)
-	@mkdir -p $(PI_EXTENSIONS_DIR)
-	@cp $(PI_EXTENSIONS_SRC)/*.ts $(PI_EXTENSIONS_SRC)/*.md $(PI_EXTENSIONS_DIR)/
+	@bash -eu -o pipefail -c '\
+		src="$$(cd $(PI_EXTENSIONS_SRC) && pwd -P)"; \
+		root="$$(git -C "$$src" rev-parse --show-toplevel)"; \
+		rel="$$(git -C "$$src" rev-parse --show-prefix)"; \
+		rel="$${rel%/}"; \
+		historical="$$(git -C "$$root" log --format= --name-only -- "$$rel" | sed "/^$$/d" | sort -u)"; \
+		mkdir -p $(PI_EXTENSIONS_DIR); \
+		host="$$(cd $(PI_EXTENSIONS_DIR) && pwd -P)"; \
+		git -C "$$root" ls-files -z -- "$$rel" | \
+			while IFS= read -r -d "" tracked_rel; do \
+				host_rel="$${tracked_rel#$$rel/}"; \
+				mkdir -p "$$host/$$(dirname "$$host_rel")"; \
+				cp "$$root/$$tracked_rel" "$$host/$$host_rel"; \
+			done; \
+		comm -13 \
+			<(git -C "$$root" ls-files -- "$$rel" | sort) \
+			<(printf "%s\n" "$$historical") | \
+			while IFS= read -r stale_rel; do \
+				stale_host="$$host/$${stale_rel#$$rel/}"; \
+				if [[ -f "$$stale_host" || -L "$$stale_host" ]]; then \
+					rm -f -- "$$stale_host"; \
+					echo "  pruned drifted tracked path: $${stale_rel#$$rel/}"; \
+				fi; \
+			done; \
+	'
 	@echo "Done! pi extensions deployed to $(PI_EXTENSIONS_DIR)."
 
 # Generate ~/.pi/agent/AGENTS.md from the opencode rules
