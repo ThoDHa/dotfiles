@@ -16,15 +16,26 @@
 # mapping), so a pi surface change that invalidates a mapping turns the
 # suite red. The four subagent fleet bodies' dual-harness notes must
 # still carry the same shared truthful clause, pinned under the same
-# run-everywhere contract. The host compare and the comparator self-test skip when the
+# run-everywhere contract, and the advisor and reviewer notes must also
+# carry their phrase-level deposit clauses (the tasks report channel
+# under .tasks/reports/; the named path under /tmp/llm/reports/) so a
+# rewrite that drops either deposit destination turns the suite red.
+# The host compare and the comparator self-tests skip when the
 # extensions dir is absent (CI and the verify container have no pi); the
-# pin and note sections run everywhere. Host state is never written. A
-# stale, partial, or lingering deployment fails with the sync
-# remediation, and the comparator is self-tested against doctored
-# scratch copies so a comparator that can no longer detect drift fails
-# loudly instead of passing vacuously. The self-test covers the
-# comparator functions only, not the host-comparison wiring branch,
-# which needs the extensions dir present.
+# pin, note, and deploy-canary sections run everywhere. Host state is
+# never written. A stale, partial, or lingering deployment fails with
+# the sync remediation; an untracked repo-side source path instead
+# fails with a distinct diagnostic telling the operator to git add or
+# remove it, since a deploy copies only tracked paths and rerunning it
+# can never clear that mismatch. The comparator is self-tested against
+# doctored scratch copies so a comparator that can no longer detect
+# drift fails loudly instead of passing vacuously; the self-test covers
+# the comparator functions only, not the host-comparison wiring branch,
+# which needs the extensions dir present. The deploy target itself is
+# canaried everywhere against a hermetic fixture repo and host dir: a
+# drifted tracked path is pruned, a foreign untracked host file
+# survives, and the deployed bytes end up matching the repo-tracked set
+# exactly.
 
 set -uo pipefail
 
@@ -49,22 +60,40 @@ fleet_body_digest() {
 
 # sync_forward_drift SRC HOST; return 0 when every regular file under
 # SRC, relative path preserved, exists under HOST as a regular file with
-# identical content, 1 otherwise. Prints one diagnostic block per
-# drifted entry, indented two spaces. Reads only; writes nothing.
+# identical content, 1 otherwise. A mismatching source path that git
+# does not track is its own failure class: the deploy copies only the
+# tracked set, so rerunning it can never clear the mismatch, and the
+# entry gets a distinct diagnostic with a git-add-or-remove remediation
+# instead. Sets forward_drift_tracked to 1 when at least one tracked
+# path mismatched (or the source dir is missing), 0 otherwise, so the
+# caller can scope the sync remediation to drift a deploy run fixes.
+# When SRC sits outside a git work tree (the comparator self-tests run
+# it on scratch copies) every path counts as tracked. Prints one
+# diagnostic block per drifted entry, indented two spaces. Reads only;
+# writes nothing.
 sync_forward_drift() {
-	local src="$1" host="$2" rel rc=0
-	[[ -d "$src" ]] || { echo "  repo source dir missing: $src"; return 1; }
+	local src="$1" host="$2" rel rc=0 in_repo=0 tracked_set=""
+	forward_drift_tracked=0
+	[[ -d "$src" ]] || { echo "  repo source dir missing: $src"; forward_drift_tracked=1; return 1; }
+	if tracked_set="$(git -C "$src" ls-files 2>/dev/null)"; then
+		in_repo=1
+	fi
 	while IFS= read -r -d '' rel; do
-		if [[ ! -f "$host/$rel" ]]; then
-			echo "  missing from the deployed set: $rel"
+		[[ -f "$host/$rel" ]] && cmp -s "$src/$rel" "$host/$rel" && continue
+		if (( in_repo )) && ! grep -qx -F -- "$rel" <<<"$tracked_set"; then
+			echo "  untracked repo source path (a deploy copies only tracked paths): $rel"
+			echo "    Remediation: git add or remove it"
 			rc=1
 			continue
 		fi
-		if ! cmp -s "$src/$rel" "$host/$rel"; then
+		forward_drift_tracked=1
+		if [[ ! -f "$host/$rel" ]]; then
+			echo "  missing from the deployed set: $rel"
+		else
 			echo "  content drift (source vs deployed): $rel"
 			diff -u "$src/$rel" "$host/$rel" 2>/dev/null | sed -n '1,12p' | sed 's/^/    /' || true
-			rc=1
 		fi
+		rc=1
 	done < <(find "$src" -type f -printf '%P\0')
 	return "$rc"
 }
@@ -128,6 +157,16 @@ for agent in worker advisor planner reviewer; do
 	assert_contains "$agent dual-harness note pins the shared pi tasks-CLI truthfulness clause" "$agent_note" "$subagent_tasks_clause"
 done
 
+# The advisor and reviewer notes must name both deposit destinations at
+# phrase level (the tasks report channel and the named fallback path),
+# so dropping or rewording either one turns the suite red where the
+# deposit misattribution class occurred.
+for agent in advisor reviewer; do
+	agent_note="$(grep -m1 '^Dual-harness note:' "$REPO_ROOT/opencode/.config/opencode/agents/$agent.md")"
+	assert_contains "$agent dual-harness note pins the tasks report channel deposit clause" "$agent_note" 'the tasks report channel under .tasks/reports/'
+	assert_contains "$agent dual-harness note pins the named-path deposit clause" "$agent_note" 'at the named path under /tmp/llm/reports/'
+done
+
 # Pre-host snapshot for the host-untouched assertion; unset on hosts
 # without the directory, which skip the host section that uses it.
 if [[ -d "$HOST_DIR" ]]; then
@@ -143,9 +182,12 @@ else
 	forward_rc=$?
 	sync_reverse_drift "$SRC_DIR" "$HOST_DIR" "$REPO_ROOT"
 	reverse_rc=$?
-	((forward_rc == 0)) \
-		&& ok "every repo-side extension file is deployed byte-identical" \
-		|| { bad "every repo-side extension file is deployed byte-identical"; echo "  Remediation: $REMEDIATION"; }
+	if ((forward_rc == 0)); then
+		ok "every repo-side extension file is deployed byte-identical"
+	else
+		bad "every repo-side extension file is deployed byte-identical"
+		((forward_drift_tracked != 0)) && echo "  Remediation: $REMEDIATION"
+	fi
 	((reverse_rc == 0)) \
 		&& ok "no deleted repo extension lingers in the deployed set" \
 		|| bad "no deleted repo extension lingers in the deployed set"
@@ -207,20 +249,89 @@ else
 		&& ok "comparator tolerates never-tracked host-local extensions" \
 		|| bad "comparator tolerates never-tracked host-local extensions"
 
-	doctored="$(mktemp -d)"
-	sed 's/^You are a manager\./You are NOT a manager./' "$BODY" >"$doctored/manager-body.md"
-	doctored_digest="$(sha256sum "$doctored/manager-body.md" | cut -d' ' -f1)"
-	[[ "$doctored_digest" != "$body_digest" ]] \
-		&& ok "comparator detects a doctored body line as drift" \
-		|| bad "comparator detects a doctored body line as drift"
-	if cmp -s "$BODY" "$doctored/manager-body.md"; then
-		bad "comparator probe reports the doctored copy as drifted"
-	else
-		ok "comparator probe reports the doctored copy as drifted"
-	fi
-
-	rm -rf "$scratch_deployed" "$subdir_src" "$subdir_deployed" "$ghost_repo" "$ghost_deployed" "$doctored"
+	rm -rf "$scratch_deployed" "$subdir_src" "$subdir_deployed" "$ghost_repo" "$ghost_deployed"
 fi
+
+# Deploy canary: run make sync-pi-extensions against a hermetic fixture
+# (fixture repo plus temp host dir) instead of the live tree, so the
+# deploy contract is exercised everywhere, including hosts without
+# ~/.pi. The fixture's tracked set carries a top-level and a nested
+# file; its history also carries two since-deleted tracked paths. The
+# fixture host starts with byte drift at both tracked paths, the two
+# drifted tracked paths themselves, and a never-tracked foreign file.
+# After the deploy the tracked paths match the fixture bytes exactly,
+# the drifted tracked paths are pruned, and the foreign file survives.
+echo "== deploy canary: tracked-prune against a hermetic fixture =="
+canary_repo="$(mktemp -d)"
+canary_host="$(mktemp -d)"
+mkdir -p "$canary_repo/pi/extensions/nested"
+printf 'tracked alpha\n' > "$canary_repo/pi/extensions/alpha.ts"
+printf 'tracked beta\n' > "$canary_repo/pi/extensions/nested/beta.md"
+printf 'ghost top\n' > "$canary_repo/pi/extensions/ghost-top.ts"
+printf 'ghost nested\n' > "$canary_repo/pi/extensions/nested/ghost-deleted.md"
+# The fixture is built with a null global and system git config so a
+# user's global gitignore cannot silently shrink the tracked set the
+# canary asserts against.
+canary_git_env=(env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
+"${canary_git_env[@]}" git -C "$canary_repo" init -q
+"${canary_git_env[@]}" git -C "$canary_repo" add -A
+"${canary_git_env[@]}" git -C "$canary_repo" -c user.name=selftest -c user.email=selftest@example.com commit -qm seed
+rm "$canary_repo/pi/extensions/ghost-top.ts" "$canary_repo/pi/extensions/nested/ghost-deleted.md"
+"${canary_git_env[@]}" git -C "$canary_repo" add -A
+"${canary_git_env[@]}" git -C "$canary_repo" -c user.name=selftest -c user.email=selftest@example.com commit -qm "delete ghosts"
+mkdir -p "$canary_host/nested"
+printf 'stale bytes\n' > "$canary_host/alpha.ts"
+printf 'stale bytes\n' > "$canary_host/nested/beta.md"
+printf 'ghost top\n' > "$canary_host/ghost-top.ts"
+printf 'ghost nested\n' > "$canary_host/nested/ghost-deleted.md"
+printf 'foreign\n' > "$canary_repo/foreign-seed.txt"
+cp "$canary_repo/foreign-seed.txt" "$canary_host/host-local-extension.ts"
+
+canary_log="$canary_repo/deploy.log"
+if make -s -C "$REPO_ROOT" sync-pi-extensions \
+	PI_EXTENSIONS_SRC="$canary_repo/pi/extensions" \
+	PI_EXTENSIONS_DIR="$canary_host" >"$canary_log" 2>&1; then
+	ok "deploy target succeeds against the hermetic fixture"
+else
+	bad "deploy target succeeds against the hermetic fixture"
+	sed 's/^/    /' "$canary_log"
+fi
+
+[[ ! -e "$canary_host/ghost-top.ts" && ! -e "$canary_host/nested/ghost-deleted.md" ]] \
+	&& ok "canary: drifted tracked paths (top-level and nested) are pruned" \
+	|| bad "canary: drifted tracked paths (top-level and nested) are pruned"
+
+if [[ -f "$canary_host/host-local-extension.ts" ]] \
+	&& cmp -s "$canary_host/host-local-extension.ts" "$canary_repo/foreign-seed.txt"; then
+	ok "canary: the foreign untracked host file survives the deploy"
+else
+	bad "canary: the foreign untracked host file survives the deploy"
+fi
+
+byte_rc=0
+while IFS= read -r -d '' tracked_rel; do
+	host_rel="${tracked_rel#pi/extensions/}"
+	if ! cmp -s "$canary_repo/$tracked_rel" "$canary_host/$host_rel"; then
+		byte_rc=1
+	fi
+done < <(git -C "$canary_repo" ls-files -z -- pi/extensions)
+((byte_rc == 0)) \
+	&& ok "canary: deployed bytes match the fixture tracked set exactly" \
+	|| bad "canary: deployed bytes match the fixture tracked set exactly"
+
+expected_files="$( { git -C "$canary_repo" ls-files -- pi/extensions | sed 's|^pi/extensions/||'; printf '%s\n' 'host-local-extension.ts'; } | sort)"
+actual_files="$(cd "$canary_host" && find . -type f -printf '%P\n' | sort)"
+assert_eq "canary: deployed file set is exactly the tracked set plus the foreign file" "$expected_files" "$actual_files"
+
+sync_forward_drift "$canary_repo/pi/extensions" "$canary_host"
+canary_forward_rc=$?
+sync_reverse_drift "$canary_repo/pi/extensions" "$canary_host" "$canary_repo"
+canary_reverse_rc=$?
+((canary_forward_rc == 0 && canary_reverse_rc == 0)) \
+	&& ok "canary: both comparators pass the freshly deployed fixture host" \
+	|| bad "canary: both comparators pass the freshly deployed fixture host"
+
+rm -rf "$canary_repo" "$canary_host"
 
 print_result
 ((fail == 0)) || exit 1
