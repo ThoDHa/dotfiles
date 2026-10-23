@@ -14,7 +14,9 @@
 # dual-harness note must still carry its load-bearing pi mapping phrases
 # (the pi tasks-CLI truthfulness clause and the background-to-detach
 # mapping), so a pi surface change that invalidates a mapping turns the
-# suite red. The host compare and the comparator self-test skip when the
+# suite red. The four subagent fleet bodies' dual-harness notes must
+# still carry the same shared truthful clause, pinned under the same
+# run-everywhere contract. The host compare and the comparator self-test skip when the
 # extensions dir is absent (CI and the verify container have no pi); the
 # pin and note sections run everywhere. Host state is never written. A
 # stale, partial, or lingering deployment fails with the sync
@@ -115,6 +117,16 @@ tasks_clause='the tasks CLI is present in both harnesses (on pi stowed to ~/.loc
 detach_mapping="rule 4's \`background: true\` maps to the subagent tool's \`detach\` parameter (\`detach: true\`)"
 assert_contains "fleet dual-harness note pins the pi tasks-CLI truthfulness clause" "$note_line" "$tasks_clause"
 assert_contains "fleet dual-harness note pins the background-to-detach mapping" "$note_line" "$detach_mapping"
+
+# The subagent notes share the manager note's truthful clause minus its
+# "so their conditional clauses apply as written" tail; pin it verbatim
+# in all four so a reverted or divergent clause turns the suite red on
+# every host, including those without ~/.pi.
+subagent_tasks_clause='The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records'
+for agent in worker advisor planner reviewer; do
+	agent_note="$(grep -m1 '^Dual-harness note:' "$REPO_ROOT/opencode/.config/opencode/agents/$agent.md")"
+	assert_contains "$agent dual-harness note pins the shared pi tasks-CLI truthfulness clause" "$agent_note" "$subagent_tasks_clause"
+done
 
 # Pre-host snapshot for the host-untouched assertion; unset on hosts
 # without the directory, which skip the host section that uses it.

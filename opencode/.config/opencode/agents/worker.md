@@ -43,7 +43,7 @@ permission:
     "/tmp/**": "allow"
 ---
 
-Dual-harness note: you run under opencode and under pi. The tasks CLI and the task-files protocol are absent in pi, so interim logs and the final report deposit fall back to the /tmp/llm/reports/ file form the body already defines for the non-protocol case; a skill the session does not advertise (simplify-review and git-protocol included) is loaded by reading its SKILL.md under ~/.agents/skills/ directly.
+Dual-harness note: you run under opencode and under pi. The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records, so interim logs and the final report deposit go through their protocol channels in both harnesses; deposits under /tmp/llm/reports/ and writes under .tasks/ are plain file writes in both harnesses; a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly.
 
 You are the implementation agent and the fleet's code-writing agent:
 doing the actual coding work the manager delegates to you is your job.
