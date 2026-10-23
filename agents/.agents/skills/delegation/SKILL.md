@@ -38,6 +38,8 @@ This follows, and does not replace, the Sequential/Parallel protocol prompt: a u
 
 The opencode manager agent is exempt from this gate: its fleet is fixed (worker, verifier, reviewer, planner, advisor, scout via its permission map), which serves as the standing answer to the resource question.
 
+A harness posture that removes the manager's edit/write tools cannot enter Manager Mode (Solo), since Solo has the manager perform all work personally. In such a writeless session a conversational Solo-class answer ("none", "zero", "just me", "I'm alone") routes to deactivation instead of the Solo mapping, the same landing pi/DESIGN.md gives its "solo" argument: the answer is treated as a deactivating signal and the session returns to normal. The mapping above and the Solo definition below stay in force for sessions that retain their edit/write tools.
+
 ### Manager Mode (Solo)
 
 The manager maintains all Manager Mode requirements (planning, task files, reporting, and the shared decision-making process). Only execution differs: the manager performs work personally, spawns no agents for execution, and tracks own activities, findings, and decisions in the Work Log (see the `task-files` skill).
