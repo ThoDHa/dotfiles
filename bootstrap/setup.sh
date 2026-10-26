@@ -594,9 +594,10 @@ step_pi() {
 }
 
 # Clone the context-manager plugin directly into the opencode config dir,
-# where opencode.json and cli.json reference it. Floating on latest for now;
-# pin to a sha once the plugin API stabilizes. HTTPS (not SSH) so fresh
-# machines without keys can clone.
+# where cli.json's plugins entry references it (the step's own file checks
+# below verify the clone). Floating on latest for now; pin to a sha once
+# the plugin API stabilizes. HTTPS (not SSH) so fresh machines without keys
+# can clone.
 step_context_manager() {
     git_clone_or_pull "opencode-context-manager" \
         "https://github.com/ThoDHa/opencode-context-manager.git" \

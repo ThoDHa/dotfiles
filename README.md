@@ -43,7 +43,7 @@ dotfiles/
 │       ├── agents/     # Agent definitions (manager and fleet)
 │       ├── opencode.json
 │       ├── rules/      # RFC 2119 specification files
-│       └── tui.json
+│       └── cli.json
 ├── claudecode/         # Claude Code settings
 │   └── .claude/        # -> ~/.claude (stowed only when claude is installed)
 ├── agents/             # Shared agent skills (opencode, Claude Code, pi)
@@ -80,7 +80,7 @@ dotfiles/
 | `make restow` | Update symlinks (unstow + stow) |
 | `make dry-run` | Preview what would be stowed |
 | `make clean-stow` | Remove conflicting files before stowing |
-| `make readopt` | Re-adopt opencode.json after a runtime rewrite |
+| `make readopt` | Re-adopt opencode.json/cli.json after a runtime rewrite |
 | `make stow-PKG` | Stow a single package (e.g., `make stow-shell`) |
 | `make unstow-PKG` | Unstow a single package |
 | `make build` | Build the dev container |
