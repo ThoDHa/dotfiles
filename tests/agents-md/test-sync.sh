@@ -23,22 +23,9 @@ RULE_BASENAMES=(core.md coding-standards.md execution-standards.md qhaway-memory
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
-report_stale() { # fresh actual; prints the diff summary and the remediation
-	echo "  Stale AGENTS.md: $2 does not match a fresh generation of the rules."
-	echo "  Diff summary (first $DIFF_SUMMARY_LINES lines, fresh vs host):"
-	diff -u "$1" "$2" | sed -n "1,${DIFF_SUMMARY_LINES}p" | sed 's/^/    /' || true
-	echo "  Remediation: $REMEDIATION"
-}
-
-compare_fresh() { # label fresh actual; ok on byte-identity, bad plus summary otherwise
-	if cmp -s "$2" "$3"; then
-		ok "$1"
-		return 0
-	fi
-	bad "$1"
-	report_stale "$2" "$3"
-	return 1
-}
+ARTIFACT_NOUN="AGENTS.md"
+PROVENANCE_PHRASE="does not match a fresh generation of the rules."
+source "$REPO_ROOT/tests/lib/sync-comparator.sh"
 
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
@@ -151,6 +138,8 @@ else
 	selftest_out="$(compare_fresh "comparator probe" "$fresh" "$doctored")"
 	selftest_rc=$?
 	assert_eq "comparator detects a deleted line as stale" "1" "$selftest_rc"
+	assert_contains "stale report names the artifact and provenance phrase" \
+		"$selftest_out" "Stale AGENTS.md: $doctored does not match a fresh generation of the rules."
 	assert_contains "stale report carries the remediation line" "$selftest_out" "$REMEDIATION"
 	assert_contains "stale report summarizes the diff" "$selftest_out" "-# User Instructions (AGENTS.md)"
 fi
