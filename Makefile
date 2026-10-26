@@ -71,23 +71,49 @@ define announce_skips
 done
 endef
 
+# ── Optional-sync macro ───────────────────────────────────────────────────────
+# The stow and restow recipes end with the optional tool syncs: run the
+# tool's syncs when installed, announce the skip when not. The ifneq
+# blocks select, at parse time, the branch each tail macro holds, and
+# both recipes expand the selected tail via $(call), so every branch's
+# recipe lines are defined exactly once.
+define claudecode_sync_run
+@$(MAKE) sync-claudecode
+endef
+
+define claudecode_sync_skip
+@echo "Skipping Claude Code sync (claude not installed)"
+endef
+
+define pi_sync_run
+@$(MAKE) sync-pi-agents
+@$(MAKE) sync-pi-extensions
+endef
+
+define pi_sync_skip
+@echo "Skipping pi agents sync (pi not installed)"
+endef
+
+ifneq ($(CLAUDE_SYNC),)
+CLAUDECODE_SYNC_TAIL := claudecode_sync_run
+else
+CLAUDECODE_SYNC_TAIL := claudecode_sync_skip
+endif
+
+ifneq ($(PI_SYNC),)
+PI_SYNC_TAIL := pi_sync_run
+else
+PI_SYNC_TAIL := pi_sync_skip
+endif
+
 # Stow all applicable packages to home directory
 stow:
 	@echo "Stowing packages to $(STOW_TARGET)..."
 	$(call announce_skips)
 	$(call stow_all,$(STOW_PACKAGES),--no-folding,Stow)
 	@echo "Done! All packages stowed."
-ifneq ($(CLAUDE_SYNC),)
-	@$(MAKE) sync-claudecode
-else
-	@echo "Skipping Claude Code sync (claude not installed)"
-endif
-ifneq ($(PI_SYNC),)
-	@$(MAKE) sync-pi-agents
-	@$(MAKE) sync-pi-extensions
-else
-	@echo "Skipping pi agents sync (pi not installed)"
-endif
+	$(call $(CLAUDECODE_SYNC_TAIL))
+	$(call $(PI_SYNC_TAIL))
 
 # Unstow all packages (full list, so configs of uninstalled tools are removed)
 unstow:
@@ -104,17 +130,8 @@ restow:
 	$(call stow_all,$(STOW_PACKAGES_ALL),-D,Unstow)
 	$(call announce_skips)
 	$(call stow_all,$(STOW_PACKAGES),--no-folding,Stow)
-ifneq ($(CLAUDE_SYNC),)
-	@$(MAKE) sync-claudecode
-else
-	@echo "Skipping Claude Code sync (claude not installed)"
-endif
-ifneq ($(PI_SYNC),)
-	@$(MAKE) sync-pi-agents
-	@$(MAKE) sync-pi-extensions
-else
-	@echo "Skipping pi agents sync (pi not installed)"
-endif
+	$(call $(CLAUDECODE_SYNC_TAIL))
+	$(call $(PI_SYNC_TAIL))
 	@echo "Done! All packages restowed."
 
 # Stow / unstow / restow individual packages
