@@ -1,10 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "provider": {
+  "providers": {
     "thoai-local": {
-      "npm": "@ai-sdk/openai-compatible",
+      "package": "aisdk:@ai-sdk/openai-compatible",
       "name": "ThOAI Local GPU Server",
-      "options": {
+      "settings": {
         "baseURL": "http://thoai-op:8080/v1"
       },
       "models": {
@@ -25,44 +25,52 @@
     "~/.config/opencode/rules/qhaway-memory.md"
   ],
   "mcp": {
-    "playwright": {
-      "type": "local",
-      "command": [
-        "npx",
-        "-y",
-        "@playwright/mcp"
-      ],
-      "enabled": true
-    },
-    "context7": {
-      "type": "remote",
-      "url": "https://mcp.context7.com/mcp",
-      "enabled": true
-    },
-    "qhaway": {
-      "type": "local",
-      "command": [
-        "uvx",
-        "--python",
-        "3.14",
-        "--from",
-        "qhaway==0.7.3",
-        "qhaway",
-        "serve",
-        "--dir",
-        "/home/khave/.config/opencode/qhaway-memory"
-      ],
-      "enabled": true,
-      "timeout": 30000
+    "servers": {
+      "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@playwright/mcp"
+        ],
+        "disabled": false
+      },
+      "context7": {
+        "type": "remote",
+        "url": "https://mcp.context7.com/mcp",
+        "disabled": false
+      },
+      "qhaway": {
+        "type": "local",
+        "command": [
+          "uvx",
+          "--python",
+          "3.14",
+          "--from",
+          "qhaway==0.7.3",
+          "qhaway",
+          "serve",
+          "--dir",
+          "/home/khave/.config/opencode/qhaway-memory"
+        ],
+        "disabled": false,
+        "timeout": {
+          "startup": 30000,
+          "catalog": 30000,
+          "execution": 30000
+        }
+      }
     }
   },
-  "permission": {
-    "external_directory": {
-      "/tmp/**": "allow"
-    },
-    "doom_loop": "allow"
-  },
+  "permissions": [
+    {
+      "action": "external_directory",
+      "resource": "/tmp/**",
+      "effect": "allow"
+    }
+  ],
   "experimental": {
+    "todo": true,
     "subagent_depth": 2
   }
 }
