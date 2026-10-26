@@ -416,8 +416,10 @@ _install_opencode_v2() {
 
 # Reconcile the stow deployment after the opencode v2 installer. v2's
 # one-time config migration rename-replaces the stow-owned links under
-# ~/.config/opencode (opencode.json plus the rules/ and agents/ links)
-# with real files, and the Makefile stows before the installer runs, so
+# ~/.config/opencode (opencode.json, cli.json, plus the rules/ and
+# agents/ links; the migration also turns the old tui.json link into
+# the real cli.json it auto-migrates) with real files, and the Makefile
+# stows before the installer runs, so
 # a fresh machine's first v2 invocation can be this bootstrap's own
 # installer and silently break the deployment. Call after every
 # installer invocation; the up-to-date path never calls it. On a host
@@ -431,12 +433,13 @@ _install_opencode_v2() {
 # the cause, rather than later at step_claude_stow with the migration
 # damage as the only symptom.
 _reconcile_opencode_stow() {
-    if [ ! -L "$HOME/.config/opencode/opencode.json" ]; then
+    if [ ! -L "$HOME/.config/opencode/opencode.json" ] \
+        || [ ! -L "$HOME/.config/opencode/cli.json" ]; then
         if [ "${SKIP_CHSH:-0}" = "1" ]; then
             echo "  Repairing container stow shadowed by the opencode v2 migration (clean-stow + stow)..."
             make -C "$DOTFILES_DIR" clean-stow stow
         else
-            echo "  Warning: ~/.config/opencode/opencode.json is not a stow symlink (opencode v2 migration replaces it) — run 'make readopt' or 'make clean-stow stow' in $DOTFILES_DIR to repair"
+            echo "  Warning: a stow symlink under ~/.config/opencode is missing (opencode.json, cli.json; the opencode v2 migration replaces them) — run 'make readopt' or 'make clean-stow stow' in $DOTFILES_DIR to repair"
         fi
     fi
 }
@@ -591,7 +594,7 @@ step_pi() {
 }
 
 # Clone the context-manager plugin directly into the opencode config dir,
-# where opencode.json/tui.json reference it. Floating on latest for now;
+# where opencode.json and cli.json reference it. Floating on latest for now;
 # pin to a sha once the plugin API stabilizes. HTTPS (not SSH) so fresh
 # machines without keys can clone.
 step_context_manager() {
