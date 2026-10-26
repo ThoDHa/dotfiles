@@ -22,22 +22,9 @@ DIFF_SUMMARY_LINES=12
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
-report_stale() { # fresh actual; prints the diff summary and the remediation
-	echo "  Stale pi agents: $2 does not match a fresh compilation of the fleet."
-	echo "  Diff summary (first $DIFF_SUMMARY_LINES lines, fresh vs host):"
-	diff -u "$1" "$2" | sed -n "1,${DIFF_SUMMARY_LINES}p" | sed 's/^/    /' || true
-	echo "  Remediation: $REMEDIATION"
-}
-
-compare_fresh() { # label fresh actual; ok on byte-identity, bad plus summary otherwise
-	if cmp -s "$2" "$3"; then
-		ok "$1"
-		return 0
-	fi
-	bad "$1"
-	report_stale "$2" "$3"
-	return 1
-}
+ARTIFACT_NOUN="pi agents"
+PROVENANCE_PHRASE="does not match a fresh compilation of the fleet."
+source "$REPO_ROOT/tests/lib/sync-comparator.sh"
 
 # manager_body_digest FILE; sha256 of the manager body: everything below
 # the frontmatter closing --- line. One definition shared by the pin
@@ -198,6 +185,8 @@ else
 	selftest_out="$(compare_fresh "comparator probe" "$fresh/worker.md" "$doctored/worker.md")"
 	selftest_rc=$?
 	assert_eq "comparator detects a deleted line as stale" "1" "$selftest_rc"
+	assert_contains "stale report names the artifact and provenance phrase" \
+		"$selftest_out" "Stale pi agents: $doctored/worker.md does not match a fresh compilation of the fleet."
 	assert_contains "stale report carries the remediation line" "$selftest_out" "$REMEDIATION"
 	assert_contains "stale report summarizes the diff" "$selftest_out" "-model:"
 fi
