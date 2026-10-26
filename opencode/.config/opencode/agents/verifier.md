@@ -1,74 +1,72 @@
 ---
-name: verifier
 description: Runs tests, linters, and typecheckers and reports raw results without interpretation
 mode: subagent
 # pi: model=glm-5.3-flash tools=read, bash
 model: zai-coding-plan/glm-5.3-flash
-permission:
-  edit: deny
-  bash:
-    "*": "deny"
-    "git push*": "deny"
-    "make verify": "allow"
-    "tasks render": "allow"
-    "git status *": "allow"
-    "git diff *": "allow"
-    "git log *": "allow"
-    "git show *": "allow"
-    "git rev-parse *": "allow"
-    "ls *": "allow"
-    "cat *": "allow"
-    "grep *": "allow"
-    "make test*": "allow"
-    "make lint*": "allow"
-    "make check*": "allow"
-    "make build*": "allow"
-    "python *": "allow"
-    "python3 *": "allow"
-    ".venv/bin/python *": "allow"
-    ".venv/bin/python3 *": "allow"
-    "venv/bin/python *": "allow"
-    "venv/bin/python3 *": "allow"
-    "*/.venv/bin/python *": "allow"
-    "*/.venv/bin/python3 *": "allow"
-    "*/venv/bin/python *": "allow"
-    "*/venv/bin/python3 *": "allow"
-    "pytest *": "allow"
-    ".venv/bin/pytest *": "allow"
-    "venv/bin/pytest *": "allow"
-    "*/.venv/bin/pytest *": "allow"
-    "*/venv/bin/pytest *": "allow"
-    "ruff *": "allow"
-    "*/ruff *": "allow"
-    "mypy *": "allow"
-    "*/mypy *": "allow"
-    "uv run pytest*": "allow"
-    "uv run ruff*": "allow"
-    "uv run python*": "allow"
-    "uv run make*": "allow"
-    "uvx ruff *": "allow"
-    "node *": "allow"
-    "npm test*": "allow"
-    "npm run test*": "allow"
-    "npm run lint*": "allow"
-    "npm run check*": "allow"
-    "npm run build*": "allow"
-    "npx tsc *": "allow"
-    "npx vitest *": "allow"
-    "npx jest *": "allow"
-    "npx eslint *": "allow"
-    "npx prettier *": "allow"
-    "npx playwright *": "allow"
-    "cargo test*": "allow"
-    "cargo check*": "allow"
-    "cargo clippy*": "allow"
-    "go test *": "allow"
-    "go vet *": "allow"
-    "* *.env*": "deny"
-  task: deny
-  webfetch: deny
-  websearch: deny
-  external_directory: {"/tmp/**": "allow"}
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: shell, resource: "*", effect: deny }
+  - { action: shell, resource: "git push*", effect: deny }
+  - { action: shell, resource: "make verify", effect: allow }
+  - { action: shell, resource: "tasks render", effect: allow }
+  - { action: shell, resource: "git status *", effect: allow }
+  - { action: shell, resource: "git diff *", effect: allow }
+  - { action: shell, resource: "git log *", effect: allow }
+  - { action: shell, resource: "git show *", effect: allow }
+  - { action: shell, resource: "git rev-parse *", effect: allow }
+  - { action: shell, resource: "ls *", effect: allow }
+  - { action: shell, resource: "cat *", effect: allow }
+  - { action: shell, resource: "grep *", effect: allow }
+  - { action: shell, resource: "make test*", effect: allow }
+  - { action: shell, resource: "make lint*", effect: allow }
+  - { action: shell, resource: "make check*", effect: allow }
+  - { action: shell, resource: "make build*", effect: allow }
+  - { action: shell, resource: "python *", effect: allow }
+  - { action: shell, resource: "python3 *", effect: allow }
+  - { action: shell, resource: ".venv/bin/python *", effect: allow }
+  - { action: shell, resource: ".venv/bin/python3 *", effect: allow }
+  - { action: shell, resource: "venv/bin/python *", effect: allow }
+  - { action: shell, resource: "venv/bin/python3 *", effect: allow }
+  - { action: shell, resource: "*/.venv/bin/python *", effect: allow }
+  - { action: shell, resource: "*/.venv/bin/python3 *", effect: allow }
+  - { action: shell, resource: "*/venv/bin/python *", effect: allow }
+  - { action: shell, resource: "*/venv/bin/python3 *", effect: allow }
+  - { action: shell, resource: "pytest *", effect: allow }
+  - { action: shell, resource: ".venv/bin/pytest *", effect: allow }
+  - { action: shell, resource: "venv/bin/pytest *", effect: allow }
+  - { action: shell, resource: "*/.venv/bin/pytest *", effect: allow }
+  - { action: shell, resource: "*/venv/bin/pytest *", effect: allow }
+  - { action: shell, resource: "ruff *", effect: allow }
+  - { action: shell, resource: "*/ruff *", effect: allow }
+  - { action: shell, resource: "mypy *", effect: allow }
+  - { action: shell, resource: "*/mypy *", effect: allow }
+  - { action: shell, resource: "uv run pytest*", effect: allow }
+  - { action: shell, resource: "uv run ruff*", effect: allow }
+  - { action: shell, resource: "uv run python*", effect: allow }
+  - { action: shell, resource: "uv run make*", effect: allow }
+  - { action: shell, resource: "uvx ruff *", effect: allow }
+  - { action: shell, resource: "node *", effect: allow }
+  - { action: shell, resource: "npm test*", effect: allow }
+  - { action: shell, resource: "npm run test*", effect: allow }
+  - { action: shell, resource: "npm run lint*", effect: allow }
+  - { action: shell, resource: "npm run check*", effect: allow }
+  - { action: shell, resource: "npm run build*", effect: allow }
+  - { action: shell, resource: "npx tsc *", effect: allow }
+  - { action: shell, resource: "npx vitest *", effect: allow }
+  - { action: shell, resource: "npx jest *", effect: allow }
+  - { action: shell, resource: "npx eslint *", effect: allow }
+  - { action: shell, resource: "npx prettier *", effect: allow }
+  - { action: shell, resource: "npx playwright *", effect: allow }
+  - { action: shell, resource: "cargo test*", effect: allow }
+  - { action: shell, resource: "cargo check*", effect: allow }
+  - { action: shell, resource: "cargo clippy*", effect: allow }
+  - { action: shell, resource: "go test *", effect: allow }
+  - { action: shell, resource: "go vet *", effect: allow }
+  - { action: shell, resource: "* *.env*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: webfetch, resource: "*", effect: deny }
+  - { action: websearch, resource: "*", effect: deny }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
 ---
 
 You are the verifier. You execute verification commands and report their

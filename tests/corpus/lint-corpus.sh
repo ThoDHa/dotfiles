@@ -23,19 +23,20 @@
 #                             non-markdown helpers in the same tree stay
 #                             out of the corpus; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           per-file agent budgets (manager 395,
-#                             worker 145, verifier 120, reviewer 155,
-#                             planner 120, advisor 90, scout 65), rules 190,
+#   6. line budgets           per-file agent budgets (manager 390,
+#                             worker 150, verifier 120, reviewer 150,
+#                             planner 125, advisor 95, scout 70), rules 190,
 #                             SKILL.md 950, README/DESIGN under 500
-#   7. bash map identity      the planner and advisor `permission:`
-#                             `bash:` blocks stay byte-identical; a
-#                             missing or empty block fails too
-#   8. verifier bash order    the verifier `permission:` `bash:` map
-#                             keeps its order-dependent posture: the
-#                             catch-all deny first, the lexical `.env`
-#                             deny last, no allow after it, the
-#                             `git push*` deny present, and the entry
-#                             count pinned
+#   7. shell rule identity    the planner and advisor permissions lists
+#                             carry byte-identical shell-rule blocks
+#                             (unsorted, in file order); a missing or
+#                             empty block fails too
+#   8. verifier shell order   the verifier permissions list keeps its
+#                             order-dependent posture over the shell
+#                             rules only: the catch-all deny first, the
+#                             lexical `.env` deny last, no allow after
+#                             it, the `git push*` deny present, and the
+#                             shell-rule count pinned
 #   9. verify-recipe pin      the Makefile verify recipe keeps its
 #                             docker flags verbatim: the repo read-only
 #                             mount, --network none, and the scratch
@@ -104,9 +105,9 @@ CORPUS_DOCS_DIR="."
 # headroom of max(10 lines, ten percent), rounded up to a multiple of 5,
 # so one file's growth cannot spend another file's slack (manager.md sat
 # at 319 of the shared 320). manager.md's entry is the one deliberate
-# exception: its 395 is a hard cap at the file's current line count
-# (moved from 390 with the dual-harness preamble and the # pi: compile
-# directive),
+# exception: its 390 is a hard cap at the file's current line count
+# (moved from 395 by the V2 frontmatter conversion, which shrank the
+# frontmatter five lines: the dropped name key and four map headers),
 # superseding the headroom formula for that one file so the anti-drift
 # pressure stays binding; additive policy work there must pay a dedup
 # pass or raise the cap explicitly. The map is the only registry: a
@@ -116,20 +117,20 @@ BUDGET_RULE_LINES=190
 BUDGET_SKILL_LINES=950
 BUDGET_CORPUS_DOC_LINES=500
 declare -A BUDGET_AGENT_FILE_LINES=(
-	[opencode/.config/opencode/agents/manager.md]=395
-	[opencode/.config/opencode/agents/worker.md]=145
+	[opencode/.config/opencode/agents/manager.md]=390
+	[opencode/.config/opencode/agents/worker.md]=150
 	[opencode/.config/opencode/agents/verifier.md]=120
-	[opencode/.config/opencode/agents/reviewer.md]=155
-	[opencode/.config/opencode/agents/planner.md]=120
-	[opencode/.config/opencode/agents/advisor.md]=90
-	[opencode/.config/opencode/agents/scout.md]=65
+	[opencode/.config/opencode/agents/reviewer.md]=150
+	[opencode/.config/opencode/agents/planner.md]=125
+	[opencode/.config/opencode/agents/advisor.md]=95
+	[opencode/.config/opencode/agents/scout.md]=70
 )
 
-# The two agent files that share one read-only bash permission map,
+# The two agent files that share one read-only shell permission block,
 # pinned byte-identical by the map-identity check. Exactly this pair:
-# not a registry, and not generalized to edit: or the other
-# frontmatter maps, which deliberately differ (planner edits .tasks/**,
-# advisor /tmp/llm/reports/**).
+# not a registry, and not generalized to the other frontmatter rules,
+# which deliberately differ (planner edits .tasks/**, advisor
+# /tmp/llm/reports/**).
 MAP_ID_PLANNER="$AGENTS_SCOPE/planner.md"
 MAP_ID_ADVISOR="$AGENTS_SCOPE/advisor.md"
 
@@ -514,147 +515,201 @@ check_line_budgets() {
 }
 
 # Map-identity check: the planner and advisor files carry one shared
-# read-only bash permission map, and a drift in either file breaks the
-# shared contract, so neither side is authoritative and any difference
-# fails the pair. Extraction is line-based like every other check here
-# (no YAML parser; worker.md's description value is quoted so pi's
-# strict frontmatter parser accepts it, but consumers stay
-# line-asserted):
-# the block is the `  bash:` line through the line before the next
-# two-space-indented sibling key (`  task:`) or the closing `---`,
-# opened only inside the line-1 `---` frontmatter so a body code
-# fence cannot stand in for the map; and a block whose lines beyond
-# the header are blank fails as entry-less instead of passing
-# vacuously.
+# read-only shell permission block, and a drift in either file breaks
+# the shared contract, so neither side is authoritative and any
+# difference fails the pair. Extraction is line-based like every other
+# check here (no YAML parser; worker.md's description value is quoted
+# so pi's strict frontmatter parser accepts it, but consumers stay
+# line-asserted): the rules are the `permissions:` list's items inside
+# the line-1 `---` frontmatter whose text carries the shell action
+# whatever the flow-map spacing, because a canonical-prefix anchor
+# would let a YAML-valid but noncanonically formatted shell rule
+# escape the comparison while opencode still honors it; a body code
+# fence still cannot stand in for the rules. Only the shell action is
+# extracted because the pair's edit rules deliberately differ and
+# whole-list identity would fail on that deliberate difference. The
+# list state also ends at the first non-item line, so shell-pattern
+# lines under a later frontmatter key are never collected. The
+# comparison is unsorted, in file order, byte-identical; a file with
+# no permissions list, or a list with no shell rules, fails as missing
+# or empty instead of passing vacuously, and a one-sided list insertion
+# or deletion fails the whole-list count comparison even when the
+# shell rules still match.
 check_map_identity() {
 	assert_present "$MAP_ID_PLANNER"
 	assert_present "$MAP_ID_ADVISOR"
 	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ADVISOR" '
-	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
+	FNR == 1 { in_list = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
-	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
-	in_frontmatter && $0 == "---" { in_frontmatter = 0 }
-	!done && in_frontmatter && /^  bash:$/ { in_block = 1 }
-	in_block {
-		if (!(FILENAME in start)) start[FILENAME] = FNR
-		if ($0 !~ /^  bash:$/ && $0 ~ /[^[:space:]]/) entries[FILENAME]++
-		count[FILENAME]++
-		lines[FILENAME, count[FILENAME]] = $0
+	in_frontmatter && $0 == "---" { in_frontmatter = 0; in_list = 0 }
+	in_frontmatter && /^permissions:$/ { in_list = 1 }
+	in_list && $0 !~ /^permissions:$/ && $0 !~ /^  - / && $0 !~ /^  -$/ && $0 !~ /^[[:space:]]*$/ { in_list = 0 }
+	in_list && (/^  - / || /^  -$/) {
+		listn[FILENAME]++
+		item[FILENAME, listn[FILENAME]] = $0
+		itemline[FILENAME, listn[FILENAME]] = FNR
+		if (!(FILENAME in baditem) && $0 !~ /"?action"?[[:space:]]*:/) {
+			baditem[FILENAME] = FNR
+			badtext[FILENAME] = $0
+		}
+		if ($0 ~ /"?action"?[[:space:]]*:[[:space:]]*"?shell/) {
+			if (!(FILENAME in start)) start[FILENAME] = FNR
+			count[FILENAME]++
+			lines[FILENAME, count[FILENAME]] = $0
+		}
 	}
 	END {
+		if (pf in baditem) {
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", pf, baditem[pf], badtext[pf]
+			exit 1
+		}
+		if (af in baditem) {
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", af, baditem[af], badtext[af]
+			exit 1
+		}
 		if (!(pf in start)) {
-			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); must stay byte-identical to %s\n", pf, af
+			printf "FAIL: %s:1: no shell permission rules (missing permissions list or no shell-rule lines); must stay byte-identical to %s\n", pf, af
 			exit 1
 		}
 		if (!(af in start)) {
-			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); must stay byte-identical to %s\n", af, pf
-			exit 1
-		}
-		if (entries[pf] == 0) {
-			printf "FAIL: %s:%d: bash permission map has no entries; must stay byte-identical to %s\n", pf, start[pf], af
-			exit 1
-		}
-		if (entries[af] == 0) {
-			printf "FAIL: %s:%d: bash permission map has no entries; must stay byte-identical to %s\n", af, start[af], pf
+			printf "FAIL: %s:1: no shell permission rules (missing permissions list or no shell-rule lines); must stay byte-identical to %s\n", af, pf
 			exit 1
 		}
 		for (i = 1; i <= count[pf] && i <= count[af]; i++) {
 			if (lines[pf, i] != lines[af, i]) {
-				printf "FAIL: %s:%d: bash permission map diverges from %s:%d at map line %d: \x27%s\x27 vs \x27%s\x27\n", pf, start[pf] + i - 1, af, start[af] + i - 1, i, lines[pf, i], lines[af, i]
+				printf "FAIL: %s:%d: shell permission block diverges from %s:%d at rule %d: \x27%s\x27 vs \x27%s\x27\n", pf, start[pf] + i - 1, af, start[af] + i - 1, i, lines[pf, i], lines[af, i]
 				exit 1
 			}
 		}
 		if (count[pf] != count[af]) {
 			shared = (count[pf] < count[af] ? count[pf] : count[af])
-			printf "FAIL: %s:%d: bash permission map diverges from %s:%d at map line %d: blocks have %d vs %d lines\n", pf, start[pf] + shared, af, start[af] + shared, shared + 1, count[pf], count[af]
+			printf "FAIL: %s:%d: shell permission block diverges from %s:%d at rule %d: blocks have %d vs %d rules\n", pf, start[pf] + shared, af, start[af] + shared, shared + 1, count[pf], count[af]
+			exit 1
+		}
+		if (listn[pf] != listn[af]) {
+			for (div = 1; item[pf, div] == item[af, div]; div++) { }
+			wider = (listn[pf] >= listn[af] ? pf : af)
+			printf "FAIL: %s:%d: permissions list has %d items vs %d in %s; the lists first diverge at item %d; a one-sided list insertion or deletion breaks the shared contract even when the shell rules still match\n", wider, itemline[wider, div], listn[pf], listn[af], af, div
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
-	echo "  7/9 bash map identity: clean"
+	echo "  7/9 shell rule identity: clean"
 }
 
-# Verifier bash-order pin: the verifier map is deny-first by entry
-# ORDER, not just by content, because opencode evaluates bash rules
-# last-match-wins: the catch-all deny must stay the first bash entry,
-# the lexical `.env` deny the final entry, every allow between them,
-# and the `git push*` deny present. The widening reorder class is
-# exclusively `.env`-deny-relative: an allow moved after the `.env`
-# guard quietly outranks it and widens the map without changing one
-# byte of any entry. The catch-all deny is the structural case, not a
-# widening one: moved below other entries it makes every entry it
-# passes dead (the map narrows or bricks, never widens), so its first
-# position is pinned for structure, not width: nothing can silently
-# precede and thus die under the floor, and a deleted catch-all is
-# caught. An allow inserted between the catch-all and the `.env` deny
-# escapes every ordering assertion (it sits inside the allow region),
-# so the entry count is pinned too, paired with the map the way the
-# line budgets pair with the agent files: the constant equals the
-# map's current entry count, and any entry added or removed must
-# deliberately update the pin in the same edit. Extraction is
-# line-based like the map-identity check (same state machine over the
-# `  bash:` block inside the line-1 frontmatter, so a body code fence
-# cannot stand in for the map); entries are the block's nonblank lines
-# beyond the header, compared left-trimmed.
-VERIFIER_MAP_FILE="$AGENTS_SCOPE/verifier.md"
-VERIFIER_MAP_FIRST='"*": "deny"'
-VERIFIER_MAP_ENV_DENY='"* *.env*": "deny"'
-VERIFIER_MAP_PUSH_DENY='"git push*": "deny"'
-VERIFIER_MAP_ENTRY_COUNT=58
+# Verifier shell-order pin: the verifier permissions list is deny-first
+# by rule ORDER, not just by content, because opencode evaluates shell
+# rules last-match-wins: the catch-all deny must stay the first shell
+# rule, the lexical `.env` deny the final shell rule, every allow
+# between them, and the `git push*` deny present. The check is scoped
+# to the shell rules only: the list interleaves actions (edit deny
+# first, then the shell block, then subagent/webfetch/websearch/
+# external_directory), so whole-list indexing would pin the wrong
+# anchors; the whole-list count is 63 and pinned separately below. The widening
+# reorder class is exclusively `.env`-deny-relative: an allow moved
+# after the `.env` guard quietly outranks it and widens the map without
+# changing one byte of any rule. The catch-all deny is the structural
+# case, not a widening one: moved below other rules it makes every rule
+# it passes dead (the set narrows or bricks, never widens), so its
+# first position is pinned for structure, not width: nothing can
+# silently precede and thus die under the floor, and a deleted
+# catch-all is caught. An allow inserted between the catch-all and the
+# `.env` deny escapes every ordering assertion (it sits inside the
+# allow region), so the shell-rule count is pinned too, paired with
+# the list the way the line budgets pair with the agent files: the
+# constant equals the list's current shell-rule count, and any rule
+# added or removed must deliberately update the pin in the same edit.
+# A whole-list item count pin rides alongside (VERIFIER_LIST_ITEM_COUNT):
+# it fails any insertion or deletion of a list item in any syntax,
+# including the YAML-valid noncanonical spellings a line-based
+# extraction cannot be trusted to recognize. In-place rewrites are
+# covered where the canonical-form assertion in both permission awk
+# programs reaches: every counted permissions item must carry its
+# action on the item line per the pinned one-rule-per-line flow-map
+# syntax, so a block-style or multi-line rewrite that moves the action
+# off the item line fails naming the item instead of passing as an
+# unrecognizable-but-counted entry.
+# Extraction is line-based like the map-identity check (the
+# `permissions:` list's items whose text carries the shell action
+# whatever the flow-map spacing, inside the line-1 frontmatter, so a
+# body code fence cannot stand in for the rules); rules are compared
+# left-trimmed.
+VERIFIER_SHELL_FILE="$AGENTS_SCOPE/verifier.md"
+VERIFIER_SHELL_FIRST='- { action: shell, resource: "*", effect: deny }'
+VERIFIER_SHELL_ENV_DENY='- { action: shell, resource: "* *.env*", effect: deny }'
+VERIFIER_SHELL_PUSH_DENY='- { action: shell, resource: "git push*", effect: deny }'
+VERIFIER_SHELL_RULE_COUNT=58
+VERIFIER_LIST_ITEM_COUNT=63
 
 check_verifier_map_order() {
-	assert_present "$VERIFIER_MAP_FILE"
-	awk -v file="$VERIFIER_MAP_FILE" -v first="$VERIFIER_MAP_FIRST" \
-		-v envdeny="$VERIFIER_MAP_ENV_DENY" -v pushdeny="$VERIFIER_MAP_PUSH_DENY" \
-		-v expected="$VERIFIER_MAP_ENTRY_COUNT" '
-	FNR == 1 { in_block = 0; done = 0; in_frontmatter = 0 }
+	assert_present "$VERIFIER_SHELL_FILE"
+	awk -v file="$VERIFIER_SHELL_FILE" -v first="$VERIFIER_SHELL_FIRST" \
+		-v envdeny="$VERIFIER_SHELL_ENV_DENY" -v pushdeny="$VERIFIER_SHELL_PUSH_DENY" \
+		-v expected="$VERIFIER_SHELL_RULE_COUNT" \
+		-v listexpected="$VERIFIER_LIST_ITEM_COUNT" '
+	FNR == 1 { in_list = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
-	in_block && $0 !~ /^  bash:$/ && (/^  [^[:space:]]/ || /^---/) { in_block = 0; done = 1 }
-	in_frontmatter && $0 == "---" { in_frontmatter = 0 }
-	!done && in_frontmatter && /^  bash:$/ { in_block = 1 }
-	in_block && $0 !~ /^  bash:$/ && $0 ~ /[^[:space:]]/ {
-		n++
-		entry[n] = $0
-		sub(/^[[:space:]]+/, "", entry[n])
-		line[n] = FNR
+	in_frontmatter && $0 == "---" { in_frontmatter = 0; in_list = 0 }
+	in_frontmatter && /^permissions:$/ { in_list = 1 }
+	in_list && $0 !~ /^permissions:$/ && $0 !~ /^  - / && $0 !~ /^  -$/ && $0 !~ /^[[:space:]]*$/ { in_list = 0 }
+	in_list && (/^  - / || /^  -$/) {
+		listn++
+		if (badline == 0 && $0 !~ /"?action"?[[:space:]]*:/) {
+			badline = FNR
+			badtext = $0
+		}
+		if ($0 ~ /"?action"?[[:space:]]*:[[:space:]]*"?shell/) {
+			n++
+			rule[n] = $0
+			sub(/^[[:space:]]+/, "", rule[n])
+			line[n] = FNR
+		}
 	}
 	END {
-		if (n == 0) {
-			printf "FAIL: %s:1: no bash permission map (missing \x27  bash:\x27 line); the order-dependent deny-first posture needs pinning\n", file
+		if (badline) {
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", file, badline, badtext
 			exit 1
 		}
-		if (entry[1] != first) {
-			printf "FAIL: %s:%d: first bash entry is \x27%s\x27; must be the catch-all deny \x27%s\x27 so the map stays deny-first: no rule precedes the floor, and any command no allow matches denies\n", file, line[1], entry[1], first
+		if (n == 0) {
+			printf "FAIL: %s:1: no shell permission rules (missing permissions list or no shell-rule lines); the order-dependent deny-first posture needs pinning\n", file
+			exit 1
+		}
+		if (rule[1] != first) {
+			printf "FAIL: %s:%d: first shell rule is \x27%s\x27; must be the catch-all deny \x27%s\x27 so the set stays deny-first: no rule precedes the floor, and any command no allow matches denies\n", file, line[1], rule[1], first
 			exit 1
 		}
 		envline = 0
 		for (i = 1; i <= n; i++)
-			if (entry[i] == envdeny) envline = line[i]
+			if (rule[i] == envdeny) envline = line[i]
 		if (envline == 0) {
-			printf "FAIL: %s:1: bash permission map lost the \x27%s\x27 entry that must stay final\n", file, envdeny
+			printf "FAIL: %s:1: shell rules lost the \x27%s\x27 rule that must stay final\n", file, envdeny
 			exit 1
 		}
 		for (i = 1; i <= n; i++)
-			if (line[i] > envline && entry[i] ~ /"allow"$/) {
-				printf "FAIL: %s:%d: allow entry \x27%s\x27 sits after the \x27%s\x27 deny at line %d; the deny must be the final entry so it outranks every allow\n", file, line[i], entry[i], envdeny, envline
+			if (line[i] > envline && rule[i] ~ /effect:[[:space:]]*"?allow"?[[:space:]]*\}?[[:space:]]*$/) {
+				printf "FAIL: %s:%d: allow rule \x27%s\x27 sits after the \x27%s\x27 deny at line %d; the deny must be the final shell rule so it outranks every allow\n", file, line[i], rule[i], envdeny, envline
 				exit 1
 			}
-		if (entry[n] != envdeny) {
-			printf "FAIL: %s:%d: last bash entry is \x27%s\x27; must be the \x27%s\x27 deny so no allow outranks it\n", file, line[n], entry[n], envdeny
+		if (rule[n] != envdeny) {
+			printf "FAIL: %s:%d: last shell rule is \x27%s\x27; must be the \x27%s\x27 deny so no allow outranks it\n", file, line[n], rule[n], envdeny
 			exit 1
 		}
 		sawpush = 0
 		for (i = 1; i <= n; i++)
-			if (entry[i] == pushdeny) sawpush = 1
+			if (rule[i] == pushdeny) sawpush = 1
 		if (!sawpush) {
-			printf "FAIL: %s:1: bash permission map lost the \x27%s\x27 entry\n", file, pushdeny
+			printf "FAIL: %s:1: shell rules lost the \x27%s\x27 rule\n", file, pushdeny
 			exit 1
 		}
 		if (n != expected) {
-			printf "FAIL: %s:1: bash permission map has %d entries; the count pin expects %d; changing the map requires a deliberate paired edit of VERIFIER_MAP_ENTRY_COUNT\n", file, n, expected
+			printf "FAIL: %s:1: permissions list has %d shell rules; the count pin expects %d; changing the rules requires a deliberate paired edit of VERIFIER_SHELL_RULE_COUNT\n", file, n, expected
 			exit 1
 		}
-	}' "$VERIFIER_MAP_FILE"
-	echo "  8/9 verifier bash map ordering: clean"
+		if (listn != listexpected) {
+			printf "FAIL: %s:1: permissions list has %d items; the whole-list pin expects %d; any list insertion or deletion, in any syntax, is a deliberate paired edit of VERIFIER_LIST_ITEM_COUNT\n", file, listn, listexpected
+			exit 1
+		}
+	}' "$VERIFIER_SHELL_FILE"
+	echo "  8/9 verifier shell rule ordering: clean"
 }
 
 # Verify-recipe pin: the containerized make verify gate is the

@@ -74,7 +74,7 @@ for src in "$AGENT_SRC_DIR"/*.md; do
         continue
     fi
 
-    name="$(awk -v stop="$close_line" 'NR < stop && /^name: / {sub(/^name: /, ""); print; exit}' "$src")"
+    name="$base"
     description="$(awk -v stop="$close_line" 'NR < stop && /^description: / {sub(/^description: /, ""); print; exit}' "$src")"
     model="$(sed -n 's/^# pi: model=\([^ ]*\).*$/\1/p' <<<"$pi_line")"
     tools="$(sed -n 's/^# pi: model=[^ ]* tools=//p' <<<"$pi_line")"
@@ -88,7 +88,6 @@ for src in "$AGENT_SRC_DIR"/*.md; do
     fi
 
     missing=()
-    if [[ -z "$name" ]]; then missing+=("name"); fi
     if [[ -z "$description" ]]; then missing+=("description"); fi
     if [[ -z "$model" ]]; then missing+=("model (in # pi: directive)"); fi
     if [[ -z "$tools" ]]; then missing+=("tools (in # pi: directive)"); fi
