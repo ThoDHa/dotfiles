@@ -1,46 +1,43 @@
 ---
-name: worker
 description: "The fleet's code-writing agent: implements delegated units end to end"
 mode: subagent
 # pi: model=glm-5.3-flash tools=read, bash, edit, write
 model: zai-coding-plan/glm-5.3-flash
-permission:
-  edit: allow
-  bash:
-    "*": "allow"
-    "git push*": "deny"
-    "git commit --amend*": "deny"
-    "git commit * --amend*": "deny"
-    "git rebase*": "deny"
-    "git pull* --rebase*": "deny"
-    "git pull* -r*": "deny"
-    "gh *": "deny"
-    "gh auth status*": "allow"
-    "gh issue status*": "allow"
-    "gh issue list*": "allow"
-    "gh issue view*": "allow"
-    "gh pr status*": "allow"
-    "gh pr list*": "allow"
-    "gh pr view*": "allow"
-    "gh pr diff*": "allow"
-    "gh pr checks*": "allow"
-    "gh release list*": "allow"
-    "gh release view*": "allow"
-    "gh repo list*": "allow"
-    "gh repo view*": "allow"
-    "gh run list*": "allow"
-    "gh run view*": "allow"
-    "gh run watch*": "allow"
-    "gh search*": "allow"
-    "gh workflow list*": "allow"
-    "gh workflow view*": "allow"
-    "gh label list*": "allow"
-    "make test*": "allow"
-    "mktemp /tmp/llm/*": "allow"
-    "mktemp -d /tmp/llm/*": "allow"
-  task: deny
-  external_directory:
-    "/tmp/**": "allow"
+permissions:
+  - { action: edit, resource: "*", effect: allow }
+  - { action: shell, resource: "*", effect: allow }
+  - { action: shell, resource: "git push*", effect: deny }
+  - { action: shell, resource: "git commit --amend*", effect: deny }
+  - { action: shell, resource: "git commit * --amend*", effect: deny }
+  - { action: shell, resource: "git rebase*", effect: deny }
+  - { action: shell, resource: "git pull* --rebase*", effect: deny }
+  - { action: shell, resource: "git pull* -r*", effect: deny }
+  - { action: shell, resource: "gh *", effect: deny }
+  - { action: shell, resource: "gh auth status*", effect: allow }
+  - { action: shell, resource: "gh issue status*", effect: allow }
+  - { action: shell, resource: "gh issue list*", effect: allow }
+  - { action: shell, resource: "gh issue view*", effect: allow }
+  - { action: shell, resource: "gh pr status*", effect: allow }
+  - { action: shell, resource: "gh pr list*", effect: allow }
+  - { action: shell, resource: "gh pr view*", effect: allow }
+  - { action: shell, resource: "gh pr diff*", effect: allow }
+  - { action: shell, resource: "gh pr checks*", effect: allow }
+  - { action: shell, resource: "gh release list*", effect: allow }
+  - { action: shell, resource: "gh release view*", effect: allow }
+  - { action: shell, resource: "gh repo list*", effect: allow }
+  - { action: shell, resource: "gh repo view*", effect: allow }
+  - { action: shell, resource: "gh run list*", effect: allow }
+  - { action: shell, resource: "gh run view*", effect: allow }
+  - { action: shell, resource: "gh run watch*", effect: allow }
+  - { action: shell, resource: "gh search*", effect: allow }
+  - { action: shell, resource: "gh workflow list*", effect: allow }
+  - { action: shell, resource: "gh workflow view*", effect: allow }
+  - { action: shell, resource: "gh label list*", effect: allow }
+  - { action: shell, resource: "make test*", effect: allow }
+  - { action: shell, resource: "mktemp /tmp/llm/*", effect: allow }
+  - { action: shell, resource: "mktemp -d /tmp/llm/*", effect: allow }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
 ---
 
 Dual-harness note: you run under opencode and under pi. The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records, so interim logs and the final report deposit go through their protocol channels in both harnesses; deposits under /tmp/llm/reports/ and writes under .tasks/ are plain file writes in both harnesses; a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly.

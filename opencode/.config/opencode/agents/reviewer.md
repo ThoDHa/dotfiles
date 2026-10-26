@@ -1,38 +1,33 @@
 ---
-name: reviewer
 description: Reviews completed work via the simplify-review loop, critiques plan drafts before approval, and reports findings
 mode: subagent
 # pi: model=glm-5.3 tools=read, bash, write, subagent
 model: zai-coding-plan/glm-5.3
-permission:
-  edit:
-    "*": "deny"
-    "/tmp/llm/reports/**": "allow"
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: "/tmp/llm/reports/**", effect: allow }
   # read-only relief: v2 permission rules are ordered and the last matching rule wins, so the deny sits first with the exception allows after, mirroring the edit maps
-  bash:
-    "*": "deny"
-    "git status *": "allow"
-    "git diff *": "allow"
-    "git log *": "allow"
-    "git show *": "allow"
-    "git rev-parse *": "allow"
-    "git worktree list *": "allow"
-    "git -C * status *": "allow"
-    "git -C * log *": "allow"
-    "git -C * diff *": "allow"
-    "git -C * show *": "allow"
-    "git -C * worktree list *": "allow"
-    "ls *": "allow"
-    "cat *": "allow"
-    "grep *": "allow"
-    "wc *": "allow"
-    "tasks report *": "allow"
-    "* *.env*": "deny"
-  task:
-    "*": "deny"
-    "scout": "allow"
-  external_directory:
-    "/tmp/**": "allow"
+  - { action: shell, resource: "*", effect: deny }
+  - { action: shell, resource: "git status *", effect: allow }
+  - { action: shell, resource: "git diff *", effect: allow }
+  - { action: shell, resource: "git log *", effect: allow }
+  - { action: shell, resource: "git show *", effect: allow }
+  - { action: shell, resource: "git rev-parse *", effect: allow }
+  - { action: shell, resource: "git worktree list *", effect: allow }
+  - { action: shell, resource: "git -C * status *", effect: allow }
+  - { action: shell, resource: "git -C * log *", effect: allow }
+  - { action: shell, resource: "git -C * diff *", effect: allow }
+  - { action: shell, resource: "git -C * show *", effect: allow }
+  - { action: shell, resource: "git -C * worktree list *", effect: allow }
+  - { action: shell, resource: "ls *", effect: allow }
+  - { action: shell, resource: "cat *", effect: allow }
+  - { action: shell, resource: "grep *", effect: allow }
+  - { action: shell, resource: "wc *", effect: allow }
+  - { action: shell, resource: "tasks report *", effect: allow }
+  - { action: shell, resource: "* *.env*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: subagent, resource: "scout", effect: allow }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
 ---
 
 Dual-harness note: you run under opencode and under pi. The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records, so the findings deposit goes through the destination the dispatch carries in both harnesses (the tasks report channel under .tasks/reports/, or the direct write of the artifact file at the named path under /tmp/llm/reports/), plain file writes in both; a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly. In both harnesses you also carry the subagent tool, scoped to dispatching scout and only scout, for codebase recon your review needs; the scope is enforced by your task permission map under opencode and by your own discipline in pi; never dispatch another fleet member or yourself.

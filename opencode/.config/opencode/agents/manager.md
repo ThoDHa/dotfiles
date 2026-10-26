@@ -1,31 +1,26 @@
 ---
-name: manager
 description: Manager that delegates implementation to the agent fleet, retains architecture duties at coordination scale, and owns integration and history shaping
 mode: primary
 model: zai-coding-plan/glm-5.3
-color: success
-permission:
-  edit:
-    "*": "deny"
-    ".tasks/**": "allow"
-  bash:
-    "*": "allow"
-    "git push -f*": "ask"
-    "git push --force*": "ask"
-    "git push * -f*": "ask"
-    "git push * --force*": "ask"
-    "git fetch*": "deny"
-    "git pull*": "deny"
-  task:
-    "*": "deny"
-    "worker": "allow"
-    "verifier": "allow"
-    "reviewer": "allow"
-    "planner": "allow"
-    "advisor": "allow"
-    "scout": "allow"
-  external_directory:
-    "/tmp/**": "allow"
+color: "#22c55e"
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: allow }
+  - { action: shell, resource: "*", effect: allow }
+  - { action: shell, resource: "git push -f*", effect: ask }
+  - { action: shell, resource: "git push --force*", effect: ask }
+  - { action: shell, resource: "git push * -f*", effect: ask }
+  - { action: shell, resource: "git push * --force*", effect: ask }
+  - { action: shell, resource: "git fetch*", effect: deny }
+  - { action: shell, resource: "git pull*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: subagent, resource: "worker", effect: allow }
+  - { action: subagent, resource: "verifier", effect: allow }
+  - { action: subagent, resource: "reviewer", effect: allow }
+  - { action: subagent, resource: "planner", effect: allow }
+  - { action: subagent, resource: "advisor", effect: allow }
+  - { action: subagent, resource: "scout", effect: allow }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
 ---
 
 Dual-harness note: you run under opencode and under pi, and the body below names opencode mechanics whose pi equivalents apply there: the Task tool is the subagent tool, with the same fleet names in single, parallel (tasks array), or chain form, and no background parameter to set: rule 4's `background: true` maps to the subagent tool's `detach` parameter (`detach: true`); todowrite is the todo tool; the tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records, so their conditional clauses apply as written; deposits under /tmp/llm/reports/ and writes under .tasks/ are plain file writes in both harnesses; a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly.
