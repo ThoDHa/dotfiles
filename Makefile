@@ -162,7 +162,7 @@ dry-run:
 #   .tmux.conf: may exist from a prior manual tmux setup
 #   tmux-sessionizer/windowizer: may exist from a prior manual install
 #   isort config: may exist from a prior isort install
-#   .config/opencode/{opencode.json,tui.json,rules/*,agents/*}: stow-owned
+#   .config/opencode/{opencode.json,cli.json,rules/*,agents/*}: stow-owned
 #     links that external tools overwrite in place; only these paths are
 #     removed so unmanaged runtime data (qhaway-memory DB, node_modules,
 #     scripts, *.bak) survives cleanup. A legacy folded dir symlink is
@@ -188,37 +188,47 @@ clean-stow:
 		rm -f $(STOW_TARGET)/.config/opencode; \
 	else \
 		rm -f $(STOW_TARGET)/.config/opencode/opencode.json \
-			$(STOW_TARGET)/.config/opencode/tui.json \
+			$(STOW_TARGET)/.config/opencode/cli.json \
 			$(STOW_TARGET)/.config/opencode/rules/* \
 			$(STOW_TARGET)/.config/opencode/agents/*; \
 	fi
 	@rm -rf $(STOW_TARGET)/.agents
 	@echo "Done! Conflicting files removed. Run 'make stow' to create fresh symlinks."
 
-# Repo-side opencode.json and the canned commit message for readopt
-OPENCODE_JSON := opencode/.config/opencode/opencode.json
-READOPT_MSG   := chore: readopt opencode.json after runtime rewrite
+# Repo-side runtime-rewritten opencode configs and the canned commit
+# messages for readopt
+OPENCODE_JSON     := opencode/.config/opencode/opencode.json
+OPENCODE_CLI_JSON := opencode/.config/opencode/cli.json
+READOPT_MSG       := chore: readopt opencode.json after runtime rewrite
+READOPT_CLI_MSG   := chore: readopt cli.json after runtime rewrite
 
-# Re-adopt opencode.json after the running opencode process rewrites it:
-# the rewrite is a rename-replace, which swaps the stow symlink for a
+# Re-adopt the runtime-rewritten opencode configs (opencode.json and
+# cli.json) after the running opencode process rewrites either: the
+# rewrite is a rename-replace, which swaps the stow symlink for a
 # real file and silently breaks the deployment. Adopt restores the link
 # and pulls any drift into the repo copy. Drift is committed for exactly
-# that one file (pathspec commit, so an unrelated staged change can
-# never ride along); with no drift, nothing is committed. Both branches
-# end by warning about any residual adopted drift left uncommitted
-# elsewhere in the package. Meant for the main checkout, which owns
-# the live deployment; from any other checkout, stow aborts with its
-# not-owned error by design.
+# the one rewritten file (per-file pathspec commit, so an unrelated
+# staged change can never ride along and one file's rewrite cannot
+# sweep the other into its commit); with no drift, nothing is
+# committed. Both branches end by warning about any residual adopted
+# drift left uncommitted elsewhere in the package. Meant for the main
+# checkout, which owns the live deployment; from any other checkout,
+# stow aborts with its not-owned error by design.
 readopt:
-	@echo "Re-adopting opencode.json from $(STOW_TARGET)..."
+	@echo "Re-adopting runtime-rewritten opencode configs from $(STOW_TARGET)..."
 	stow --adopt --no-folding -v -t $(STOW_TARGET) opencode
-	@drift=$$(git status --porcelain -- $(OPENCODE_JSON)) || \
-	{ echo "ERROR: git status failed for $(OPENCODE_JSON); cannot check readopt drift" >&2; exit 1; }; \
-	if [ -n "$$drift" ]; then \
-		git commit -m "$(READOPT_MSG)" -- $(OPENCODE_JSON) || exit $$?; \
-	else \
-		echo "No drift found in opencode.json: it matches the repo copy."; \
-	fi; \
+	@for pair in "$(OPENCODE_JSON)|$(READOPT_MSG)" \
+		"$(OPENCODE_CLI_JSON)|$(READOPT_CLI_MSG)"; do \
+		file=$${pair%%|*}; \
+		msg=$${pair#*|}; \
+		drift=$$(git status --porcelain -- "$$file") || \
+		{ echo "ERROR: git status failed for $$file; cannot check readopt drift" >&2; exit 1; }; \
+		if [ -n "$$drift" ]; then \
+			git commit -m "$$msg" -- "$$file" || exit $$?; \
+		else \
+			echo "No drift found in $$file: it matches the repo copy."; \
+		fi; \
+	done; \
 	residual=$$(git status --porcelain -- opencode/) || \
 	{ echo "ERROR: git status failed for opencode/; cannot check for adopted drift" >&2; exit 1; }; \
 	if [ -n "$$residual" ]; then \
@@ -424,7 +434,7 @@ ifneq ($(OPENCODE_PRESENT),)
 		echo "    $$file OK"; \
 	done
 	@echo "  Checking opencode config symlinks..."
-	@for file in opencode.json tui.json; do \
+	@for file in opencode.json cli.json; do \
 		test -L $(OPENCODE_CONFIG)/$$file || { echo "FAIL: $$file symlink missing"; exit 1; }; \
 		echo "    $$file OK"; \
 	done
@@ -557,7 +567,7 @@ help:
 	@echo "  make restow      - Update symlinks (unstow + stow)"
 	@echo "  make dry-run     - Preview what would be stowed"
 	@echo "  make clean-stow  - Remove conflicting files before stowing"
-	@echo "  make readopt     - Re-adopt opencode.json after a runtime rewrite"
+	@echo "  make readopt     - Re-adopt opencode.json/cli.json after a runtime rewrite"
 	@echo "  make stow-PKG    - Stow a single package   (e.g., make stow-shell)"
 	@echo "  make unstow-PKG  - Unstow a single package (e.g., make unstow-shell)"
 	@echo "  make restow-PKG  - Restow a single package (e.g., make restow-shell)"
