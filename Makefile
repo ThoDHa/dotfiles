@@ -487,19 +487,20 @@ test-pi-extensions:
 	@bash tests/pi-extensions/test-sync.sh
 
 # Fleet manager source and its digest pin (see pin-manager-body; the digest
-# must match tests/pi-agents/test-sync.sh's manager_body_digest)
+# must match the single digest home tests/lib/body-digest.sh)
 FLEET_MANAGER_MD := opencode/.config/opencode/agents/manager.md
 MANAGER_BODY_PIN := tests/pi-agents/manager-body.sha256
 
-# Regenerate the manager body digest pin (keep the awk program identical to
-# the test's manager_body_digest). Refuses to write a vacuous pin: a missing
-# fleet manager.md, a digest pipeline that produced nothing, or an empty body
-# (an unclosed frontmatter extracts no lines, and empty input hashes to the
-# well-known empty digest) each fail loudly instead of pinning, which would
-# leave the sync guard dying vacuously after the next re-pin.
+# Regenerate the manager body digest pin through the single digest home
+# (tests/lib/body-digest.sh, shared with the sync suites). Refuses to
+# write a vacuous pin: a missing fleet manager.md, a digest pipeline that
+# produced nothing, or an empty body (an unclosed frontmatter extracts no
+# lines, and empty input hashes to the well-known empty digest) each fail
+# loudly instead of pinning, which would leave the sync guard dying
+# vacuously after the next re-pin.
 pin-manager-body:
 	@test -f $(FLEET_MANAGER_MD) || { echo "ERROR: $(FLEET_MANAGER_MD) not found; nothing to pin" >&2; exit 1; }; \
-	digest=$$(awk '/^---$$/{c++; if (c == 2) { in_body = 1; next } } in_body { print }' $(FLEET_MANAGER_MD) | sha256sum | cut -d' ' -f1) || \
+	digest=$$(bash tests/lib/body-digest.sh $(FLEET_MANAGER_MD)) || \
 		{ echo "ERROR: hashing the $(FLEET_MANAGER_MD) body failed" >&2; exit 1; }; \
 	[ -n "$$digest" ] || { echo "ERROR: body extraction from $(FLEET_MANAGER_MD) produced no digest" >&2; exit 1; }; \
 	empty_digest=$$(printf '' | sha256sum | cut -d' ' -f1) || \

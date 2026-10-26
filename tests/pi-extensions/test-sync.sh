@@ -50,13 +50,10 @@ REMEDIATION="run make sync-pi-extensions"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
-# fleet_body_digest FILE; sha256 of the manager body: everything below
-# the frontmatter closing --- line. Keep the awk program identical to
-# make pin-manager-body and tests/pi-agents/test-sync.sh, which share it.
-fleet_body_digest() {
-	awk '/^---$/{c++; if (c == 2) { in_body = 1; next } } in_body { print }' "$1" \
-		| sha256sum | cut -d' ' -f1
-}
+# manager_body_digest comes from tests/lib/body-digest.sh, the single
+# home of the fleet manager body digest program; make pin-manager-body
+# and tests/pi-agents/test-sync.sh consume the same home.
+source "$REPO_ROOT/tests/lib/body-digest.sh"
 
 # sync_forward_drift SRC HOST; return 0 when every regular file under
 # SRC, relative path preserved, exists under HOST as a regular file with
@@ -134,7 +131,7 @@ done
 echo "== pin: vendored manager body matches the fleet pin =="
 body_digest="$(sha256sum "$BODY" | cut -d' ' -f1)"
 assert_eq "vendored manager-body.md digest matches the pin" "$pinned_digest" "$body_digest"
-fleet_digest="$(fleet_body_digest "$FLEET_MANAGER_MD")"
+fleet_digest="$(manager_body_digest "$FLEET_MANAGER_MD")"
 assert_eq "vendored manager-body.md matches a fresh extraction of the fleet body" "$fleet_digest" "$body_digest"
 grep -qF "$pinned_digest" "$EXTENSION" \
 	&& ok "manager-mode.ts carries the pinned digest for its activation-time check" \

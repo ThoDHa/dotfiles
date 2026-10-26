@@ -26,14 +26,11 @@ ARTIFACT_NOUN="pi agents"
 PROVENANCE_PHRASE="does not match a fresh compilation of the fleet."
 source "$REPO_ROOT/tests/lib/sync-comparator.sh"
 
-# manager_body_digest FILE; sha256 of the manager body: everything below
-# the frontmatter closing --- line. One definition shared by the pin
-# check below and make pin-manager-body (which re-derives it inline;
-# keep the two awk programs identical).
-manager_body_digest() {
-	awk '/^---$/{c++; if (c == 2) { in_body = 1; next } } in_body { print }' "$1" \
-		| sha256sum | cut -d' ' -f1
-}
+# manager_body_digest comes from tests/lib/body-digest.sh, the single
+# home of the fleet manager body digest program; the pin check below,
+# make pin-manager-body, and tests/pi-extensions/test-sync.sh all
+# consume it.
+source "$REPO_ROOT/tests/lib/body-digest.sh"
 
 report_manager_drift() { # prints the reconcile duty and the refresh command
 	echo "  Fleet manager body drift: opencode/.config/opencode/agents/manager.md no longer matches tests/pi-agents/manager-body.sha256."
