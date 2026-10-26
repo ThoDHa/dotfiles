@@ -1,6 +1,43 @@
 {
-  "$schema": "https://opencode.ai/tui.json",
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "theme": {
+    "name": "rosepine",
+    "mode": "system"
+  },
   "keybinds": {
     "leader": "ctrl+w"
-  }
+  },
+  "plugins": [
+    {
+      "package": "./opencode-context-manager/plugin/context-manager.tui.tsx",
+      "options": {
+        "sidebarSubagents": true,
+        "sidebarMode": "context"
+      }
+    }
+  ],
+  "diffs": {
+    "wrap": "word",
+    "view": "split"
+  },
+  "session": {
+    "sidebar": "auto",
+    "scrollbar": false,
+    "thinking": "hide",
+    "new_location": "inherit",
+    "permissions": "prompt",
+    "verbosity": "medium"
+  },
+  "animations": true,
+  "tabs": {
+    "layout": "horizontal",
+    "indicators": "status",
+    "mode": "off",
+    "scope": "global"
+  },
+  "attention": {
+    "notifications": true,
+    "sound": false
+  },
+  "mouse": false
 }
