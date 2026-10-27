@@ -459,7 +459,7 @@ test-rules:
 	@echo "Testing opencode rules loading..."
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
-	@opencode run --auto "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
+	@opencode run --auto --model thoai-local/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
 		tee /tmp/llm-rules-test.txt >/dev/null
 	@grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/llm-rules-test.txt || \
 		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/llm-rules-test.txt && exit 1)
