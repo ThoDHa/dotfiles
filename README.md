@@ -65,6 +65,8 @@ dotfiles/
 │   ├── PowerToys/
 │   └── windows_terminal_settings.json
 ├── tests/              # Host-side tests (make test)
+├── lib/                # Shared generator library for the rules compilers (not stowed)
+├── pi/                 # pi agent design note, extensions, and generator (not stowed)
 ├── Makefile
 └── README.md
 ```
@@ -75,17 +77,14 @@ dotfiles/
 |---------|-------------|
 | `make bootstrap` | Full setup: install tools + symlink all configs |
 | `make install` | Symlink all stow packages |
-| `make uninstall` | Remove all symlinks |
 | `make stow` | Symlink stow packages (skips opencode/claudecode when the tool is not installed) |
-| `make unstow` | Remove stow symlinks |
 | `make restow` | Update symlinks (unstow + stow) |
-| `make dry-run` | Preview what would be stowed |
-| `make clean-stow` | Remove conflicting files before stowing |
-| `make readopt` | Re-adopt opencode.json/cli.json after a runtime rewrite |
-| `make stow-PKG` | Stow a single package (e.g., `make stow-shell`) |
-| `make unstow-PKG` | Unstow a single package |
-| `make build` | Build the dev container |
-| `make run` | Run the dev container |
+| `make test` | Run all test suites |
+| `make help` | Full command list |
+
+`make help` is the canonical command list: it documents every target
+(per-package stow forms such as `make stow-shell`, the sync and readopt
+targets, and each test suite); this table keeps only the highlights.
 
 **Container Usage:** The Docker setup provides a clean development environment with all tools pre-installed. Run `make build` once, then `make run` to get a containerized shell with your configs mounted.
 
