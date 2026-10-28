@@ -459,14 +459,30 @@ test-rules:
 	@echo "Testing opencode rules loading..."
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
-	@opencode run --auto --model thoai-local/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
-		tee /tmp/llm-rules-test.txt >/dev/null
-	@grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/llm-rules-test.txt || \
-		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/llm-rules-test.txt && exit 1)
-	@grep -qiE "delegation|git-protocol|task-files" /tmp/llm-rules-test.txt || \
-		(echo "FAIL: Skills not detected in response (expected delegation, git-protocol, or task-files). Output:" && cat /tmp/llm-rules-test.txt && exit 1)
-	@echo "  Rules loading confirmed!"
-	@echo "Rules test passed!"
+	@set -e; \
+	gateway_url=$$(python3 -c "import json; print(json.load(open('opencode/.config/opencode/opencode.json'))['providers']['thoai-local']['settings']['baseURL'])" 2>/dev/null) || \
+		{ echo "FAIL: cannot extract thoai-local baseURL from opencode/.config/opencode/opencode.json"; exit 1; }; \
+	case "$$gateway_url" in \
+		http://*|https://*) ;; \
+		*) echo "FAIL: could not extract model gateway baseURL from opencode.json"; exit 1 ;; \
+	esac; \
+	if ! command -v curl >/dev/null 2>&1; then \
+		echo "  Skipping opencode rules check (curl unavailable to probe model gateway)"; \
+		exit 0; \
+	fi; \
+	if ! curl -s -o /dev/null --connect-timeout 5 --max-time 10 "$$gateway_url"; then \
+		echo "  Skipping opencode rules check (model gateway $$gateway_url unreachable)"; \
+		exit 0; \
+	fi; \
+	echo "  Model gateway $$gateway_url reachable, running pinned model test..."; \
+	opencode run --auto --model thoai-local/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M "List the rules files you have loaded and the skills available to you. Just names, one per line." 2>&1 | \
+		tee /tmp/llm-rules-test.txt >/dev/null; \
+	grep -qiE "(^|[^[:alpha:]])core\.md|coding-standards|execution-standards" /tmp/llm-rules-test.txt || \
+		(echo "FAIL: Rules files not detected in response (expected coding-standards.md, core.md, or execution-standards.md). Output:" && cat /tmp/llm-rules-test.txt && exit 1); \
+	grep -qiE "delegation|git-protocol|task-files" /tmp/llm-rules-test.txt || \
+		(echo "FAIL: Skills not detected in response (expected delegation, git-protocol, or task-files). Output:" && cat /tmp/llm-rules-test.txt && exit 1); \
+	echo "  Rules loading confirmed!"; \
+	echo "Rules test passed!"
 else
 	@echo "  Skipping rules test (opencode not installed)"
 endif
