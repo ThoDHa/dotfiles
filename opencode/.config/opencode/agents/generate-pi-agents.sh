@@ -18,11 +18,12 @@
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Shared scaffold (colors, output-argument contract): resolve this
+# script through any stow symlink, then locate the repo-root library
+# from its git toplevel, falling back to the conventional clone location
+# for a copy running outside any repository.
+SCRIPT_FILE="$(readlink -f "${BASH_SOURCE[0]}")"
+source "$(git -C "$(dirname "$SCRIPT_FILE")" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.dotfiles")/lib/rules-generator-common.sh"
 
 # Paths: sources sit next to this script, resolved through any stow
 # symlink so a repo-side invocation reads the same directory it lives in.
@@ -31,22 +32,10 @@ AGENT_SRC_DIR="$SCRIPT_DIR"
 
 # Output location: an optional first argument redirects the generated
 # files into a scratch directory (used by the sync test to regenerate
-# off-host); empty (or whitespace-only) and extra arguments are rejected
-# so a typo can never silently retarget the write.
-OUTPUT_DIR="$HOME/.pi/agent/agents"
-if (( $# > 1 )); then
-    echo "Usage: $(basename "$0") [output-dir]" >&2
-    exit 1
-fi
-if [[ $# -eq 1 ]]; then
-    # A whitespace-only path would drop output into the cwd, so it is
-    # treated exactly like the empty argument.
-    if [[ -z "${1//[[:space:]]/}" ]]; then
-        echo "Error: output path must not be empty" >&2
-        exit 1
-    fi
-    OUTPUT_DIR="$1"
-fi
+# off-host); the shared parse applies the same empty and extra-argument
+# rejections as the rules compilers.
+rules_generator_parse_output_arg "$HOME/.pi/agent/agents" "output-dir" "$@"
+OUTPUT_DIR="$OUTPUT_PATH"
 
 echo -e "${YELLOW}Generating pi agents from the opencode fleet...${NC}"
 echo "  Agent sources: $AGENT_SRC_DIR"
