@@ -15,6 +15,7 @@
 ^reference$
 ^tests$
 ^pi$
+^lib$
 ^\.worktrees$
 
 # This file
