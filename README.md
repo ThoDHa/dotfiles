@@ -24,7 +24,8 @@ make install
 
 ## Structure
 
-Each directory is a stow "package" that mirrors the target structure in `$HOME`:
+The stow packages mirror the target structure in `$HOME`; every other
+directory stays repo-only:
 
 ```
 dotfiles/
