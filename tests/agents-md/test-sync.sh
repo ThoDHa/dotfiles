@@ -142,6 +142,18 @@ else
 		"$selftest_out" "Stale AGENTS.md: $doctored does not match a fresh generation of the rules."
 	assert_contains "stale report carries the remediation line" "$selftest_out" "$REMEDIATION"
 	assert_contains "stale report summarizes the diff" "$selftest_out" "-# User Instructions (AGENTS.md)"
+
+	# Source-time guard probe: the command-substitution subshell inherits
+	# the suite's globals, so the unsets live inside it, and the guard's
+	# failure exits the subshell without touching the suite.
+	guard_out="$(unset ARTIFACT_NOUN PROVENANCE_PHRASE REMEDIATION DIFF_SUMMARY_LINES
+		source "$REPO_ROOT/tests/lib/sync-comparator.sh" 2>&1)"
+	guard_rc=$?
+	if ((guard_rc != 0)) && grep -qF -- "ARTIFACT_NOUN" <<<"$guard_out"; then
+		ok "comparator sourcing with its globals unset fails naming the missing global"
+	else
+		bad "comparator sourcing with its globals unset must fail naming the missing global (rc [$guard_rc], output [$guard_out])"
+	fi
 fi
 
 print_result
