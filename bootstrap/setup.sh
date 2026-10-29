@@ -594,10 +594,10 @@ step_pi() {
 }
 
 # Clone the context-manager plugin directly into the opencode config dir,
-# where cli.json's plugins entry references it (the step's own file checks
-# below verify the clone). Floating on latest for now; pin to a sha once
-# the plugin API stabilizes. HTTPS (not SSH) so fresh machines without keys
-# can clone.
+# where cli.json's plugins entry references the TUI plugin file (the step's
+# own existence check below verifies the clone landed it). Floating on
+# latest for now; pin to a sha once the plugin API stabilizes. HTTPS (not
+# SSH) so fresh machines without keys can clone.
 step_context_manager() {
     git_clone_or_pull "opencode-context-manager" \
         "https://github.com/ThoDHa/opencode-context-manager.git" \
@@ -678,7 +678,6 @@ step_verify() {
     _check_dir  "$HOME/.local/share/nvim/venv" "nvim python venv"
     _check_link "$HOME/.zshrc"                 ".zshrc symlink"
     if [ "$WANT_OPENCODE" = "1" ]; then
-        _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.ts"       "context-manager plugin"
         _check_file "$HOME/.config/opencode/opencode-context-manager/plugin/context-manager.tui.tsx" "context-manager TUI plugin"
     fi
     # pi checks run only when selected and the deployed clone is present:
