@@ -255,8 +255,8 @@ stow-claudecode:
 	@$(MAKE) sync-claudecode
 
 # Compile ~/.pi/agent/agents from the opencode fleet agents (single source
-# of truth; the pi frontmatter is constructed from each source's
-# "# pi:" directive, name, description, and body).
+# of truth; the pi frontmatter is constructed from each source's filename
+# (the agent name), "# pi:" directive, description, and body).
 sync-pi-agents:
 	@echo "Syncing pi agents from the opencode fleet..."
 	@test -f $(PI_AGENTS_GENERATOR) || (echo "ERROR: Generator script not found at $(PI_AGENTS_GENERATOR)" && exit 1)
