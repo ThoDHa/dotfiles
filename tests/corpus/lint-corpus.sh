@@ -134,6 +134,15 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 MAP_ID_PLANNER="$AGENTS_SCOPE/planner.md"
 MAP_ID_ADVISOR="$AGENTS_SCOPE/advisor.md"
 
+# The canonical permissions-item form that both permission awk programs
+# assert (map identity and verifier order): every counted item must be
+# free of apostrophes and must match this full one-line flow-map shape
+# -- exact prefix and spacing, canonical key order, values bare or
+# double-quoted, never single-quoted, never empty -- so a YAML-valid
+# but noncanonical spelling of any counted item fails naming the item
+# instead of passing as counted-but-unextracted.
+CANONICAL_PERMISSION_ITEM_RE='^  - [{] action: ("[^"]+"|[^ ,{}"]+), resource: ("[^"]+"|[^ ,{}"]+), effect: ("[^"]+"|[^ ,{}"]+) [}]$'
+
 EM_DASH="$(printf '\xe2\x80\x94')"
 EN_DASH="$(printf '\xe2\x80\x93')"
 
@@ -524,8 +533,10 @@ check_line_budgets() {
 # the line-1 `---` frontmatter whose text carries the shell action
 # whatever the flow-map spacing, because a canonical-prefix anchor
 # would let a YAML-valid but noncanonically formatted shell rule
-# escape the comparison while opencode still honors it; a body code
-# fence still cannot stand in for the rules. Only the shell action is
+# escape the comparison while opencode still honors it; the shared
+# canonical-item assertion (CANONICAL_PERMISSION_ITEM_RE) fails that
+# class before the comparison runs, and a body code fence still cannot
+# stand in for the rules. Only the shell action is
 # extracted because the pair's edit rules deliberately differ and
 # whole-list identity would fail on that deliberate difference. The
 # list state also ends at the first non-item line, so shell-pattern
@@ -538,7 +549,8 @@ check_line_budgets() {
 check_map_identity() {
 	assert_present "$MAP_ID_PLANNER"
 	assert_present "$MAP_ID_ADVISOR"
-	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ADVISOR" '
+	awk -v pf="$MAP_ID_PLANNER" -v af="$MAP_ID_ADVISOR" \
+		-v canre="$CANONICAL_PERMISSION_ITEM_RE" -v sq="'" '
 	FNR == 1 { in_list = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
 	in_frontmatter && $0 == "---" { in_frontmatter = 0; in_list = 0 }
@@ -546,9 +558,8 @@ check_map_identity() {
 	in_list && $0 !~ /^permissions:$/ && $0 !~ /^  - / && $0 !~ /^  -$/ && $0 !~ /^[[:space:]]*$/ { in_list = 0 }
 	in_list && (/^  - / || /^  -$/) {
 		listn[FILENAME]++
-		item[FILENAME, listn[FILENAME]] = $0
 		itemline[FILENAME, listn[FILENAME]] = FNR
-		if (!(FILENAME in baditem) && $0 !~ /"?action"?[[:space:]]*:/) {
+		if (!(FILENAME in baditem) && ($0 ~ sq || $0 !~ canre)) {
 			baditem[FILENAME] = FNR
 			badtext[FILENAME] = $0
 		}
@@ -560,11 +571,11 @@ check_map_identity() {
 	}
 	END {
 		if (pf in baditem) {
-			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", pf, baditem[pf], badtext[pf]
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is the full canonical one-line flow-map form { action: ..., resource: ..., effect: ... } with canonical key order, bare-or-double-quoted values, and no apostrophes anywhere on the item line\n", pf, baditem[pf], badtext[pf]
 			exit 1
 		}
 		if (af in baditem) {
-			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", af, baditem[af], badtext[af]
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is the full canonical one-line flow-map form { action: ..., resource: ..., effect: ... } with canonical key order, bare-or-double-quoted values, and no apostrophes anywhere on the item line\n", af, baditem[af], badtext[af]
 			exit 1
 		}
 		if (!(pf in start)) {
@@ -587,9 +598,9 @@ check_map_identity() {
 			exit 1
 		}
 		if (listn[pf] != listn[af]) {
-			for (div = 1; item[pf, div] == item[af, div]; div++) { }
 			wider = (listn[pf] >= listn[af] ? pf : af)
-			printf "FAIL: %s:%d: permissions list has %d items vs %d in %s; the lists first diverge at item %d; a one-sided list insertion or deletion breaks the shared contract even when the shell rules still match\n", wider, itemline[wider, div], listn[pf], listn[af], af, div
+			beyond = (listn[pf] < listn[af] ? listn[pf] : listn[af]) + 1
+			printf "FAIL: %s:%d: %s has %d items vs %s %d; the lists diverge in length at item %d, the first item beyond the shorter list; a one-sided list insertion or deletion breaks the shared contract even when the shell rules still match\n", wider, itemline[wider, beyond], pf, listn[pf], af, listn[af], beyond
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
@@ -623,11 +634,19 @@ check_map_identity() {
 # including the YAML-valid noncanonical spellings a line-based
 # extraction cannot be trusted to recognize. In-place rewrites are
 # covered where the canonical-form assertion in both permission awk
-# programs reaches: every counted permissions item must carry its
-# action on the item line per the pinned one-rule-per-line flow-map
-# syntax, so a block-style or multi-line rewrite that moves the action
-# off the item line fails naming the item instead of passing as an
-# unrecognizable-but-counted entry.
+# programs reaches: every counted permissions item must match the full
+# canonical one-line flow-map form ({ action: ..., resource: ...,
+# effect: ... }, canonical key order, bare-or-double-quoted values), so
+# a single-quoted-value spelling, a flow map split across lines, or a
+# block-style rewrite fails naming the item whether it sits at the
+# tail or the middle of the list, instead of passing as an entry the
+# counter sees but no assertion reaches. The unpinned-content class
+# stays open by design: a rewrite that keeps the canonical spelling
+# and changes only on-line content stays lint-green here, including
+# the command pattern of a middle shell allow; only rule[1] (the
+# catch-all deny), the .env deny, the git push deny, the count pins,
+# and the ordering that keeps the env deny final are pinned; the
+# assertion pins form, not content, and claims nothing further.
 # Extraction is line-based like the map-identity check (the
 # `permissions:` list's items whose text carries the shell action
 # whatever the flow-map spacing, inside the line-1 frontmatter, so a
@@ -645,7 +664,8 @@ check_verifier_map_order() {
 	awk -v file="$VERIFIER_SHELL_FILE" -v first="$VERIFIER_SHELL_FIRST" \
 		-v envdeny="$VERIFIER_SHELL_ENV_DENY" -v pushdeny="$VERIFIER_SHELL_PUSH_DENY" \
 		-v expected="$VERIFIER_SHELL_RULE_COUNT" \
-		-v listexpected="$VERIFIER_LIST_ITEM_COUNT" '
+		-v listexpected="$VERIFIER_LIST_ITEM_COUNT" \
+		-v canre="$CANONICAL_PERMISSION_ITEM_RE" -v sq="'" '
 	FNR == 1 { in_list = 0; in_frontmatter = 0 }
 	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
 	in_frontmatter && $0 == "---" { in_frontmatter = 0; in_list = 0 }
@@ -653,7 +673,7 @@ check_verifier_map_order() {
 	in_list && $0 !~ /^permissions:$/ && $0 !~ /^  - / && $0 !~ /^  -$/ && $0 !~ /^[[:space:]]*$/ { in_list = 0 }
 	in_list && (/^  - / || /^  -$/) {
 		listn++
-		if (badline == 0 && $0 !~ /"?action"?[[:space:]]*:/) {
+		if (badline == 0 && ($0 ~ sq || $0 !~ canre)) {
 			badline = FNR
 			badtext = $0
 		}
@@ -666,7 +686,7 @@ check_verifier_map_order() {
 	}
 	END {
 		if (badline) {
-			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is one rule per line in flow-map form with the action on the item line ({ action: ..., resource: ..., effect: ... })\n", file, badline, badtext
+			printf "FAIL: %s:%d: noncanonical permissions item \x27%s\x27; the pinned format is the full canonical one-line flow-map form { action: ..., resource: ..., effect: ... } with canonical key order, bare-or-double-quoted values, and no apostrophes anywhere on the item line\n", file, badline, badtext
 			exit 1
 		}
 		if (n == 0) {
