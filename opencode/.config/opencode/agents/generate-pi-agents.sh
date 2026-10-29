@@ -4,8 +4,8 @@
 # Single source of truth: the opencode agent .md files in this directory.
 # Each dual-harness source carries a "# pi: model=<bare-id> tools=<list>"
 # comment in its frontmatter; this script compiles that comment together
-# with the name, description, and body into a real pi agent file under
-# ~/.pi/agent/agents. An optional trailing "detach=false" token (after the
+# with the filename (the agent name), description, and body into a real
+# pi agent file under ~/.pi/agent/agents. An optional trailing "detach=false" token (after the
 # tools list) additionally emits a "detach: false" frontmatter key, which
 # bars the agent from detached (background) subagent dispatch in pi. The pi
 # frontmatter is constructed, never copied
