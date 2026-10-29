@@ -5,7 +5,9 @@
 # these functions, so non-sync suites sourcing the harness stay free of
 # sync-specific comparators. The sourcing suite must source harness.sh
 # first (compare_fresh reports through its ok/bad counters) and define
-# the per-suite globals the stale line is built from:
+# the per-suite globals the stale line is built from; the guards below
+# enforce that contract at source time, failing with the missing global
+# named when a suite sources the lib with one unset:
 #   ARTIFACT_NOUN     - artifact name in the stale line ("AGENTS.md",
 #                       "CLAUDE.md", "pi agents")
 #   PROVENANCE_PHRASE - provenance sentence ("does not match a fresh
@@ -13,6 +15,11 @@
 #                       fresh compilation of the fleet.")
 #   REMEDIATION       - the sync command that repairs the drift
 # The diff summary length comes from the suite's DIFF_SUMMARY_LINES.
+
+: "${ARTIFACT_NOUN:?sync-comparator requires ARTIFACT_NOUN before sourcing}"
+: "${PROVENANCE_PHRASE:?sync-comparator requires PROVENANCE_PHRASE before sourcing}"
+: "${REMEDIATION:?sync-comparator requires REMEDIATION before sourcing}"
+: "${DIFF_SUMMARY_LINES:?sync-comparator requires DIFF_SUMMARY_LINES before sourcing}"
 
 report_stale() { # fresh actual; prints the stale line, the diff summary, and the remediation
 	echo "  Stale $ARTIFACT_NOUN: $2 $PROVENANCE_PHRASE"
