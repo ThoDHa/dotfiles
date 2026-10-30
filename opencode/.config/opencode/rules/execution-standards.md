@@ -45,6 +45,12 @@ The reset time in a provider rate-limit error reflects the provider's timezone, 
 
 When a rate limit must be reported, implementations quote the error's wording without converting or acting on the timestamp.
 
+### Detached Operations and Completion Notifications
+
+When an operation runs detached or in the background (a dispatched subagent, a shell script or command started detached, and similar) and the harness delivers a completion notification for it, implementations MUST NOT poll its state (repeated status checks, sleep-and-recheck loops, or other progress probing) and MUST NOT block the session waiting for it: the completion notification arrives on its own, other work continues until it does, and dependent work resumes on its arrival.
+
+The rule assumes that notification system exists: where the harness provides no completion notification for a detached operation, that operation runs in the foreground and is observed directly.
+
 ---
 
 ## Task Complexity Protocol
