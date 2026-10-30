@@ -1,7 +1,7 @@
 ---
 description: Fast codebase recon that returns compressed context for handoff to other agents
 mode: subagent
-# pi: model=glm-5.3-flash tools=read, bash detach=false
+# pi: model=glm-5.3-flash tools=read, bash
 model: zai-coding-plan/glm-5.3-flash
 permissions:
   - { action: edit, resource: "*", effect: deny }
