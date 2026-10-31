@@ -35,8 +35,9 @@ opencode/.config/opencode/rules/core.md
 opencode/.config/opencode/rules/execution-standards.md
 opencode/.config/opencode/rules/qhaway-memory.md
 
-## Corpus docs (3)
+## Corpus docs (4)
 
 README.md
+claudecode/.claude/CLAUDE.md
 opencode/DESIGN.md
 pi/DESIGN.md

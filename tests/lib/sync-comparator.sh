@@ -1,6 +1,6 @@
 # Sync comparator for the repo's artifact-sync suites, sourced by
-# tests/agents-md/test-sync.sh, tests/claudecode/test-sync.sh, and
-# tests/pi-agents/test-sync.sh. A sibling of harness.sh, not a member:
+# tests/agents-md/test-sync.sh and tests/pi-agents/test-sync.sh. A sibling
+# of harness.sh, not a member:
 # only suites that compare regenerated artifacts against host state load
 # these functions, so non-sync suites sourcing the harness stay free of
 # sync-specific comparators. The sourcing suite must source harness.sh
@@ -9,7 +9,7 @@
 # enforce that contract at source time, failing with the missing global
 # named when a suite sources the lib with one unset:
 #   ARTIFACT_NOUN     - artifact name in the stale line ("AGENTS.md",
-#                       "CLAUDE.md", "pi agents")
+#                       "pi agents")
 #   PROVENANCE_PHRASE - provenance sentence ("does not match a fresh
 #                       generation of the rules.", "does not match a
 #                       fresh compilation of the fleet.")
