@@ -96,8 +96,10 @@ targets, and each test suite); this table keeps only the highlights.
 | `tmux` | `~/.tmux.conf`, `~/.local/bin/` | Tmux config with TPM plugins, rose-pine theme, plus tmux-sessionizer and tmux-windowizer |
 | `isort` | `~/.config/isort/` | Python import sorter config |
 | `opencode` | `~/.config/opencode/` | OpenCode AI rules; stowed only when `opencode` is installed |
-| `claudecode` | `~/.claude/` | Claude Code settings and skills link; stowed only when `claude` is installed |
+| `claudecode` | `~/.claude/` | Claude Code settings, the shared AGENTS.md link (CLAUDE.md -> ~/.pi/agent/AGENTS.md), and skills link; stowed only when `claude` is installed |
 | `agents` | `~/.agents/skills/` | Shared agent skills (used by opencode, Claude Code, pi) |
+
+The tracked `claudecode/.claude/CLAUDE.md` link resolves relative to the in-package location, so the checkout must sit exactly two directory levels below `$HOME` (as `~/dev/.dotfiles` does); once the pi side is deployed, `make stow-claudecode` fails its post-stow check at any other depth. Bootstrap stows Claude Code before the pi step creates `~/.pi/agent`, so on a fresh machine the check skips until pi deploys, and `make test-links` is the backstop.
 
 ## Bootstrap
 

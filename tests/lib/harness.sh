@@ -1,7 +1,7 @@
 # Shared test harness for the repo's Result-line suites:
 # tests/tasks/test-tasks.sh, tests/oc-continue/test-oc-continue.sh,
-# tests/pi-continue/test-pi-continue.sh, tests/claudecode/test-sync.sh,
-# tests/agents-md/test-sync.sh, tests/pi-agents/test-sync.sh,
+# tests/pi-continue/test-pi-continue.sh, tests/agents-md/test-sync.sh,
+# tests/pi-agents/test-sync.sh,
 # tests/pi-extensions/test-sync.sh, and tests/pi/test-pi.sh.
 # lint-corpus.sh runs a different contract
 # (fail-fast lint, no counters) and is out of bounds here. Sourcing it
