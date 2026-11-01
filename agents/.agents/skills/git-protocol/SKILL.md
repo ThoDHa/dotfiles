@@ -40,11 +40,11 @@ Implementations MUST identify and categorize all changes by type, using the cano
 
 Implementations MUST separate unrelated changes into distinct commits.
 
-Each commit MUST represent one complete, coherent logical change.
+Each commit MUST represent one complete, coherent logical change, and one coherent logical change MUST NOT be split into multiple commits merely because it touches several files or spans several types: changes that exist to serve one purpose form one unit. When unit size is uncertain, the unit that reviews and reverts as a whole is the unit to commit.
 
 ### Remediation Amend Rule
 
-Fixes arising from a unit's own verification or review cycle (reviewer findings, verifier-caught defects) MUST fold into that unit's commit rather than land as stacked follow-up commits. During multi-agent verification runs this is done either by the remediation dispatch instructing the worker to amend its own unpushed unit commit, or by the manager squashing the fix into the unit's commit at integration. The worker amends only a commit no other session has built upon; when sibling work sits on top, the fold goes through integration-time squash instead.
+Fixes arising from a unit's own verification or review cycle (reviewer findings, verifier-caught defects), and author continuations of the same unpushed change within the same working session, MUST fold into that unit's commit rather than land as stacked follow-up commits. During multi-agent verification runs this is done either by the remediation dispatch instructing the worker to amend its own unpushed unit commit, or by the manager squashing the fix into the unit's commit at integration. The worker amends only a commit no other session has built upon; when sibling work sits on top, the fold goes through integration-time squash instead.
 
 The amend mechanism reaches unpushed commits only. A remediation arising after the unit commit is pushed follows the ordinary commit rules: a fixup folded by rebase before the next push where the history is still private, otherwise a follow-up commit. Pushed tips are never rewritten.
 
@@ -62,11 +62,13 @@ Related changes MUST be grouped together in the same commit:
 
 ### Concern Separation
 
-Different types of changes MUST be committed separately:
+Unrelated changes of different types MUST be committed separately:
 
-- Configuration changes separate from feature changes
-- Dependency updates separate from code changes
+- Configuration changes separate from unrelated feature changes
+- Dependency updates separate from code changes that do not depend on them
 - Formatting changes separate from logic changes
+
+Type difference alone does not separate changes that form one logical change: a feature with the configuration that enables it, and a rename with the content adopted into it, are single units.
 
 ---
 
@@ -115,6 +117,8 @@ Implementations MUST use these type prefixes:
 | `test:` | Test additions or modifications |
 | `chore:` | Maintenance, dependencies, tooling |
 | `style:` | Formatting, whitespace (no logic change) |
+
+A commit whose unit spans several types carries the prefix of its dominant change.
 
 ### Subject Line Requirements
 
