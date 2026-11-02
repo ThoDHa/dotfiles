@@ -28,7 +28,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PC="$REPO_ROOT/shell/bin/pi-continue"
+PC="$REPO_ROOT/shell/.local/bin/pi-continue"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
