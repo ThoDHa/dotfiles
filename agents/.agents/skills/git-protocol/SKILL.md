@@ -128,6 +128,7 @@ The subject line MUST:
 - Use imperative mood ("add feature" not "added feature")
 - Not end with a period
 - Describe what changed
+- Be unique among the repository's existing commit subjects (excluding any commit this one replaces): check for a collision before creating a commit or setting a combined/replacement subject (check with `git log --format=%s`), and when the 50-character cap or scope constraints make the natural wording collide, vary the wording (make it more or differently specific) rather than duplicating it, because identical subjects make `git log --oneline` and `--grep` references ambiguous
 
 ### Body Requirements
 
