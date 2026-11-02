@@ -16,7 +16,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OC="$REPO_ROOT/shell/bin/oc-continue"
+OC="$REPO_ROOT/shell/.local/bin/oc-continue"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 

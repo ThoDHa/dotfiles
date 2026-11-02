@@ -30,7 +30,10 @@ directory stays repo-only:
 ```
 dotfiles/
 ├── shell/              # Zsh configuration
-│   └── .zshrc          # -> ~/.zshrc
+│   ├── .zshrc          # -> ~/.zshrc
+│   └── .local/bin/     # -> ~/.local/bin
+│       ├── oc-continue
+│       └── pi-continue
 ├── tmux/               # Tmux configuration
 │   ├── .tmux.conf      # -> ~/.tmux.conf
 │   └── .local/bin/     # -> ~/.local/bin
@@ -92,7 +95,7 @@ targets, and each test suite); this table keeps only the highlights.
 
 | Package | Target | Description |
 |---------|--------|-------------|
-| `shell` | `~/.zshrc` | Zsh config with oh-my-zsh, FZF, aliases |
+| `shell` | `~/.zshrc`, `~/.local/bin/` | Zsh config with oh-my-zsh, FZF, aliases, plus the oc-continue and pi-continue runners |
 | `tmux` | `~/.tmux.conf`, `~/.local/bin/` | Tmux config with TPM plugins, rose-pine theme, plus tmux-sessionizer and tmux-windowizer |
 | `isort` | `~/.config/isort/` | Python import sorter config |
 | `opencode` | `~/.config/opencode/` | OpenCode AI rules; stowed only when `opencode` is installed |
