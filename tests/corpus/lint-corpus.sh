@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Corpus lint: mechanical drift checks over the tracked documentation
-# corpus (corpus-review finding 16). Nine checks run in order and the
+# corpus (corpus-review finding 16). Ten checks run in order and the
 # lint fails fast on the first finding, printing `FAIL: <file>:<line>:
 # <what>`:
 #
@@ -41,6 +41,12 @@
 #                             docker flags verbatim: the repo read-only
 #                             mount, --network none, and the scratch
 #                             plus git-common-dir mount shapes
+#  10. roles model identity   the Roles table's Model column matches
+#                             each agent file's frontmatter model value
+#                             (provider prefix before the first '/'
+#                             stripped from both sides); every table
+#                             row needs a tracked agent file, every
+#                             tracked agent file needs a row
 #
 # Reads only tracked files (git ls-files basis), so the result is
 # reproducible locally and in CI. The lint's own files (this script, the
@@ -92,6 +98,7 @@ AGENTS_SCOPE="opencode/.config/opencode/agents"
 RULES_SCOPE="opencode/.config/opencode/rules"
 INVENTORY="INVENTORY.md"
 MAKEFILE="Makefile"
+DESIGN_ROLES_FILE="opencode/DESIGN.md"
 CORPUS_SCOPES=("$SKILL_SCOPE" "$AGENTS_SCOPE" "$RULES_SCOPE" "README.md" "opencode/DESIGN.md" "pi/DESIGN.md" "$INVENTORY")
 
 # The corpus-docs class names no directory in its heading; the parser
@@ -206,7 +213,7 @@ check_em_dashes() {
 		assert_present "$file"
 		scan_em_dashes "$file"
 	done < <(md_corpus_files; printf '%s\n' "$MAKEFILE")
-	echo "  1/9 em-dash sweep: clean"
+	echo "  1/10 em-dash sweep: clean"
 }
 
 heading_slugs() { # file; prints GitHub-style anchor slugs for its headings
@@ -305,7 +312,7 @@ check_links() {
 			fi
 		done < <(extract_links "$file")
 	done < <(md_corpus_files)
-	echo "  2/9 link liveness: clean"
+	echo "  2/10 link liveness: clean"
 }
 
 scan_headings() { # file
@@ -350,7 +357,7 @@ check_headings() {
 		assert_present "$file"
 		scan_headings "$file"
 	done < <(md_corpus_files)
-	echo "  3/9 heading structure: clean"
+	echo "  3/10 heading structure: clean"
 }
 
 parse_inventory() { # emits C<class> and E<entry> records
@@ -441,7 +448,7 @@ check_inventory_counts() {
 				"class '<$name>' heading count ${INV_COUNT[$name]} != list length ${INV_ENTRY_TOTAL[$name]}"
 		fi
 	done
-	echo "  4/9 INVENTORY heading counts: clean"
+	echo "  4/10 INVENTORY heading counts: clean"
 }
 
 inventory_corpus_docs_members() {
@@ -481,7 +488,7 @@ check_inventory_membership() {
 				"membership drift in class '<$name>' vs $source_desc: missing [$missing] extra [$extra]"
 		fi
 	done
-	echo "  5/9 INVENTORY membership: clean"
+	echo "  5/10 INVENTORY membership: clean"
 }
 
 check_line_budgets() {
@@ -520,7 +527,7 @@ check_line_budgets() {
 		is_tracked "$file" || fail_at "$file" 1 \
 			"line budget mapped for a file that is not tracked; remove or rename the entry"
 	done
-	echo "  6/9 line budgets: clean"
+	echo "  6/10 line budgets: clean"
 }
 
 # Map-identity check: the planner and advisor files carry one shared
@@ -604,7 +611,7 @@ check_map_identity() {
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"
-	echo "  7/9 shell rule identity: clean"
+	echo "  7/10 shell rule identity: clean"
 }
 
 # Verifier shell-order pin: the verifier permissions list is deny-first
@@ -729,7 +736,7 @@ check_verifier_map_order() {
 			exit 1
 		}
 	}' "$VERIFIER_SHELL_FILE"
-	echo "  8/9 verifier shell rule ordering: clean"
+	echo "  8/10 verifier shell rule ordering: clean"
 }
 
 # Verify-recipe pin: the containerized make verify gate is the
@@ -756,7 +763,139 @@ check_verify_recipe_pin() {
 		[[ "$recipe" == *"$flag"* ]] || fail_at "$MAKEFILE" 1 \
 			"verify recipe lost the docker flag '$flag'; the FLEET-1-7 review DC1 rationale pins the container gate's isolation shape verbatim"
 	done
-	echo "  9/9 verify-recipe docker pin: clean"
+	echo "  9/10 verify-recipe docker pin: clean"
+}
+
+# Roles model identity: the Roles table's Model column in the opencode
+# design doc and each agent file's frontmatter model pin must agree,
+# because the table documents the fleet posture while the frontmatter
+# carries the operative value, and drift between them means one of the
+# two is lying. Extraction is line-based like every other check here
+# (no YAML parser): the table is the single `| Agent | Mode | Model |`
+# header row in opencode/DESIGN.md followed by its separator and data
+# rows (a second header-shaped row, a missing separator row, a header
+# with no data rows, or an empty Agent or Model cell fails; fence
+# contents are excluded like every content scan), and each agent's
+# model is the single `model:` entry of its line-1 `---` frontmatter,
+# bare or double-quoted (zero or several entries fail). Comparison
+# strips any provider prefix before the first '/' from BOTH sides, so
+# frontmatter `zai-coding-plan/glm-5.3` matches a table cell `glm-5.3`
+# and a full pin string in the cell matches a bare frontmatter name,
+# while a different model after normalization (a flash pin against a
+# full-model pin) fails naming both values. Completeness runs both
+# ways like the budget registry: every table row needs a tracked agent
+# file in the agents scope named <agent>.md, and every tracked agent
+# file needs a row, so a new or renamed agent cannot escape the model
+# pin on either side.
+extract_roles_table() { # prints "agent<TAB>model<TAB>line" per Roles data row
+	awk -v file="$DESIGN_ROLES_FILE" "${FENCE_AWK}"'
+	BEGIN { state = 0; rows = 0; bad = 0 }
+	{
+		if (fence_toggle($0)) next
+		if (in_fence()) next
+		if (state == 1) {
+			if ($0 ~ /^\|[[:space:]]*[-| :]+$/) { state = 2; next }
+			printf "FAIL: %s:%d: the Roles table header is not followed by the |---| separator row\n", file, NR
+			bad = 1
+			exit 1
+		}
+		if (state == 2) {
+			if ($0 ~ /^\|/) {
+				split($0, cell, /\|/)
+				agent = cell[2]
+				model = cell[4]
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", agent)
+				gsub(/^[[:space:]]+|[[:space:]]+$/, "", model)
+				if (agent == "" || model == "") {
+					printf "FAIL: %s:%d: Roles table row has an empty Agent or Model cell\n", file, NR
+					bad = 1
+					exit 1
+				}
+				rows++
+				printf "%s\t%s\t%d\n", agent, model, NR
+				next
+			}
+			state = 3
+			next
+		}
+		if ($0 ~ /^\|[[:space:]]*Agent[[:space:]]*\|[[:space:]]*Mode[[:space:]]*\|[[:space:]]*Model[[:space:]]*\|/) {
+			if (state == 3) {
+				printf "FAIL: %s:%d: second Roles-shaped table header; exactly one Roles table allowed\n", file, NR
+				bad = 1
+				exit 1
+			}
+			state = 1
+		}
+	}
+	END {
+		if (bad) exit 1
+		if (state == 0) {
+			printf "FAIL: %s:1: no Roles table (no \x27| Agent | Mode | Model |\x27 header row)\n", file
+			exit 1
+		}
+		if (state == 1) {
+			printf "FAIL: %s:1: the Roles table header is not followed by the |---| separator row\n", file
+			exit 1
+		}
+		if (rows == 0) {
+			printf "FAIL: %s:1: the Roles table has no data rows\n", file
+			exit 1
+		}
+	}' "$DESIGN_ROLES_FILE"
+}
+
+frontmatter_model() { # file; prints the frontmatter model value
+	awk '
+	FNR == 1 && $0 == "---" { in_frontmatter = 1; next }
+	in_frontmatter && $0 == "---" { exit }
+	in_frontmatter && /^model:[[:space:]]/ {
+		n++
+		value = $0
+		sub(/^model:[[:space:]]*/, "", value)
+		sub(/[[:space:]]+$/, "", value)
+		if (value ~ /^".*"$/) value = substr(value, 2, length(value) - 2)
+	}
+	END {
+		if (n != 1) {
+			printf "FAIL: %s:1: frontmatter has %d \x27model:\x27 entries; exactly one required\n", FILENAME, n + 0
+			exit 1
+		}
+		if (value == "") {
+			printf "FAIL: %s:1: the frontmatter \x27model:\x27 entry is empty\n", FILENAME
+			exit 1
+		}
+		print value
+	}' "$1"
+}
+
+strip_model_provider_prefix() { # model value; drops the namespace before the first '/'
+	local value="$1"
+	printf '%s' "${value#*/}"
+}
+
+check_roles_model_identity() {
+	local agent model ln file actual path
+	local -A ROLES_SEEN=()
+	while IFS=$'\t' read -r agent model ln; do
+		case "$agent" in
+			FAIL:*) printf '%s\n' "$agent"; exit 1 ;;
+		esac
+		file="$AGENTS_SCOPE/$agent.md"
+		is_tracked "$file" || fail_at "$DESIGN_ROLES_FILE" "$ln" \
+			"roles table row '$agent' names no tracked agent file at '$file'"
+		assert_present "$file"
+		actual="$(frontmatter_model "$file")" || { printf '%s\n' "$actual"; exit 1; }
+		if [[ "$(strip_model_provider_prefix "$actual")" != "$(strip_model_provider_prefix "$model")" ]]; then
+			fail_at "$file" 1 \
+				"frontmatter model '$actual' does not match the roles table Model cell '$model' for '$agent' ($DESIGN_ROLES_FILE:$ln)"
+		fi
+		ROLES_SEEN["$file"]=1
+	done < <(extract_roles_table)
+	while IFS= read -r path; do
+		[[ -n "${ROLES_SEEN[$path]+x}" ]] || fail_at "$path" 1 \
+			"tracked agent file has no roles table row in $DESIGN_ROLES_FILE"
+	done < <(git ls-files -- "$AGENTS_SCOPE" | grep -E '\.md$' | sort)
+	echo "  10/10 roles model identity: clean"
 }
 
 check_preflight() { # the structural basis every later check assumes
@@ -784,7 +923,8 @@ main() {
 	check_map_identity
 	check_verifier_map_order
 	check_verify_recipe_pin
-	echo "Corpus lint passed: 9 checks clean"
+	check_roles_model_identity
+	echo "Corpus lint passed: 10 checks clean"
 }
 
 main "$@"
