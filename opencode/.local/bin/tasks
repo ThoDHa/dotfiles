@@ -74,6 +74,12 @@ readonly STATUS_REASON_KEY="Status Reason"
 readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Work Log" "Execution Log")
 readonly TEMPLATE_SECTION_LEVEL=2
 
+# The sections every task file must carry for the lint pass: the new-task
+# scaffold's set. The template's planning sections stay optional (the Lite
+# Profile collapses or omits them, and tasks edit creates them on demand),
+# so linting their absence would fire on every lean file.
+readonly -a LINT_REQUIRED_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Work Log" "Execution Log")
+
 # Shared awk function source: parse the current line's markdown heading
 # level (0 when the line is not a level-1..6 heading followed by a space),
 # setting HTEXT to the heading text with trailing whitespace stripped.
@@ -175,6 +181,10 @@ Commands:
   show [--dir DIR] <taskfile> [--tail N]
                                        Print header fields, Latest Update, and
                                        the last N Work Log entries (default 10).
+  lint [--dir DIR] [--verbose]         Read-only board lint (sections, header shape, dead
+                                       report links, checkbox drift, claim/archive
+                                       hygiene, commit reachability); exits 1 on hard
+                                       findings. --verbose lists every advisory.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render.
   help                                 Show this help.
@@ -1433,6 +1443,423 @@ cmd_edit() {
 	printf 'edited %s\n' "$(basename "$file")"
 }
 
+# --- board lint (read-only) ------------------------------------------------
+
+# Severity class of a task file for the lint pass: hard when the file is an
+# open task (Triage, Ready, In Progress, Blocked) outside archive/, advisory
+# for Completed and Cancelled files and everything archived. Unknown or
+# missing statuses classify as open: a file the renderer would drop in the
+# Triage lane deserves the stricter eye.
+is_terminal_status() { [[ "$1" == "$STATUS_COMPLETED" || "$1" == "$STATUS_CANCELLED" ]]; }
+
+# Hard class of a scanned task file: open (Triage/Ready/In Progress/Blocked
+# and anything the renderer would treat as such) outside archive/. Archived
+# and terminal files are advisory-only so legacy noise never blocks lint.
+lint_class_hard() { # rel; reads status_of/arch_of from the caller's scope
+	local st="${status_of[$1]}"
+	(( "${arch_of[$1]}" == 1 )) && return 1
+	is_terminal_status "$st" && return 1
+	return 0
+}
+
+# Scan every task file on the board for protocol drift. Strictly read-only:
+# no board lock, no writes, and git is consulted only through read-only
+# plumbing (rev-list). Checks: template-section completeness, header field
+# shape (the CLI's canonical timestamp/duration forms per the Option-1
+# split), Status vocabulary, Success-Criteria checkbox vs Status
+# reconciliation, dead ../reports/ links, claim-sidecar hygiene, archive
+# hygiene, and closure push-reconcile (every recorded commit hash must be
+# reachable from some ref). Severity: open-task structural findings (header
+# shape, sections, claim drift, unreachable commits) are hard; body-space
+# findings (dead links, checkbox drift) stay advisory everywhere, and all
+# findings on terminal or archived files stay advisory, so legacy noise
+# never blocks a clean exit. Exit 1 only on hard findings. Default output
+# caps the advisory lines and names the remainder; --verbose lists every
+# finding.
+LINT_ADVISORY_CAP=20
+
+# The lint scanner itself: one awk pass over every task file, emitting
+# tab-separated records the bash side classifies. S (file, status, archive
+# bit, have-status), O (file, Owner value), C (file, checked, unchecked
+# Success Criteria boxes), M (file, missing section), H (file, field,
+# value, expected), L (file, line, ../reports/ link target), T (file, line,
+# commit-hash candidate). Links inside code spans or fences and lines that
+# carry an explicit "dead link" annotation are skipped; hash lines that
+# document known drift ("unreachable", "superseded", "accepted-lost") are
+# skipped, so a recorded disposition never re-reports itself. Hash
+# candidates are word-bounded 7..40 char hex runs, never pure decimal
+# (board date stamps), and runs of 8+ chars count only on a line carrying
+# commit-context words (commit, landed, pushed, merged, integrated, hash,
+# revert) - 7-char runs are the conventional short-hash form and count
+# anywhere. Empty header values mean absent, which the header contract
+# allows, so only non-empty values are shape-checked. Character classes are
+# explicit throughout: mawk lacks [[:space:]] and brace intervals, so the
+# program stays inside the gawk/mawk intersection.
+lint_scan_files() { # tasks_dir files...
+	local tasks_dir="$1"; shift
+	AWK_TASKS_DIR="$tasks_dir" AWK_CURRENT_DIR="$CURRENT_DIR" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
+		AWK_LINT_SECTIONS="$(printf '%s\034' "${LINT_REQUIRED_SECTIONS[@]}")" \
+		awk '
+		BEGIN {
+			sep = "\t"
+			td = ENVIRON["AWK_TASKS_DIR"] "/"
+			ad = ENVIRON["AWK_ARCHIVE_DIR"]
+			d2 = "[0-9][0-9]"
+			d4 = d2 d2
+			tsre = "^" d4 "-" d2 "-" d2 " " d2 ":" d2 "$"
+			lure = "^\\[" d4 "-" d2 "-" d2 " " d2 ":" d2 "\\] "
+			durre = "^(N/A|([0-9]+(d|h|m))( ([0-9]+(d|h|m)))*)$"
+			progre = "^[0-9]+%$"
+			nreq = split(ENVIRON["AWK_LINT_SECTIONS"], reqs, "\034")
+			for (i = 1; i <= nreq; i++) if (reqs[i] != "") reqsec[reqs[i]] = 1
+			hexrun = "[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]"
+			linkre = "\\(\\.\\./reports/[^)]+\\)"
+			wordc = "[0-9A-Za-z_]"
+		}
+		BEGIN {
+			shapere["Created"] = tsre
+			shapere["Updated"] = tsre
+			shapere["Completed"] = tsre
+			shapexp["Created"] = "YYYY-MM-DD HH:MM or absent"
+			shapexp["Updated"] = "YYYY-MM-DD HH:MM or absent"
+			shapexp["Completed"] = "YYYY-MM-DD HH:MM or absent"
+			shapere["Latest Update"] = lure
+			shapexp["Latest Update"] = "[YYYY-MM-DD HH:MM] <digest> or absent"
+			shapere["Duration"] = durre
+			shapexp["Duration"] = "N/A or d/h/m segments like 2h 15m, or absent"
+			shapere["Progress"] = progre
+			shapexp["Progress"] = "<n>% or absent"
+		}
+		function scan_links(line, rel, ln,    rest, off, before, nb, target) {
+			if (line ~ /[Dd]ead [Ll]ink/) return
+			rest = line
+			off = 0
+			while (match(rest, linkre)) {
+				off += RSTART
+				before = substr(line, 1, off - 1)
+				nb = gsub(/`/, "", before)
+				if (nb % 2 == 0) {
+					target = substr(rest, RSTART + 1, RLENGTH - 2)
+					print "L" sep rel sep ln sep target
+				}
+				rest = substr(rest, RSTART + RLENGTH)
+				off += RLENGTH - 1
+			}
+		}
+		function scan_hashes(line, rel, ln,    low, n, i, c, tok, start, prev, nxt) {
+			low = tolower(line)
+			if (low ~ /unreachable|superseded|accepted-lost/) return
+			if (line !~ hexrun) return
+			n = length(line)
+			i = 1
+			while (i <= n) {
+				c = substr(line, i, 1)
+				if (c ~ /[0-9a-f]/) {
+					start = i
+					tok = ""
+					while (i <= n && substr(line, i, 1) ~ /[0-9a-f]/) {
+						tok = tok substr(line, i, 1)
+						i++
+					}
+					prev = (start > 1) ? substr(line, start - 1, 1) : " "
+					nxt = (i <= n) ? substr(line, i, 1) : " "
+					if (prev !~ wordc && nxt !~ wordc \
+						&& length(tok) >= 7 && length(tok) <= 40 \
+						&& tok !~ /^[0-9]+$/ \
+						&& (length(tok) == 7 || low ~ /(commit|landed|pushed|merged|integrated|hash|revert)/)) {
+						print "T" sep rel sep ln sep tok
+					}
+				} else {
+					i++
+				}
+			}
+		}
+		# emit_h walks the shapere/shapexp tables via the field name, so the
+		# per-field header branch below stays a bare extraction.
+		function field_check(rel, field, value) {
+			gsub(/[ \t\r]+$/, "", value)
+			if (value == "") return
+			if (value ~ shapere[field]) return
+			v = value
+			gsub(/\t/, " ", v)
+			print "H" sep rel sep field sep v sep shapexp[field]
+		}
+		BEGIN {
+		for (argi = 1; argi < ARGC; argi++) {
+			fpath = ARGV[argi]
+			rel = fpath
+			archbit = (index(rel, ad "/") == 1) ? 1 : 0
+			for (k in have_sec) delete have_sec[k]
+			status = ""; owner = ""
+			have_status = 0; have_created = 0; have_updated = 0; have_completed = 0
+			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0
+			checked = 0; unchecked = 0
+			inhdr = 1; insc = 0; fence = 0; fnr = 0
+			while ((getline line < (td fpath)) > 0) {
+				fnr++
+				if (line ~ /^```/) { fence = !fence; continue }
+				if (line ~ /^## /) {
+					inhdr = 0
+					sec = substr(line, 4)
+					sub(/[ \t\r]+$/, "", sec)
+					if (sec in reqsec) have_sec[sec] = 1
+					insc = (sec == "Success Criteria") ? 1 : 0
+					continue
+				}
+				if (inhdr) {
+					if (!have_status && match(line, /^\*\*Status:\*\*[ \t]*/)) {
+						status = substr(line, RSTART + RLENGTH); have_status = 1
+					} else if (!have_created && match(line, /^\*\*Created:\*\*[ \t]*/)) {
+						have_created = 1
+						field_check(rel, "Created", substr(line, RSTART + RLENGTH))
+					} else if (!have_updated && match(line, /^\*\*Updated:\*\*[ \t]*/)) {
+						have_updated = 1
+						field_check(rel, "Updated", substr(line, RSTART + RLENGTH))
+					} else if (!have_completed && match(line, /^\*\*Completed:\*\*[ \t]*/)) {
+						have_completed = 1
+						field_check(rel, "Completed", substr(line, RSTART + RLENGTH))
+					} else if (!have_lu && match(line, /^\*\*Latest Update:\*\*[ \t]*/)) {
+						have_lu = 1
+						field_check(rel, "Latest Update", substr(line, RSTART + RLENGTH))
+					} else if (!have_dur && match(line, /^\*\*Duration:\*\*[ \t]*/)) {
+						have_dur = 1
+						field_check(rel, "Duration", substr(line, RSTART + RLENGTH))
+					} else if (!have_prog && match(line, /^\*\*Progress:\*\*[ \t]*/)) {
+						have_prog = 1
+						field_check(rel, "Progress", substr(line, RSTART + RLENGTH))
+					} else if (!have_owner && match(line, /^\*\*Owner:\*\*[ \t]*/)) {
+						owner = substr(line, RSTART + RLENGTH)
+						gsub(/[ \t\r]+$/, "", owner)
+						have_owner = 1
+					}
+				}
+				if (insc) {
+					if (line ~ /^- \[[xX]\] /) checked++
+					else if (line ~ /^- \[ \] /) unchecked++
+				}
+				if (!fence) {
+					scan_links(line, rel, fnr)
+					scan_hashes(line, rel, fnr)
+				}
+			}
+			close(td fpath)
+			print "S" sep rel sep (have_status ? status : "-") sep archbit sep have_status
+			print "O" sep rel sep owner
+			print "C" sep rel sep checked sep unchecked
+			for (s in reqsec) if (!(s in have_sec)) print "M" sep rel sep s
+			}
+		}
+	' "$@"
+}
+
+cmd_lint() {
+	local dir="" verbose=""
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "lint: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--verbose) verbose=1; shift ;;
+			*) die "lint: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+	# Same option-poisoning defusing as render_unlocked: the path is handed
+	# to git and re-parsed below.
+	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
+
+	local -a files=()
+	local subdir file
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md; do
+			[[ -e "$file" ]] || continue
+			files+=("${file#"$tasks_dir/"}")
+		done
+	done
+
+	# ---- pass 1: one awk scan over every task file -------------------------
+	local -a scan_recs=()
+	if ((${#files[@]} > 0)); then
+		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
+	fi
+
+	local -A status_of arch_of have_status_of checked_of unchecked_of owner_of findings_of
+	local rec tag rel
+	for rec in "${scan_recs[@]}"; do
+		local -a parts=()
+		IFS=$'\t' read -r -a parts <<<"$rec"
+		tag="${parts[0]}"; rel="${parts[1]}"
+		case "$tag" in
+			S) status_of["$rel"]="${parts[2]:-}"; arch_of["$rel"]="${parts[3]:-}"; have_status_of["$rel"]="${parts[4]:-}" ;;
+			O) owner_of["$rel"]="${parts[2]:-}" ;;
+			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}" ;;
+			M) findings_of["$rel"]+="M"$'\t'"${parts[2]:-}"$'\n' ;;
+			H) findings_of["$rel"]+="H"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\t'"${parts[4]:-}"$'\n' ;;
+			L) findings_of["$rel"]+="L"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
+			T) findings_of["$rel"]+="T"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
+		esac
+	done
+
+	# ---- pass 2: closure push-reconcile ------------------------------------
+	# Every recorded hash must be reachable from some ref. One rev-list
+	# stream merges against the sorted candidate list, so a board with
+	# hundreds of recorded hashes costs one git process total. Without a
+	# usable history (board outside a repo, or a repo with no commits) the
+	# pass is skipped with a note rather than reporting every hash
+	# unreachable.
+	local -a cands=()
+	for rel in "${!findings_of[@]}"; do
+		while IFS=$'\t' read -r _ _ tok; do
+			cands+=("$tok")
+		done < <(printf '%s' "${findings_of[$rel]:-}" | grep '^T')
+	done
+	local -A cand_reach=()
+	local have_history=0 skipped_reconcile=""
+	if ((${#cands[@]} > 0)); then
+		local -a uniq_cands=()
+		mapfile -t uniq_cands < <(printf '%s\n' "${cands[@]}" | LC_ALL=C sort -u)
+		local ci=0 nc=${#uniq_cands[@]}
+		local sha saw_any=false
+		while IFS= read -r sha; do
+			saw_any=true
+			while ((ci < nc)); do
+				if [[ "$sha" == "${uniq_cands[ci]}"* ]]; then
+					cand_reach["${uniq_cands[ci]}"]="1"; ((ci += 1)); continue
+				fi
+				if [[ "${uniq_cands[ci]}" < "$sha" ]]; then ((ci += 1)); continue; fi
+				break
+			done
+			((ci >= nc)) && break
+		# The merge needs BOTH streams sorted; rev-list emits newest-first,
+		# so the stream is sorted to byte order to match the candidates.
+		done < <(git -C "$tasks_dir" rev-list --all 2>/dev/null | LC_ALL=C sort)
+		$saw_any && have_history=1
+		((have_history)) || skipped_reconcile="no reachable git history found from $tasks_dir"
+	fi
+
+	# ---- pass 3: classify every finding ------------------------------------
+	local -a hard_out=() advisory_out=()
+	local msg sev st
+	local -a rels=()
+	for rel in "${!status_of[@]}"; do rels+=("$rel"); done
+	local -a sorted_rels=()
+	if ((${#rels[@]} > 0)); then
+		mapfile -t sorted_rels < <(printf '%s\n' "${rels[@]}" | LC_ALL=C sort)
+	fi
+	for rel in "${sorted_rels[@]}"; do
+		st="${status_of[$rel]}"
+		# Missing Status field entirely: the renderer defaults the lane to
+		# Triage, so the file acts as an open task with an incomplete header.
+		if (( "${have_status_of[$rel]}" == 0 )); then
+			msg="header Status field missing (expected one of: $STATUS_VALUES)"
+			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+		fi
+		if [[ "$st" != "-" ]] && ! valid_status "$st"; then
+			msg="header Status not a CLI-recognized value: '$st' (valid: $STATUS_VALUES)"
+			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+		fi
+		# Checkbox-vs-Status reconciliation lives in the body (Success
+		# Criteria), so it stays advisory everywhere per the Option-1 split.
+		if (( "${unchecked_of[$rel]}" > 0 )) && is_terminal_status "$st"; then
+			advisory_out+=("ADVISORY $rel: Status $st with ${unchecked_of[$rel]} unchecked Success Criteria boxes")
+		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 )) && ! is_terminal_status "$st"; then
+			advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st (closure is 'tasks close')")
+		fi
+		# Archive hygiene: an archived file still carrying an open status is
+		# work the board no longer shows in any active lane.
+		if (( "${arch_of[$rel]}" == 1 )) && ! is_terminal_status "$st"; then
+			advisory_out+=("ADVISORY $rel: archived while $st (archived tasks must be Completed or Cancelled)")
+		fi
+		while IFS=$'\t' read -r tag a b c; do
+			[[ -n "$tag" ]] || continue
+			sev=advisory
+			case "$tag" in
+				M) msg="missing required section '$a'"
+					lint_class_hard "$rel" && sev=hard ;;
+				H) msg="header $a not CLI-shaped: '$b' (expected $c)"
+					lint_class_hard "$rel" && sev=hard ;;
+				L) [[ -e "$tasks_dir/$REPORTS_DIR/${b#../reports/}" ]] && continue
+					msg="dead report link (line $a): $b" ;;
+				T) ((have_history)) || continue
+					[[ -n "${cand_reach[$b]+x}" ]] && continue
+					msg="recorded commit $b (line $a) is unreachable from any branch or remote"
+					lint_class_hard "$rel" && sev=hard ;;
+			esac
+			if [[ "$sev" == hard ]]; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+		done < <(printf '%s' "${findings_of[$rel]:-}" | grep -v '^$')
+	done
+	# Open task carrying an Owner without the atomic sidecar: the header
+	# claims ownership the sidecar no longer backs.
+	for rel in "${sorted_rels[@]}"; do
+		st="${status_of[$rel]}"
+		if ! is_terminal_status "$st" && (( "${arch_of[$rel]}" == 0 )) \
+			&& [[ -n "${owner_of[$rel]}" ]] && [[ ! -e "$tasks_dir/$rel.claim" ]]; then
+			hard_out+=("HARD $rel: header Owner '${owner_of[$rel]}' set without a claim sidecar")
+		fi
+	done
+
+	# ---- pass 4: claim-sidecar and archive hygiene -------------------------
+	local -a claims=()
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md.claim; do
+			[[ -e "$file" ]] || continue
+			claims+=("${file#"$tasks_dir/"}")
+		done
+	done
+	for file in "$tasks_dir"/*.md.claim; do
+		[[ -e "$file" ]] || continue
+		claims+=("${file#"$tasks_dir/"}")
+	done
+	local -a sorted_claims=()
+	if ((${#claims[@]} > 0)); then
+		mapfile -t sorted_claims < <(printf '%s\n' "${claims[@]}" | LC_ALL=C sort)
+	fi
+	local claim_rel task_rel sidecar_owner
+	for claim_rel in "${sorted_claims[@]}"; do
+		task_rel="${claim_rel%.claim}"
+		if [[ ! -f "$tasks_dir/$task_rel" ]]; then
+			hard_out+=("HARD $claim_rel: claim sidecar with no task file")
+			continue
+		fi
+		st="${status_of[$task_rel]}"
+		if (( "${arch_of[$task_rel]}" == 1 )) || is_terminal_status "$st"; then
+			advisory_out+=("ADVISORY $claim_rel: stale claim sidecar on $st task")
+			continue
+		fi
+		sidecar_owner="$(head -n 1 "$tasks_dir/$claim_rel")"
+		if [[ -z "${owner_of[$task_rel]}" ]]; then
+			hard_out+=("HARD $claim_rel: claim sidecar present but header Owner is empty")
+		elif [[ "${owner_of[$task_rel]}" != "$sidecar_owner" ]]; then
+			hard_out+=("HARD $claim_rel: claim sidecar owner '$sidecar_owner' does not match header Owner '${owner_of[$task_rel]}'")
+		fi
+	done
+
+	# ---- report -------------------------------------------------------------
+	local hard_count=${#hard_out[@]} advisory_count=${#advisory_out[@]}
+	local line adv_printed=0
+	for line in "${hard_out[@]}"; do printf '%s\n' "$line"; done
+	for line in "${advisory_out[@]}"; do
+		if (( adv_printed < LINT_ADVISORY_CAP )); then
+			printf '%s\n' "$line"
+			adv_printed=$((adv_printed + 1))
+		elif [[ -n "$verbose" ]]; then
+			printf '%s\n' "$line"
+			adv_printed=$((adv_printed + 1))
+		elif (( adv_printed == LINT_ADVISORY_CAP )); then
+			printf '... and %d more advisory findings (run tasks lint --verbose to list all)\n' \
+				$((advisory_count - adv_printed))
+			adv_printed=$((adv_printed + 1))
+		fi
+	done
+	[[ -n "$skipped_reconcile" ]] && printf 'note: push-reconcile skipped: %s\n' "$skipped_reconcile"
+	printf 'lint: %d hard, %d advisory across %d task files (%d claim sidecars)\n' \
+		"$hard_count" "$advisory_count" "${#files[@]}" "${#sorted_claims[@]}"
+	((hard_count == 0)) || exit 1
+}
+
 # Print the final N entries of a task's Work Log section, verbatim, from a
 # snapshot supplied on stdin. Entries start at each "### " heading; the tail
 # begins at the Nth-from-last heading and runs to the end of the section
@@ -1501,6 +1928,7 @@ main() {
 		report) cmd_report "$@" ;;
 		log) cmd_log "$@" ;;
 		edit) cmd_edit "$@" ;;
+		lint) cmd_lint "$@" ;;
 		show) cmd_show "$@" ;;
 		help | -h | --help) usage ;;
 		*) err "unknown command: $cmd"; usage; exit 2 ;;

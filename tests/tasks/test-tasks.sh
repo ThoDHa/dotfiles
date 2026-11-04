@@ -1441,7 +1441,133 @@ t render --dir "$orddir" >/dev/null
 ord_after="$(cat "$ordboard")"
 assert_eq "ordered render is byte-identical on repeat" "$ord_before" "$ord_after"
 
-echo "== usage: canonical option order =="
+echo "== lint: read-only board protocol lint =="
+# The lint fixture board lives inside its own tiny git repo so the
+# push-reconcile pass has a real history to consult; --dir pins the board,
+# so the battery's TASKS_DIR never interferes. Fixture files are written
+# directly (lint is the subject under test, not the write path).
+lint_repo="$ROOT/lintrepo"
+lint_dir="$lint_repo/.tasks"
+mkdir -p "$lint_repo"
+git -C "$lint_repo" init -q .
+git -C "$lint_repo" config user.email lint-probe@invalid
+git -C "$lint_repo" config user.name "Lint Probe"
+echo seed >"$lint_repo/seed.txt"
+git -C "$lint_repo" add seed.txt
+git -C "$lint_repo" commit -qm "seed"
+lint_reach="$(git -C "$lint_repo" rev-parse HEAD)"
+t init --dir "$lint_dir" >/dev/null
+f_lp="$(t new --id LP-1 --name "Lint Probe Target" --dir "$lint_dir")"
+
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "lint passes a clean board"; else bad "lint passes a clean board"; fi
+lint_sum="$(t lint --dir "$lint_dir" | tail -1)"
+assert_contains "clean lint reports zero hard" "$lint_sum" "0 hard"
+
+# Header shape on an open task is a hard failure (the Option-1 split).
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** [2026-10-23 10:1X] hand-stamped probe/' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a hand-stamped header field as hard" "$lint_out" \
+	"HARD current/LP-1-"
+assert_contains "lint names the non-CLI-shaped field" "$lint_out" "header Latest Update not CLI-shaped"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then bad "lint exits 1 on hard findings"; else ok "lint exits 1 on hard findings"; fi
+
+# Missing required template section on an open task is a hard failure.
+awk '/^## Execution Log$/{skip=1} !skip' "$f_lp" >"$f_lp.tmp" && mv "$f_lp.tmp" "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a missing required section" "$lint_out" "missing required section 'Execution Log'"
+
+# Repair the structural findings (CLI-shaped timestamp restored, section
+# re-added) so the following assertions read a board whose only remaining
+# drift is the body-space kind.
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** [2026-06-15 12:00] repaired probe/' "$f_lp"
+printf '\n## Execution Log\n\n- restored\n' >>"$f_lp"
+
+# Body-space drift stays advisory even on an open task (Option-1: prose is
+# free-form), and dead-link detection resolves ../reports/ from the file's
+# own directory.
+printf '%s\n' 'see [report](../reports/LP-1-20260615-1200-lint-probe-target/01-gone.md) here' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a dead report link" "$lint_out" "dead report link"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "dead links stay advisory on open tasks"; else bad "dead links stay advisory on open tasks"; fi
+# Backticked format placeholders and explicitly annotated dead links are
+# not live links and must not fire.
+printf '%s\n' 'canonical form `[ts] digest ([report](../reports/...))` stays literal' >>"$f_lp"
+printf '%s\n' '**Report:** [07-gone.md](../reports/LP-1-20260615-1200-lint-probe-target/07-gone.md) (dead link: renumbered before deposit)' >>"$f_lp"
+lint_before="$(t lint --dir "$lint_dir" 2>&1 | grep -c 'dead report link')"
+lint_after="$(t lint --dir "$lint_dir" 2>&1 | grep -c 'dead report link')"
+assert_eq "backticked placeholders and annotated links are skipped" "$lint_before" "$lint_after"
+
+# Push-reconcile: a reachable recorded hash is silent, an unreachable one
+# is hard on an open task, and a line documenting known drift is skipped.
+t log --dir "$lint_dir" "$(basename "$f_lp")" "landed commit $lint_reach on the branch" >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a reachable recorded commit is silent" "$lint_out" "unreachable from any branch"
+printf '%s\n' 'commit deadbee99 pushed to origin' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags an unreachable recorded commit as hard" "$lint_out" \
+	"recorded commit deadbee99"
+printf '%s\n' 'commit deadbe00 recorded landed+pushed but unreachable everywhere; superseded by re-land' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a drift-disposition hash line is skipped" "$lint_out" "deadbe00"
+sed -i '/commit deadbee99 pushed to origin/d' "$f_lp"
+
+# Claim hygiene: Owner without sidecar, sidecar without Owner, and an
+# owner mismatch are hard on an open task; parity passes silently.
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=ghost-session >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags Owner without a claim sidecar" "$lint_out" "Owner 'ghost-session' set without a claim sidecar"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner= >/dev/null
+printf 'orphan-owner\n' >"$f_lp.claim"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a sidecar whose header Owner is empty" "$lint_out" \
+	"claim sidecar present but header Owner is empty"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=live-owner >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a sidecar-owner mismatch" "$lint_out" "does not match header Owner 'live-owner'"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=orphan-owner >/dev/null
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "matching owner and sidecar passes"; else bad "matching owner and sidecar passes"; fi
+
+# Terminal files are advisory-only: a Completed task with unchecked boxes
+# and a stale sidecar never fails the exit code.
+printf 'someone\n' >"$f_lp.claim"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lp"
+sed -i '/^\*\*Updated:/a **Completed:** 2026-06-15 12:00' "$f_lp"
+sed -i '/^\*\*Completed:/a **Duration:** N\/A' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint reports unchecked boxes on Completed as advisory" "$lint_out" \
+	"unchecked Success Criteria boxes"
+assert_contains "lint reports a stale sidecar on Completed as advisory" "$lint_out" \
+	"stale claim sidecar"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "terminal-file drift keeps lint green"; else bad "terminal-file drift keeps lint green"; fi
+
+# An orphan sidecar (no task file behind it) is board corruption: hard.
+printf 'ghost\n' >"$lint_dir/current/20240101-0900-ghost-task.md.claim"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags an orphan claim sidecar as hard" "$lint_out" "claim sidecar with no task file"
+rm -f "$lint_dir/current/20240101-0900-ghost-task.md.claim"
+
+# Archive hygiene: archiving an open task is advisory.
+printf '%s\n' '# Task: Archived Open' '' '**Created:** 2024-01-01 09:01' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2024-01-01 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '## Execution Log' >"$lint_dir/archive/20240101-0901-archived-open.md"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint reports an archived open task as advisory" "$lint_out" "archived while Triage"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "archive drift keeps lint green"; else bad "archive drift keeps lint green"; fi
+rm -f "$lint_dir/archive/20240101-0901-archived-open.md"
+
+# Advisory cap: the default output truncates and names the remainder;
+# --verbose lists every finding.
+for i in $(seq 1 30); do
+	printf '%s\n' "see [report](../reports/LP-1-20260615-1200-lint-probe-target/$i-filler.md)" >>"$f_lp"
+done
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "default lint caps the advisory listing" "$lint_out" "more advisory findings (run tasks lint --verbose to list all)"
+verbose_count="$(t lint --dir "$lint_dir" --verbose | grep -c '^ADVISORY')"
+(( verbose_count >= 32 )) && ok "--verbose lists every advisory finding" || bad "--verbose lists every advisory finding (got $verbose_count)"
+# Lint never writes: the fixture dashboard is byte-identical after a run.
+board_before="$(cat "$lint_dir/dashboard.md")"
+t lint --dir "$lint_dir" >/dev/null 2>&1 || true
+assert_eq "lint leaves the dashboard untouched" "$board_before" "$(cat "$lint_dir/dashboard.md")"
+
+ echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
 	"--slug SLUG [--from WORKER] --digest TEXT"
