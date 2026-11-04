@@ -183,21 +183,60 @@ Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
 a value that itself begins with "--" (e.g. --name=--force).
 
 The .tasks/ directory is located from --dir, then $TASKS_DIR, then by walking
-up from the current directory, then ./.tasks as a last resort.
+up from the current directory, then ./.tasks as a last resort. Writing
+commands refuse the bare last resort; show and render only warn about it.
 EOF
 }
+
+# How the last resolve_tasks_dir call reached its answer: flag (--dir), env
+# (TASKS_DIR), walkup (an upward search that found an existing board), or
+# fallback (the bare ./.tasks last resort). The guards below hang off this
+# marker: writers refuse the fallback root, readers only warn, and every
+# other branch passes either way.
+RESOLVED_VIA=""
+# The resolved directory itself. Resolution assigns both globals in the
+# caller's shell instead of printing the directory: a printf contract
+# would run inside the $( ) command substitution every caller wraps this
+# in, stranding both markers in the subshell where the guards never see
+# them.
+RESOLVED_TASKS_DIR=""
 
 # Resolve the .tasks directory: explicit value wins, else search upward, else default.
 resolve_tasks_dir() {
 	local explicit="${1:-}"
-	if [[ -n "$explicit" ]]; then printf '%s' "$explicit"; return; fi
-	if [[ -n "${TASKS_DIR:-}" ]]; then printf '%s' "$TASKS_DIR"; return; fi
+	if [[ -n "$explicit" ]]; then RESOLVED_VIA=flag; RESOLVED_TASKS_DIR="$explicit"; return; fi
+	if [[ -n "${TASKS_DIR:-}" ]]; then RESOLVED_VIA=env; RESOLVED_TASKS_DIR="$TASKS_DIR"; return; fi
 	local dir="$PWD"
 	while [[ "$dir" != "/" ]]; do
-		if [[ -d "$dir/.tasks" ]]; then printf '%s' "$dir/.tasks"; return; fi
+		if [[ -d "$dir/.tasks" ]]; then RESOLVED_VIA=walkup; RESOLVED_TASKS_DIR="$dir/.tasks"; return; fi
 		dir="$(dirname "$dir")"
 	done
-	printf '%s' "$PWD/.tasks"
+	RESOLVED_VIA=fallback
+	RESOLVED_TASKS_DIR="$PWD/.tasks"
+}
+
+# Refuse the bare ./.tasks last resort for mutations: a write pinned by
+# nothing (no --dir, no TASKS_DIR) that finds no board walking up would
+# land in a stray root at an arbitrary cwd, the stray-board incident class
+# this guard exists for.
+refuse_fallback_tasks_dir() {
+	[[ "$RESOLVED_VIA" == "fallback" ]] || return 0
+	die "refusing to write to the bare ./.tasks fallback at $1 (no board found walking up from $PWD); pass --dir, export TASKS_DIR, or run from inside the board's tree"
+}
+
+# Writer chokepoint: the fallback refusal first (its remediation covers the
+# missing-board case too), then the existence check.
+require_tasks_dir_for_write() {
+	refuse_fallback_tasks_dir "$1"
+	require_tasks_dir "$1"
+}
+
+# Reader chokepoint: announce the bare last resort without refusing it, so
+# show and render keep their existing outcome (succeed on an existing
+# fallback root, keep the missing-board die otherwise).
+warn_fallback_tasks_dir() {
+	[[ "$RESOLVED_VIA" == "fallback" ]] || return 0
+	err "warning: no board found walking up from $PWD; using the bare ./.tasks fallback at $1 (writes refuse it; pass --dir or export TASKS_DIR to pin the board)"
 }
 
 # Resolve a task file argument to a real path: as given, or under current/, or archive/.
@@ -865,7 +904,8 @@ cmd_init() {
 			*) die "init: unknown argument: $1" ;;
 		esac
 	done
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	refuse_fallback_tasks_dir "$tasks_dir"
 	mkdir -p "$tasks_dir/$CURRENT_DIR" "$tasks_dir/$ARCHIVE_DIR"
 	render "$tasks_dir"
 	printf '%s\n' "$tasks_dir"
@@ -880,7 +920,8 @@ cmd_render() {
 			*) die "render: unknown argument: $1" ;;
 		esac
 	done
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
 	render "$tasks_dir"
 }
 
@@ -906,8 +947,8 @@ cmd_new() {
 	valid_task_id "$id" || die "new: invalid task ID: $id (expected PREFIX-N, hierarchically PREFIX-N-N)"
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 
 	local ts; ts="$(now)"
@@ -1002,8 +1043,8 @@ cmd_set() {
 		fi
 	done
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
@@ -1106,8 +1147,8 @@ cmd_claim() {
 	[[ -n "$target" ]] || die "claim: usage: tasks claim <taskfile> [--owner ID]"
 	[[ -n "$owner" ]] || owner="$(session_id)"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	local claim="$file$CLAIM_SUFFIX"
@@ -1137,8 +1178,8 @@ cmd_release() {
 	done
 	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile>"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	rm -f "$file$CLAIM_SUFFIX"
@@ -1194,8 +1235,8 @@ cmd_report() {
 	[[ -n "${from//[[:space:]]/}" ]] || from="$DEFAULT_FROM"
 	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "report: --from must be a single line"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 
 	# Read the report content before taking the board lock: content is not
 	# board state, an unreadable or empty source must fail before anything
@@ -1275,8 +1316,8 @@ cmd_log() {
 		[[ "$line" =~ $heading_re ]] && die "log: message lines must not begin with a markdown heading"
 	done <<<"$message"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
 
@@ -1317,8 +1358,8 @@ cmd_edit() {
 	# can never leave a half-applied body behind.
 	[[ -n "$section" ]] || die "edit: --section is required"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
-	require_tasks_dir "$tasks_dir"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
 
 	# Read the new body before taking the board lock: content is not board
 	# state, an unreadable or empty source must fail before anything changes,
@@ -1429,7 +1470,8 @@ cmd_show() {
 	((${#args[@]} == 1)) || die "show: usage: tasks show <taskfile> [--tail N]"
 	[[ "$tail" =~ ^[1-9][0-9]*$ ]] || die "show: --tail expects a positive integer, got: $tail"
 
-	local tasks_dir; tasks_dir="$(resolve_tasks_dir "$dir")"
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 

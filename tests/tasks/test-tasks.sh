@@ -2,7 +2,8 @@
 #
 # Tests for the `tasks` board tool. Self-contained: builds a scratch .tasks/
 # dir under a temp root, exercises each command, and asserts the derived
-# dashboard, idempotency, atomic claiming, and lane placement.
+# dashboard, idempotency, atomic claiming, lane placement, and the
+# canonical-root resolution guard.
 
 set -uo pipefail
 
@@ -1450,6 +1451,52 @@ assert_contains "usage places --append after --section" "$usage_out" \
 	"--section HEADING [--append] [<file>|-]"
 assert_not_contains "usage does not place --append before --section" "$usage_out" \
 	"--append] --section"
+
+echo "== canonical-root guard (fallback root: writes refuse, reads warn) =="
+# The guard fixture must sit OUTSIDE the battery root's chain: walk-up from
+# anywhere under ROOT finds the battery board, so a sibling temp root whose
+# ancestors carry no board is what puts the CLI in bare-fallback territory
+# (a host with a board at /tmp or / would fail these probes loudly). Probes
+# run inside command substitutions; every assert runs in the parent because
+# the harness counters are in-process and a subshell assert is lost.
+guard_root="$(mktemp -d)"
+guard_board="$guard_root/.tasks"
+trap 'rm -rf "$ROOT" "$guard_root"' EXIT
+
+refuse_err="$( cd "$guard_root" && unset TASKS_DIR && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
+assert_contains "new refuses the bare fallback root" "$refuse_err" "refusing to write to the bare ./.tasks fallback"
+assert_contains "fallback refusal carries the pin remediation" "$refuse_err" "pass --dir, export TASKS_DIR"
+set_err="$( cd "$guard_root" && unset TASKS_DIR && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
+assert_contains "set refuses the bare fallback root" "$set_err" "refusing to write to the bare ./.tasks fallback"
+log_err="$( cd "$guard_root" && unset TASKS_DIR && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
+assert_contains "log refuses the bare fallback root" "$log_err" "refusing to write to the bare ./.tasks fallback"
+report_err="$( cd "$guard_root" && unset TASKS_DIR && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
+assert_contains "report refuses the bare fallback root" "$report_err" "refusing to write to the bare ./.tasks fallback"
+init_err="$( cd "$guard_root" && unset TASKS_DIR && t init </dev/null 2>&1 >/dev/null || true )"
+assert_contains "init refuses to scaffold the bare fallback root" "$init_err" "refusing to write to the bare ./.tasks fallback"
+[[ -e "$guard_root/.tasks" ]] && bad "refused probes leave no fallback root behind" || ok "refused probes leave no fallback root behind"
+
+render_err="$( cd "$guard_root" && unset TASKS_DIR && t render </dev/null 2>&1 >/dev/null || true )"
+assert_contains "render warns on the bare fallback root" "$render_err" "warning: no board found walking up from"
+assert_contains "render keeps the missing-board die on the fallback root" "$render_err" "no .tasks directory"
+show_err="$( cd "$guard_root" && unset TASKS_DIR && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
+assert_contains "show warns on the bare fallback root" "$show_err" "warning: no board found walking up from"
+assert_contains "show keeps the missing-board die on the fallback root" "$show_err" "no .tasks directory"
+
+# The accepted pins, probed in the same walk-up-empty territory: explicit
+# --dir, exported TASKS_DIR, and the upward find each let writes through.
+t init --dir "$guard_board" >/dev/null
+flag_file="$(t new --id GRD-2 --name "Flag Pin Probe" --dir "$guard_board")"
+[[ -f "$flag_file" ]] && ok "write lands under an explicit --dir pin" || bad "write lands under an explicit --dir pin"
+env_file="$( TASKS_DIR="$guard_board"; t new --id GRD-3 --name "Env Pin Probe" )"
+[[ -f "$env_file" ]] && ok "write lands under a TASKS_DIR pin" || bad "write lands under a TASKS_DIR pin"
+mkdir "$guard_root/nested"
+walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR && t new --id GRD-4 --name "Walk-up Probe" )"
+[[ -f "$walk_file" ]] && ok "write walks up to the found board" || bad "write walks up to the found board"
+assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guard_board/"
+walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
+assert_eq "walk-up read succeeds" "0" "$?"
+assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
 
 print_result
 ((fail == 0)) || exit 1
