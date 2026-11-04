@@ -1503,9 +1503,10 @@ if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "dead links stay advisory o
 # not live links and must not fire.
 printf '%s\n' 'canonical form `[ts] digest ([report](../reports/...))` stays literal' >>"$f_lp"
 printf '%s\n' '**Report:** [07-gone.md](../reports/LP-1-20260615-1200-lint-probe-target/07-gone.md) (dead link: renumbered before deposit)' >>"$f_lp"
-lint_before="$(t lint --dir "$lint_dir" 2>&1 | grep -c 'dead report link')"
-lint_after="$(t lint --dir "$lint_dir" 2>&1 | grep -c 'dead report link')"
+lint_before="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
+lint_after="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
 assert_eq "backticked placeholders and annotated links are skipped" "$lint_before" "$lint_after"
+assert_eq "the skipped pair adds no dead-link finding" "1" "$lint_before"
 
 # Push-reconcile: a reachable recorded hash is silent, an unreachable one
 # is hard on an open task, and a line documenting known drift is skipped.

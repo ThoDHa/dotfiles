@@ -1168,7 +1168,11 @@ cmd_set() {
 		value="${pair#*=}"
 		# Empty means delete everywhere except Updated: set exists to keep
 		# that field fresh, the dashboard depends on it, so an emptied
-		# Updated= pair is a refresh request, never a deletion.
+		# Updated= pair is a refresh request, never a deletion. Production
+		# never reaches this branch for Updated: the CLI-owned guard above
+		# refuses the pair outright (the seam admits it for fixtures), and
+		# the refresh that matters happens through the auto-appended write
+		# below.
 		if [[ "$key" == "Updated" && -z "$value" ]]; then
 			value="$(now)"
 		fi
@@ -1676,7 +1680,7 @@ LINT_ADVISORY_CAP=20
 # program stays inside the gawk/mawk intersection.
 lint_scan_files() { # tasks_dir files...
 	local tasks_dir="$1"; shift
-	AWK_TASKS_DIR="$tasks_dir" AWK_CURRENT_DIR="$CURRENT_DIR" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
+	AWK_TASKS_DIR="$tasks_dir" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
 		AWK_LINT_SECTIONS="$(printf '%s\034' "${LINT_REQUIRED_SECTIONS[@]}")" \
 		awk '
 		BEGIN {
@@ -1859,7 +1863,7 @@ cmd_lint() {
 	done
 
 	# ---- pass 1: one awk scan over every task file -------------------------
-	local -a scan_recs=()
+	local -a scan_recs=() cands=()
 	if ((${#files[@]} > 0)); then
 		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
 	fi
@@ -1877,23 +1881,18 @@ cmd_lint() {
 			M) findings_of["$rel"]+="M"$'\t'"${parts[2]:-}"$'\n' ;;
 			H) findings_of["$rel"]+="H"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\t'"${parts[4]:-}"$'\n' ;;
 			L) findings_of["$rel"]+="L"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
-			T) findings_of["$rel"]+="T"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
+			T) findings_of["$rel"]+="T"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n'
+				cands+=("${parts[3]:-}") ;;
 		esac
 	done
 
 	# ---- pass 2: closure push-reconcile ------------------------------------
 	# Every recorded hash must be reachable from some ref. One rev-list
-	# stream merges against the sorted candidate list, so a board with
-	# hundreds of recorded hashes costs one git process total. Without a
-	# usable history (board outside a repo, or a repo with no commits) the
-	# pass is skipped with a note rather than reporting every hash
-	# unreachable.
-	local -a cands=()
-	for rel in "${!findings_of[@]}"; do
-		while IFS=$'\t' read -r _ _ tok; do
-			cands+=("$tok")
-		done < <(printf '%s' "${findings_of[$rel]:-}" | grep '^T')
-	done
+	# stream merges against the sorted candidate list (cands collected while
+	# consuming the scan records), so a board with hundreds of recorded
+	# hashes costs one git process total. Without a usable history (board
+	# outside a repo, or a repo with no commits) the pass is skipped with a
+	# note rather than reporting every hash unreachable.
 	local -A cand_reach=()
 	local have_history=0 skipped_reconcile=""
 	if ((${#cands[@]} > 0)); then
@@ -1901,6 +1900,8 @@ cmd_lint() {
 		mapfile -t uniq_cands < <(printf '%s\n' "${cands[@]}" | LC_ALL=C sort -u)
 		local ci=0 nc=${#uniq_cands[@]}
 		local sha saw_any=false
+		# The merge needs BOTH streams sorted; rev-list emits newest-first,
+		# so the stream is sorted to byte order to match the candidates.
 		while IFS= read -r sha; do
 			saw_any=true
 			while ((ci < nc)); do
@@ -1911,8 +1912,6 @@ cmd_lint() {
 				break
 			done
 			((ci >= nc)) && break
-		# The merge needs BOTH streams sorted; rev-list emits newest-first,
-		# so the stream is sorted to byte order to match the candidates.
 		done < <(git -C "$tasks_dir" rev-list --all 2>/dev/null | LC_ALL=C sort)
 		$saw_any && have_history=1
 		((have_history)) || skipped_reconcile="no reachable git history found from $tasks_dir"
