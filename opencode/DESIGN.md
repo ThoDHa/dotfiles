@@ -46,6 +46,17 @@ duty.
 
 The verifier and reviewer split verification along the judgment line: transcription of command results is mechanical and runs on the flash model, while code review and result interpretation need the full model. The model pins follow the same line: an unpinned subagent inherits the parent session's model, and the manager session itself runs the full glm-5.3 through the coding-plan pin (`zai-coding-plan/glm-5.3`) rather than flash, per the rationale recorded in commit d45324a: the manager is judgment-dense but volume-light (its reports return as digests with artifacts deposited to files, and scout absorbs recon from the judgment agents, so coordination context stays lean), flash's speed edge matters little for short coordinator turns, and a weak dispatch prompt or plan approval triggers fleet retries that cost more than the model delta, matching the pi side, whose manager sessions already run glm-5.3 at thinking high. The judgment roles (reviewer, planner, advisor) carry explicit glm-5.3 pins while the mechanical roles (worker, verifier) keep their flash pins. The verifier reports exit statuses, the runner's own counts, and verbatim failure output; interpretation happens in the reconciliation chain (advisor memo, manager decision), never inside the verifier. Scout rides the same flash line for mechanical recon: the judgment roles (reviewer, planner, advisor) dispatch it for file reading and codebase lookups through their scout-only task allows, keeping their full-model context for judgment while the read-heavy leg runs on glm-5.3-flash, and scout's own task channel stays denied so the dispatch tree stays two-level. The manager holds a scout allow on the same grounds: manager-scale recon rides scout to keep the coordination context lean, and the lane is enforced by the permission map on opencode and by policy in pi.
 
+## Stage cross-reference map
+
+The pipeline runs six operational stages (understanding, planning, dispatch, validation, resolution, integration), and each stage's requirements have one canonical home; this map points at those homes and is explanatory only, adding no requirement of its own.
+
+- Understand: rule 1 of the manager agent file owns decomposition and tracking.
+- Plan: rules 2 and 3 of the manager agent file own planning approval and the risk tier, with the delegation skill's Planning Approval Authority and Execution Sign-off Gate sections and the task-files skill's Triage to Ready Planning Phase section governing the approval and sign-off gates around them.
+- Dispatch: rules 4 and 5 of the manager agent file own the parallel unit fan-out and the context passed between dependent units, with the worktree-per-unit default recorded in this note's Git authority section and the delegation skill's Worktree Isolation section.
+- Validate: rule 7 of the manager agent file owns the per-unit verification and review pipeline, with the verifier and reviewer agent files defining the two fleet roles the pipeline dispatches.
+- Resolve: rules 8 and 9 of the manager agent file own discrepancy reconciliation and the one-disposition-per-suggestion rule.
+- Integrate: this note's Git authority section owns staging, history shaping, pushing, and the ordered-pair rule, with the delegation skill's Worktree Teardown section owning worktree cleanup.
+
 ## Git authority
 
 Under the worker-commit model recorded here, a unit dispatched alongside a
