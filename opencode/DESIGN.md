@@ -57,6 +57,8 @@ The pipeline runs six operational stages (understanding, planning, dispatch, val
 - Resolve: rules 8 and 9 of the manager agent file own discrepancy reconciliation and the one-disposition-per-suggestion rule.
 - Integrate: this note's Git authority section owns staging, history shaping, pushing, and the ordered-pair rule, with the delegation skill's Worktree Teardown section owning worktree cleanup.
 
+Size-tier vocabulary (small, moderate, complex, research) in plans, dispatches, and reports is a projection of two canonical scales in the manager agent file, never a parallel taxonomy: rule 3's five-factor low/medium/high risk tier (affected scope, reversibility, data sensitivity, external effects, concurrency complexity) sets gate depth, and rule 1's decomposition scale sets how many units a task breaks into. The size words describe where a task lands on those two scales; when they seem to say something the scales do not, rule 3 stays canonical.
+
 ## Git authority
 
 Under the worker-commit model recorded here, a unit dispatched alongside a
