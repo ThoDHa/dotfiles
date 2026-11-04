@@ -122,7 +122,29 @@ readonly HEADER_FIELDS="$(_header_fields_list "${TEMPLATE_HEADER_FIELDS[@]}")"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
-now() { date '+%Y-%m-%d %H:%M'; }
+
+# The CLI clock. Test harnesses may pin it by exporting TASKS_TEST_CLOCK
+# ("YYYY-MM-DD HH:MM"): every derived timestamp (header stamps, report and
+# log entries, the new-task filename stamp) then follows that value, and
+# `tasks set` accepts the CLI-owned header fields so fixtures can backdate
+# deterministically. Production never exports it; the variable exists so
+# the never-hand-edit header contract has a sanctioned test seam, not a
+# production exemption.
+TEST_CLOCK="${TASKS_TEST_CLOCK:-}"
+if [[ -n "$TEST_CLOCK" && ! "$TEST_CLOCK" =~ ^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\ [0-9][0-9]:[0-9][0-9]$ ]]; then
+	die "TASKS_TEST_CLOCK must be CLI-shaped (YYYY-MM-DD HH:MM), got: $TEST_CLOCK"
+fi
+
+now() {
+	if [[ -n "$TEST_CLOCK" ]]; then printf '%s\n' "$TEST_CLOCK"; else date '+%Y-%m-%d %H:%M'; fi
+}
+
+# The new-task filename stamp form of the clock (YYYYMMDD-HHMM).
+now_stamp() {
+	local digits
+	digits="$(now | tr -d ' :-')"
+	printf '%s-%s\n' "${digits:0:8}" "${digits:8:4}"
+}
 
 # The Status vocabulary is fixed; new/set must reject anything else.
 valid_status() {
@@ -168,6 +190,9 @@ Commands:
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
                                        opts: --status S --priority P --dir DIR
   set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
+                                       CLI-owned timeline fields (Created, Updated,
+                                       Completed, Duration, Latest Update) refuse
+                                       direct writes; closure goes through close.
   report [--dir DIR] <taskfile> --slug SLUG [--from WORKER] --digest TEXT [<file>|-]
                                        Deposit a report file under reports/ and
                                        link it from the Work Log (locked).
@@ -187,6 +212,12 @@ Commands:
                                        findings. --verbose lists every advisory.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render.
+  close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
+                                       (CLI clock), Duration (Work Log anchors), Updated;
+                                       drops Status Reason and any claim; render.
+  stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
+                                       Completed task from the CLI clock and Work Log
+                                       anchors; render.
   help                                 Show this help.
 
 Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
@@ -962,7 +993,7 @@ cmd_new() {
 	acquire_board_lock "$tasks_dir"
 
 	local ts; ts="$(now)"
-	local stamp; stamp="$(date '+%Y%m%d-%H%M')"
+	local stamp; stamp="$(now_stamp)"
 	local body; body="$(cat <<EOF
 # Task: $name
 
@@ -1044,6 +1075,20 @@ cmd_set() {
 		value="${pair#*=}"
 		valid_header_key "$key" \
 			|| die "set: unknown header key: $key (valid fields: $HEADER_FIELDS)"
+		# CLI-owned header fields take no direct writes: the timeline is
+		# stamped by the CLI's own operations (log, report, claim, close,
+		# stamp), and backdating them through set is exactly the drift the
+		# Option-1 contract exists to stop. Test harnesses pin
+		# TASKS_TEST_CLOCK, which doubles as the sanctioned fixture seam.
+		if [[ -z "$TEST_CLOCK" ]]; then
+			case "$key" in
+				Created|Updated|Completed|Duration|"Latest Update")
+					die "set: '$key' is CLI-owned; the header timeline is stamped by log/report/claim/close/stamp, not set (test harnesses may export TASKS_TEST_CLOCK)" ;;
+			esac
+			if [[ "$key" == "Status" && "$value" == "$STATUS_COMPLETED" ]]; then
+				die "set: Status=$STATUS_COMPLETED must go through 'tasks close' (closure stamps Completed, Duration, and Updated)"
+			fi
+		fi
 		if [[ "$key" == "Status" ]]; then
 			valid_status "$value" || die "set: unknown status: $value (valid: $STATUS_VALUES)"
 			new_status="$value"
@@ -1198,6 +1243,140 @@ cmd_release() {
 		"Updated"$'\034'"**Updated:** $(now)"
 	render_unlocked "$tasks_dir"
 	printf 'released %s\n' "$(basename "$file")"
+}
+
+# --- closure stamping -------------------------------------------------------
+
+# Compact CLI duration form from a minute count: "45m", "2h 15m",
+# "1d 3h", segments descending and only the nonzero trailing ones carried.
+format_duration_minutes() {
+	local total=$1 d=0 h=0 out=""
+	(( total < 0 )) && { printf '%s\n' "$NA"; return; }
+	if (( total >= 1440 )); then
+		d=$((total / 1440))
+		total=$((total % 1440))
+		out="${d}d"
+	fi
+	if (( total >= 60 )); then
+		h=$((total / 60))
+		total=$((total % 60))
+		out="${out:+$out }${h}h"
+	fi
+	(( total > 0 )) && out="${out:+$out }${total}m"
+	[[ -n "$out" ]] || out="0m"
+	printf '%s\n' "$out"
+}
+
+# First and last Work Log anchor timestamps (the "### YYYY-MM-DD HH:MM:
+# ..." entry headings), in file order, as "first<TAB>last"; empty when the
+# section carries fewer than two parseable anchors.
+work_log_span() {
+	awk '
+		/^## Work Log/ { inwork = 1; next }
+		inwork && /^## / { exit }
+		inwork && /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:/ {
+			ts = substr($0, 5, 16)
+			if (first == "") first = ts
+			last = ts
+		}
+		END {
+			if (first != "" && last != "") print first "\t" last
+		}
+	' "$1"
+}
+
+# Duration between the Work Log anchors in minutes, N/A when the anchors
+# cannot produce a nonnegative span (fewer than two parseable entries,
+# unparseable timestamps, or a log whose entries run backwards).
+derive_duration() {
+	local span first last a b
+	span="$(work_log_span "$1")" || span=""
+	[[ -n "$span" ]] || { printf '%s\n' "$NA"; return; }
+	first="${span%%$'\t'*}"
+	last="${span#*$'\t'}"
+	a="$(date -d "$first" +%s 2>/dev/null)" || { printf '%s\n' "$NA"; return; }
+	b="$(date -d "$last" +%s 2>/dev/null)" || { printf '%s\n' "$NA"; return; }
+	format_duration_minutes $(( (b - a) / 60 ))
+}
+
+# Re-stamp a Completed task: Completed and Updated follow the CLI clock and
+# Duration re-derives from the Work Log anchors. The repair path for legacy
+# hand-stamps and re-closure bumps; closing a task that is not Completed
+# belongs to `tasks close`.
+cmd_stamp() {
+	local dir="" args=()
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "stamp: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 1)) || die "stamp: usage: tasks stamp <taskfile>"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	local status
+	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	[[ "$status" == "$STATUS_COMPLETED" ]] \
+		|| die "stamp: $(basename "$file") is not Completed (status: ${status:-missing}); use 'tasks close' to close it"
+
+	local ts duration
+	ts="$(now)"
+	duration="$(derive_duration "$file")"
+	write_header_fields "$file" \
+		"Completed"$'\034'"**Completed:** $ts" \
+		"Duration"$'\034'"**Duration:** $duration" \
+		"Updated"$'\034'"**Updated:** $ts"
+	render_unlocked "$tasks_dir"
+	printf 'stamped %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+}
+
+# Close a task: transition to Completed with the header timeline stamped
+# from the CLI clock, as the one sanctioned write path for closure. Sets
+# Status, Completed, Duration (Work Log anchors, N/A when they cannot
+# produce a span), and Updated in one locked header rewrite; drops the
+# Status Reason (the header contract carries it only under
+# Blocked/Cancelled) and releases any claim sidecar with its Owner field,
+# then renders. The assembler and dashboard formats are the locked write
+# path's own, so closure rows render byte-compatibly.
+cmd_close() {
+	local dir="" args=()
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "close: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile>"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	local status
+	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	[[ "$status" == "$STATUS_COMPLETED" ]] \
+		&& die "close: $(basename "$file") is already Completed (use 'tasks stamp' to re-stamp)"
+
+	local ts duration
+	ts="$(now)"
+	duration="$(derive_duration "$file")"
+	write_header_fields "$file" \
+		"Status"$'\034'"**Status:** $STATUS_COMPLETED" \
+		"Completed"$'\034'"**Completed:** $ts" \
+		"Duration"$'\034'"**Duration:** $duration" \
+		"Updated"$'\034'"**Updated:** $ts" \
+		"$STATUS_REASON_KEY"$'\034' \
+		"Owner"$'\034'"**Owner:**"
+	rm -f "$file$CLAIM_SUFFIX"
+	render_unlocked "$tasks_dir"
+	printf 'closed %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
 # Next report sequence number for a task's reports directory: one past the
@@ -1925,6 +2104,8 @@ main() {
 		set) cmd_set "$@" ;;
 		claim) cmd_claim "$@" ;;
 		release) cmd_release "$@" ;;
+		close) cmd_close "$@" ;;
+		stamp) cmd_stamp "$@" ;;
 		report) cmd_report "$@" ;;
 		log) cmd_log "$@" ;;
 		edit) cmd_edit "$@" ;;

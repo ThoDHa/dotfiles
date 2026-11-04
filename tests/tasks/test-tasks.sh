@@ -20,6 +20,10 @@ refuse() { # label; rest is the command to attempt
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 export TASKS_DIR="$ROOT/.tasks"
+# Pin the CLI clock: backdating fixtures and stamp/close assertions read
+# deterministic timestamps, and the set guard admits CLI-owned header
+# fields only under this sanctioned test seam.
+export TASKS_TEST_CLOCK="2026-06-15 12:00"
 DASH="$TASKS_DIR/dashboard.md"
 
 t() { "$TASKS_BIN" "$@"; }
@@ -28,6 +32,12 @@ edit_stderr_of() { # rest is the edit invocation; echoes its stderr
 	# edit consumes stdin even when refusing, so detach it
 	t edit "$@" </dev/null 2>&1 >/dev/null || true
 }
+
+# The battery pins the CLI clock through TASKS_TEST_CLOCK (the sanctioned
+# seam the set-guard section exercises), so assertions on CLI-refreshed
+# timestamps compare against the pinned clock's date. The fallback keeps
+# the same assertion meaningful when the battery runs unpinned.
+clock_today() { printf '%s\n' "${TASKS_TEST_CLOCK%% *}"; }
 
 echo "== init =="
 t init >/dev/null
@@ -343,7 +353,7 @@ assert_eq "deleting an absent field leaves one Updated line" "1" \
 t set "$f_kv" Updated="2020-01-01 00:00" >/dev/null
 t set "$f_kv" Updated= >/dev/null
 kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
-[[ "$kv_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$kv_updated" == "$(clock_today)"* ]] \
 	&& ok "an emptied Updated= pair refreshes instead of deleting" \
 	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
 
@@ -683,7 +693,7 @@ assert_contains "entry links the deposit via ../reports/" "$(cat "$f_rp")" \
 	"**Report:** [01-recon.md](../reports/$rpbase/01-recon.md)"
 assert_contains "entry carries the digest" "$(cat "$f_rp")" "**Digest:** Recon findings recorded"
 rp_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
-[[ "$rp_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$rp_updated" == "$(clock_today)"* ]] \
 	&& ok "report bumps Updated to today" || bad "report bumps Updated to today (got [$rp_updated])"
 latest_line="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rp")"
 assert_contains "Latest Update carries the digest" "$latest_line" "Recon findings recorded"
@@ -808,7 +818,7 @@ t log "$f_lg" "Dispatches held pending decision" >/dev/null
 lg_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Dispatches held pending decision$' "$f_lg" || true)"
 [[ -n "$lg_entry" ]] && ok "log appends the timestamped manager heading" || bad "log appends the timestamped manager heading"
 lg_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
-[[ "$lg_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$lg_updated" == "$(clock_today)"* ]] \
 	&& ok "log bumps Updated to today" || bad "log bumps Updated to today (got [$lg_updated])"
 assert_eq "successful log leaves exactly one Updated line on a headed file" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$f_lg")"
@@ -931,7 +941,7 @@ t log "$hless_predated" "Entry on a predated headingless file" >/dev/null
 assert_eq "headingless append replaces an existing Updated field in place" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$hless_predated")"
 hless_predated_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$hless_predated")"
-[[ "$hless_predated_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$hless_predated_updated" == "$(clock_today)"* ]] \
 	&& ok "headingless append bumps the predated Updated value" \
 	|| bad "headingless append bumps the predated Updated value (got [$hless_predated_updated])"
 rm -f "$hless_predated"
@@ -1071,7 +1081,7 @@ assert_contains "append keeps the pre-existing nested content" "$nested_ap" "**D
 printf '####### seven hashes is not a heading\n' | t edit "$nested" --section "Objective" >/dev/null
 assert_contains "seven-hash lines stay acceptable in edit bodies" "$(cat "$nested")" "####### seven hashes is not a heading"
 nested_updated_after="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
-[[ "$nested_updated_after" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$nested_updated_after" == "$(clock_today)"* ]] \
 	&& ok "nested-heading edits bump Updated" || bad "nested-heading edits bump Updated (got [$nested_updated_after])"
 
 echo "== edit: same-or-higher-level headings stay refused =="
@@ -1124,7 +1134,7 @@ cr_wl_line="$(grep -n '^## Work Log$' "$f_cr" | cut -d: -f1)"
 	|| bad "created Technical Approach sits after Success Criteria and before Work Log"
 assert_contains "created section carries the supplied body" "$(cat "$f_cr")" "Risks: none beyond ordinary regression risk"
 cr_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cr")"
-[[ "$cr_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$cr_updated" == "$(clock_today)"* ]] \
 	&& ok "section creation bumps Updated" || bad "section creation bumps Updated (got [$cr_updated])"
 assert_contains "dashboard reflects the creation bump" "$(grep -F 'Section Creation Target' "$DASH")" "$cr_updated"
 # Append onto a just-created section appends, not replaces
@@ -1183,7 +1193,7 @@ echo "== edit: Updated refresh and dashboard render =="
 t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
 printf 'Render check body\n' | t edit "$f_ed" --section Objective >/dev/null
 ed_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
-[[ "$ed_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$ed_updated" == "$(clock_today)"* ]] \
 	&& ok "edit bumps Updated to today" || bad "edit bumps Updated to today (got [$ed_updated])"
 assert_contains "dashboard reflects the edit bump" "$(grep -F 'Edit Section Target' "$DASH")" "$ed_updated"
 
@@ -1566,6 +1576,101 @@ verbose_count="$(t lint --dir "$lint_dir" --verbose | grep -c '^ADVISORY')"
 board_before="$(cat "$lint_dir/dashboard.md")"
 t lint --dir "$lint_dir" >/dev/null 2>&1 || true
 assert_eq "lint leaves the dashboard untouched" "$board_before" "$(cat "$lint_dir/dashboard.md")"
+
+echo "== set: CLI-owned header fields are refused outside the test seam =="
+# The Option-1 contract: header timeline fields (Created, Updated,
+# Completed, Duration, Latest Update) are stamped by the CLI's own
+# operations, never written through set. The battery runs with
+# TASKS_TEST_CLOCK exported, so these probes unset it locally; every
+# assertion runs in the parent because the harness counters are
+# in-process.
+guard_target="$(t new --id GRD-5 --name "Guard Probe Target")"
+guard_before="$(cat "$guard_target")"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Completed outside the seam" "$guard_err" "'Completed' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" Duration=1h 2>&1 >/dev/null || true)"
+assert_contains "set refuses Duration outside the seam" "$guard_err" "'Duration' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Updated=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Updated outside the seam" "$guard_err" "'Updated' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Created=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Created outside the seam" "$guard_err" "'Created' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Latest Update=forged" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Latest Update outside the seam" "$guard_err" "'Latest Update' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Completed" 2>&1 >/dev/null || true)"
+assert_contains "set redirects Status=Completed to close" "$guard_err" "must go through 'tasks close'"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "the refusal names the sanctioned seam" "$guard_err" "TASKS_TEST_CLOCK"
+assert_eq "guard refusals leave the file byte-identical" "$guard_before" "$(cat "$guard_target")"
+# Under the seam the same writes land: the fixture backdating path.
+t set "$guard_target" "Completed=2026-01-01 00:00" "Duration=2h 30m" >/dev/null
+assert_contains "seam admits Completed for fixtures" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$guard_target")" "2026-01-01 00:00"
+t set "$guard_target" Updated= >/dev/null
+assert_eq "an emptied Updated= pair refreshes to the pinned clock" "2026-06-15 12:00" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$guard_target")"
+guard_err="$(TASKS_TEST_CLOCK=garbage t show "$guard_target" 2>&1 >/dev/null || true)"
+assert_contains "a malformed clock dies at startup" "$guard_err" "TASKS_TEST_CLOCK must be CLI-shaped"
+rm -f "$guard_target"
+t render >/dev/null
+
+ echo "== close and stamp: closure stamping through the locked write path =="
+# close derives Duration from the Work Log anchors and stamps Completed
+# from the CLI clock; the header rewrite rides write_header_fields, so
+# field order stays canonical and the dashboard rows stay byte-compatible.
+f_cl="$(t new --id CLS-9 --name "Closure Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cl" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 11:30" t log "$f_cl" "second anchor" >/dev/null
+close_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cl")"
+assert_contains "close reports the stamped completion" "$close_out" "Completed 2026-06-16 10:00"
+assert_contains "close reports the derived duration" "$close_out" "Duration 2h 30m"
+assert_eq "close stamps Status Completed" "Completed" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close stamps Completed from the CLI clock" "2026-06-16 10:00" \
+	"$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close derives Duration from the Work Log anchors" "2h 30m" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close refreshes Updated" "2026-06-16 10:00" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cl")"
+cls_order="$(awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_cl")"
+assert_eq "close keeps the canonical header order" \
+	"$(printf '%s\n' Created Status Priority Progress Owner Updated Completed Duration "Latest Update")" \
+	"$cls_order"
+board="$(cat "$DASH")"
+cls_row="$(grep -F 'Closure Probe' <<<"$board")"
+assert_contains "the Completed lane carries the stamped timestamp" "$cls_row" "2026-06-16 10:00"
+assert_contains "the Completed lane carries the derived duration" "$cls_row" "2h 30m"
+refuse "close refuses an already-Completed task" close "$f_cl"
+
+# stamp re-stamps an already-Completed task and re-derives Duration.
+stamp_out="$(TASKS_TEST_CLOCK="2026-06-20 08:00" t stamp "$f_cl")"
+assert_contains "stamp re-stamps Completed" "$stamp_out" "Completed 2026-06-20 08:00"
+assert_eq "stamp keeps Duration derived from the anchors" "2h 30m" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cl")"
+
+# A multi-day span renders in the compact d/h form; fewer than two
+# parseable anchors yields N/A.
+f_md="$(t new --id CLS-10 --name "Multi Day Probe")"
+TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_md" "day one" >/dev/null
+TASKS_TEST_CLOCK="2026-06-18 11:00" t log "$f_md" "day four" >/dev/null
+TASKS_TEST_CLOCK="2026-06-18 12:00" t close "$f_md" >/dev/null
+assert_eq "close renders multi-day durations in the compact form" "3d 3h" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_md")"
+f_na="$(t new --id CLS-11 --name "No Anchor Probe")"
+refuse "stamp refuses a task that is not Completed" stamp "$f_na"
+TASKS_TEST_CLOCK="2026-06-16 12:00" t close "$f_na" >/dev/null
+assert_eq "close without two anchors stamps N/A" "N/A" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_na")"
+
+# Closing from Blocked drops the Status Reason and releases the claim:
+# the header contract carries the reason only under Blocked/Cancelled, and
+# a closed task owns nothing.
+f_blk="$(t new --id CLS-12 --name "Blocked Closure Probe")"
+t set "$f_blk" Status=Blocked "Status Reason=waiting on deps" >/dev/null
+t claim "$f_blk" --owner sess-closer >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 11:00" t close "$f_blk" >/dev/null
+assert_not_contains "close drops the Status Reason" "$(awk '/^## /{exit}{print}' "$f_blk")" "**Status Reason:**"
+[[ ! -f "$f_blk.claim" ]] && ok "close removes the claim sidecar" || bad "close removes the claim sidecar"
+assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
+refuse "close without a taskfile is refused" close
+refuse "stamp without a taskfile is refused" stamp
 
  echo "== usage: canonical option order =="
 usage_out="$(t help)"
