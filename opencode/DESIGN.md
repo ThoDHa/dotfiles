@@ -11,7 +11,7 @@ requirement's canonical home (file plus section heading or rule number).
 
 | Agent | Mode | Model | Duties |
 |-------|------|-------|--------|
-| manager | primary | glm-5.3-flash | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
+| manager | primary | zai-coding-plan/glm-5.3 | Decomposition, dispatch, unit worktrees and branches, planning approval, user plan sign-off, architecture duties at coordination scale (exploration, builds, verification runs, CI/CD operation), integration and history shaping, pushes, reconciliation |
 | worker | subagent | glm-5.3-flash | Code writing: implementation inside an assigned territory, commit checkpoints on the unit branch, real-time work logs, reports |
 | verifier | subagent | glm-5.3-flash | Runs tests, linter, and typechecker once each, reports raw results without interpretation |
 | reviewer | subagent | glm-5.3 | Dual mandate: compliance (simplify-review in Analysis-Only Mode, advisory plan critiques between drafting and approval, expectation checks, verdict failing only on correctness, security, or contradiction) and advisory adversarial design critique aimed at a better design, not a defeated one (every challenge carrying an alternative, tradeoffs, and a falsifiable claim, one-exchange debate through the report deposits), no command execution beyond its deny-first read-only map plus exactly one findings-deposit write per dispatch (the `tasks report` channel under task files, a `/tmp/llm/reports/` artifact otherwise) |
@@ -44,24 +44,7 @@ judgment memos to the advisor, code writing to the worker), since
 capability never reduces the delegation
 duty.
 
-The verifier and reviewer split verification along the judgment line:
-transcription of command results is mechanical and runs on the flash model,
-while code review and result interpretation need the full model. The model
-pins follow the same line: an unpinned subagent inherits the parent
-session's model, and the manager session itself runs flash, so the
-judgment roles (reviewer, planner, advisor) carry explicit glm-5.3 pins
-while the mechanical roles (worker, verifier) keep their flash pins. The
-verifier reports exit statuses, the runner's own counts, and verbatim
-failure output; interpretation happens in the reconciliation chain
-(advisor memo, manager decision), never inside the verifier. Scout rides
-the same flash line for mechanical recon: the judgment roles (reviewer,
-planner, advisor) dispatch it for file reading and codebase lookups
-through their scout-only task allows, keeping their full-model context
-for judgment while the read-heavy leg runs on glm-5.3-flash, and scout's
-own task channel stays denied so the dispatch tree stays two-level. The
-manager holds a scout allow on the same grounds: manager-scale recon
-rides scout to keep the coordination context lean, and the lane is
-enforced by the permission map on opencode and by policy in pi.
+The verifier and reviewer split verification along the judgment line: transcription of command results is mechanical and runs on the flash model, while code review and result interpretation need the full model. The model pins follow the same line: an unpinned subagent inherits the parent session's model, and the manager session itself runs the full glm-5.3 through the coding-plan pin (`zai-coding-plan/glm-5.3`) rather than flash, per the rationale recorded in commit d45324a: the manager is judgment-dense but volume-light (its reports return as digests with artifacts deposited to files, and scout absorbs recon from the judgment agents, so coordination context stays lean), flash's speed edge matters little for short coordinator turns, and a weak dispatch prompt or plan approval triggers fleet retries that cost more than the model delta, matching the pi side, whose manager sessions already run glm-5.3 at thinking high. The judgment roles (reviewer, planner, advisor) carry explicit glm-5.3 pins while the mechanical roles (worker, verifier) keep their flash pins. The verifier reports exit statuses, the runner's own counts, and verbatim failure output; interpretation happens in the reconciliation chain (advisor memo, manager decision), never inside the verifier. Scout rides the same flash line for mechanical recon: the judgment roles (reviewer, planner, advisor) dispatch it for file reading and codebase lookups through their scout-only task allows, keeping their full-model context for judgment while the read-heavy leg runs on glm-5.3-flash, and scout's own task channel stays denied so the dispatch tree stays two-level. The manager holds a scout allow on the same grounds: manager-scale recon rides scout to keep the coordination context lean, and the lane is enforced by the permission map on opencode and by policy in pi.
 
 ## Git authority
 
