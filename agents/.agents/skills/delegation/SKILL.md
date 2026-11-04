@@ -1,6 +1,6 @@
 ---
 name: delegation
-description: Manager Mode and delegation protocol covering activation triggers like you are a manager or delegate this, allies versus agents, parallel safety rules, worktree isolation and teardown, dispatch prompt contracts, resource assessment, and question batching. Use when the user chooses parallel or worktree execution or asks about delegating work to agents.
+description: Manager Mode and delegation protocol covering activation triggers like you are a manager or delegate this, allies versus agents, parallel safety rules, worktree isolation and teardown, dispatch prompt contracts, resource assessment, unit tier floors, and question batching. Use when the user chooses parallel or worktree execution or asks about delegating work to agents.
 ---
 
 > When Manager Mode work is tracked in task files, also load the `task-files` skill.
@@ -62,13 +62,25 @@ The manager MUST execute directly: quick tasks (< 30 seconds, each bounded to a 
 
 Planning labor (exploration, analysis, drafting task documentation, proposing a breakdown) MAY be delegated; planning approval NEVER is. When work is tracked in task files and the planned breakdown fans out into parallel children with overlapping territory, the planning labor MUST satisfy the `task-files` skill's shared-reconnaissance default (deposit the shared reconnaissance artifact under the parent or record the Decision Log exception), defined in that skill's Triage to Ready Planning Phase. The manager is the sole agent-side authority that approves a planned task for execution: approval is never delegated to an agent or ally, and it never substitutes for the user's sign-off under the [Execution Sign-off Gate](#execution-sign-off-gate). Implementations MUST NOT allow a delegated agent or ally to declare its own planning complete and move work into execution; when agents performed the planning labor, the manager MUST review the resulting plan, verify it is complete and aligned, and grant approval personally. Delegation does not absolve accountability. When the task is tracked in a task file, this approval is the Triage → Ready transition (see the `task-files` skill).
 
+### Unit Tiers
+
+Every unit in a plan carries a unit tier that binds the unit's verification and review floor. The manager MUST assign every unit a tier at plan time and MUST present each unit's tier with the plan, so the user sees every floor before sign-off; the tier then governs that unit's verification and review rounds for the unit's whole life, retries and restarts included. The tiers are:
+
+| Tier | Covers | Floor |
+|------|--------|-------|
+| **Mechanical** | Renames, dependency bumps, formatting, wording-only documentation edits | Verifier run plus a diff-scope check that the unit's diff stays inside its declared territory; the reviewer is optional, and skipping it requires a rationale recorded where the plan is tracked (the task file's Decision Log under the `task-files` protocol) |
+| **Standard** | Everything not classified mechanical or design-bearing; the default | Full pipeline: worker, verifier, and reviewer |
+| **Design-bearing** | Work whose shape embeds design decisions a reviewer should attack: new architecture, new interfaces or protocols, semantics other code depends on | The standard floor plus the second adversarial memo, at the depth the risk tier machinery gives consequential rulings (manager.md rule 3) |
+
+Tiers bind floors and never relax gates: no tier bypasses the [Execution Sign-off Gate](#execution-sign-off-gate), no tier alters standing-waiver semantics (a tier never creates, extends, or substitutes for a waiver; the gate and the risk tier rule govern waivers as written), and the verifier floor never drops, so every unit is verified and only review depth scales. The unit tier is orthogonal to the task's risk tier (manager.md rule 3): the tier scales review depth by the shape of the work, the risk tier scales gate depth by the work's consequences, and neither implies the other, so a small change can still be high-risk, and a mechanical unit touching secrets, personal data, or remote writes keeps every risk tier requirement in force.
+
 ### Execution Sign-off Gate
 
 Agent-side planning approval never substitutes for the user's. Before the first execution dispatch of a task (the first worker dispatch in Delegating mode, the first work step beyond planning in Solo), the manager MUST present the plan to the user and wait for explicit go-ahead. The gate applies to every task in both modes regardless of size; a user-granted standing waiver is honored until revoked.
 
 The wait is a turn boundary, not a formality: presenting the plan MUST end the manager's turn, and the response carrying the presentation MUST NOT contain a worker dispatch, a unit worktree creation, or any other execution step. A dispatch issued in the same turn as the presentation is a conformance failure even when the plan itself is correct. The go-ahead MUST be an explicit user reply received after the presentation, unless a standing waiver is in force: the user's original task request never counts as sign-off, and the absence of an objection never counts as consent.
 
-The presented plan MUST be scaled to the task: at minimum the objective reading, the unit breakdown with territories, the execution order (which units run sequentially, in parallel, and in worktrees), and the verification approach; when the task admits multiple viable approaches, the plan MUST also present the alternatives and their tradeoffs. Any then-pending Significant questions MUST be batched into the same presentation per Question Batching Discipline.
+The presented plan MUST be scaled to the task: at minimum the objective reading, the unit breakdown with territories, each unit's tier, the execution order (which units run sequentially, in parallel, and in worktrees), and the verification approach; when the task admits multiple viable approaches, the plan MUST also present the alternatives and their tradeoffs. Any then-pending Significant questions MUST be batched into the same presentation per Question Batching Discipline.
 
 One sign-off covers its plan: the units it contains, their fix, verification, and review rounds, retries, restarts of parked tasks from that plan, and backfill dispatches. Genuinely new work (a task raised after completion, a deferred suggestion picked up, a new user request) gets its own gate. A material deviation from the approved plan (new territory, scope growth, a different execution shape) is a new plan and returns to the gate before dispatch.
 
