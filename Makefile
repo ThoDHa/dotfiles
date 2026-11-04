@@ -388,7 +388,11 @@ check: test
 
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
-# (test-links, test-rules) stay host-only in test.
+# (test-links, test-rules) stay host-only in test. The prerequisite chain
+# is the per-suite exit-gating loop itself: each suite target runs its own
+# runner script and make stops at the first nonzero exit, so no aggregate
+# exit code can mask an individual suite failure (the coding standards'
+# Test Suite Invocation rule).
 verify-inner: lint-corpus test-tasks test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
