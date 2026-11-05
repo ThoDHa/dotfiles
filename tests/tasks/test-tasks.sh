@@ -1788,6 +1788,28 @@ assert_contains "lint reports a stale sidecar on Completed as advisory" "$lint_o
 	"stale claim sidecar"
 if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "terminal-file drift keeps lint green"; else bad "terminal-file drift keeps lint green"; fi
 
+# The ~ superseded annotation is its own lint state, neither an unchecked
+# box nor a ticked lie: a ~-marked criterion never reports as unchecked
+# on a terminal file, and an open file mixing ticked and ~ boxes is not
+# reported as all-checked. Flipping the same line to a plain unticked
+# box must report, so the pair pins the distinction.
+f_lint_tilde="$lint_dir/current/20260601-0900-lint-tilde-probe.md"
+printf '%s\n' '# Task: Lint Tilde Probe' '' '**Created:** 2026-06-01 09:00' '**Status:** Completed' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2026-06-01 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '- ~ [ ] superseded criterion' '' '## Work Log' '' '## Execution Log' >"$f_lint_tilde"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a ~-marked criterion is not an unchecked box" "$lint_out" "lint-tilde-probe"
+sed -i 's/^\*\*Status:.*/**Status:** Triage/' "$f_lint_tilde"
+printf '%s\n' '- [x] done criterion' >>"$f_lint_tilde"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "ticked and ~ boxes on an open task are not all-checked" "$lint_out" "lint-tilde-probe"
+sed -i 's/^- ~ \[ \] superseded criterion$/- [ ] superseded criterion/' "$f_lint_tilde"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "the unticked box alone stays quiet on an open task" "$lint_out" "lint-tilde-probe"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lint_tilde"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "the same line unticked reports as unchecked" "$lint_out" \
+	"ADVISORY current/20260601-0900-lint-tilde-probe.md: Status Completed with 1 unchecked Success Criteria boxes"
+rm -f "$f_lint_tilde"
+
 # An orphan sidecar (no task file behind it) is board corruption: hard.
 printf 'ghost\n' >"$lint_dir/current/20240101-0900-ghost-task.md.claim"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
@@ -1973,20 +1995,50 @@ assert_contains "the refusal offers the --force route" "$gate_err" "close anyway
 assert_eq "the refused closure leaves the file byte-identical" "$gate_before" "$(cat "$f_gate")"
 refuse "close without --force exits nonzero" close "$f_gate"
 
-# A named child blocks even with every box checked; mentioning the
-# parent's own ID and an ID that names no board file must not. Completing
-# the child unlocks the parent.
+# A child declared on a dedicated dependency surface blocks even with
+# every box checked, while a Work Log prose citation of the same open
+# sibling closes clean (citation is not dependency): the dedicated
+# surfaces are the ## Dependencies section, **Dependencies:** field
+# lines, and **Child tasks:** declaration lines, with the parent's own ID
+# and an ID that names no board file ignored there. Completing the child
+# unlocks the parent.
 f_gate_child="$(t new --id CGT-2 --name "Gate Child Probe")"
-f_gate_parent="$(t new --id CGT-3 --name "Gate Parent Probe")"
-t edit "$f_gate_parent" --section Objective --append <<<"Depends on CGT-2; tracked here as CGT-3; NOPE-9 names no board task." >/dev/null
+f_gate_prose="$(t new --id CGT-3 --name "Gate Prose Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_prose"
+TASKS_TEST_CLOCK="2026-06-16 07:00" t log "$f_gate_prose" "work follows CGT-2; tracked here as CGT-3; NOPE-9 names no board task" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 07:30" t close "$f_gate_prose" >/dev/null
+assert_eq "a Work Log prose citation of an open sibling closes clean" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_prose")"
+f_gate_own="$(t new --id CGT-4 --name "Gate Own ID Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_own"
+t edit "$f_gate_own" --section Dependencies --append <<<"- CGT-4 is this file's own ID and NOPE-9 names no board task" >/dev/null
+t close "$f_gate_own" >/dev/null
+assert_eq "own ID and unknown tokens on a dependency surface are ignored" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_own")"
+f_gate_parent="$(t new --id CGT-5 --name "Gate Parent Probe")"
 sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_parent"
+t edit "$f_gate_parent" --section Dependencies --append <<<"- CGT-2" >/dev/null
 gate_err="$(t close "$f_gate_parent" 2>&1 >/dev/null || true)"
-assert_contains "close refuses an unfinished named child" "$gate_err" "unfinished named child task(s): CGT-2"
+assert_contains "close refuses a child declared in the Dependencies section" "$gate_err" "unfinished named child task(s): CGT-2"
 refuse "the child gate refuses before any write" close "$f_gate_parent"
+f_gate_field="$(t new --id CGT-6 --name "Gate Dependencies Field Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_field"
+t edit "$f_gate_field" --section Objective --append <<<"**Dependencies:** CGT-2" >/dev/null
+gate_err="$(t close "$f_gate_field" 2>&1 >/dev/null || true)"
+assert_contains "close refuses a child named on a Dependencies field line" "$gate_err" "unfinished named child task(s): CGT-2"
+f_gate_decl="$(t new --id CGT-7 --name "Gate Declaration Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_decl"
+t edit "$f_gate_decl" --section Objective --append <<<"**Child tasks:** CGT-2" >/dev/null
+gate_err="$(t close "$f_gate_decl" 2>&1 >/dev/null || true)"
+assert_contains "close refuses a declared child task" "$gate_err" "unfinished named child task(s): CGT-2"
+gate_out="$(TASKS_TEST_CLOCK="2026-06-16 07:45" t close "$f_gate_field" --force)"
+assert_contains "close --force closes past a declared child" "$gate_out" "closed $(basename "$f_gate_field")"
+assert_contains "the override note names the declared child" \
+	"$(awk '/^## Work Log/{f=1} f' "$f_gate_field")" "unfinished named child task(s): CGT-2"
 sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_child"
 TASKS_TEST_CLOCK="2026-06-16 08:00" t close "$f_gate_child" >/dev/null
 t close "$f_gate_parent" >/dev/null
-assert_eq "a parent closes once the named child is terminal" "Completed" \
+assert_eq "a parent closes once its declared child is terminal" "Completed" \
 	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_parent")"
 
 # The override: --force closes past the refusing gate and records the
@@ -2010,7 +2062,40 @@ sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_ready"
 t close "$f_gate_ready" --force >/dev/null
 assert_not_contains "close --force on a ready gate writes no override note" \
 	"$(awk '/^## Work Log/{f=1} f' "$f_gate_ready")" "closure gate overridden"
-rm -f "$f_gate" "$f_gate_child" "$f_gate_parent" "$f_gate_ready"
+rm -f "$f_gate" "$f_gate_child" "$f_gate_prose" "$f_gate_own" "$f_gate_parent" "$f_gate_field" "$f_gate_decl" "$f_gate_ready"
+t render >/dev/null
+
+echo "== close: the ~ superseded annotation resolves unticked criteria =="
+# A Success Criteria line marked '- ~ [ ] ' counts as resolved for the
+# closure gate: close proceeds without --force and its Work Log entry
+# lists the marked criteria as superseded, stamped at the closure clock
+# so the elapsed Duration spans first anchor to closure. Plain unticked
+# boxes still refuse, listing only themselves, and --force carries the
+# superseded fragment in the override note.
+f_tilde="$(t new --id TIL-1 --name "Superseded Annotation Probe")"
+TASKS_TEST_CLOCK="2026-06-16 06:00" t log "$f_tilde" "only anchor" >/dev/null
+sed -i 's/^- \[ \] TODO$/- ~ [ ] old criterion, superseded by the redesign/' "$f_tilde"
+TASKS_TEST_CLOCK="2026-06-16 06:30" t close "$f_tilde" >/dev/null
+assert_eq "a ~-marked file closes without --force" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_tilde")"
+tilde_log="$(awk '/^## Work Log/{f=1} f' "$f_tilde")"
+assert_contains "the close entry lists the superseded criteria" "$tilde_log" \
+	"close: 1 superseded Success Criteria: old criterion, superseded by the redesign"
+assert_eq "the superseded note anchor bounds the elapsed Duration" "30m" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_tilde")"
+f_tilde_mix="$(t new --id TIL-2 --name "Mixed Boxes Probe")"
+sed -i 's/^- \[ \] TODO$/- ~ [ ] superseded criterion/' "$f_tilde_mix"
+t edit "$f_tilde_mix" --section "Success Criteria" --append <<<"- [ ] still open criterion" >/dev/null
+gate_err="$(t close "$f_tilde_mix" 2>&1 >/dev/null || true)"
+assert_contains "mixed unticked and ~ criteria refuse" "$gate_err" "fails the closure gate"
+assert_contains "the refusal counts only the unticked box" "$gate_err" "unchecked Success Criteria boxes: 1"
+assert_not_contains "the refusal does not list the superseded criterion" "$gate_err" "superseded criterion"
+refuse "mixed boxes refuse without --force" close "$f_tilde_mix"
+TASKS_TEST_CLOCK="2026-06-16 07:00" t close "$f_tilde_mix" --force >/dev/null
+mix_log="$(awk '/^## Work Log/{f=1} f' "$f_tilde_mix")"
+assert_contains "the --force override lists the overridden finding" "$mix_log" "unchecked Success Criteria boxes: 1"
+assert_contains "the --force override lists the superseded criteria" "$mix_log" "superseded Success Criteria: superseded criterion"
+rm -f "$f_tilde" "$f_tilde_mix"
 t render >/dev/null
 
 echo "== archive: terminal tasks move to archive/ =="

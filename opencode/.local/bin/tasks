@@ -79,8 +79,12 @@ readonly STATUS_REASON_KEY="Status Reason"
 # list at its canonical slot (before its first present successor) and
 # refuses sections outside it; the template's planning sections live
 # between Success Criteria and Work Log, which is exactly the slot the
-# tasks-new scaffold omits.
-readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Work Log" "Execution Log")
+# tasks-new scaffold omits. Dependencies sits with the planning sections
+# (the template's subtask **Dependencies:** field has this section as its
+# standalone form) and is a dedicated dependency surface: the closure
+# gate's child detection reads it, so a declared child blocks closure
+# while prose citations elsewhere do not.
+readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Dependencies" "Work Log" "Execution Log")
 readonly TEMPLATE_SECTION_LEVEL=2
 
 # The sections every task file must carry for the lint pass: the new-task
@@ -253,8 +257,11 @@ Commands:
                                        (CLI clock), elapsed Duration (first-to-last Work
                                        Log anchors), Updated; drops Status Reason and
                                        any claim; render. The closure gate refuses when
-                                       Success Criteria carry unchecked boxes or a
-                                       named child task is unfinished; --force closes
+                                       Success Criteria carry unticked boxes (a
+                                       '- ~ [ ] ' line is a superseded annotation:
+                                       resolved for the gate, listed in the close Work
+                                       Log entry) or a child named on a dedicated
+                                       dependency surface is unfinished; --force closes
                                        anyway and records the override in the Work Log.
                                        --cancelled transitions to Cancelled instead: Status,
                                        Duration, Updated (no Completed stamp); keeps the
@@ -1627,43 +1634,102 @@ task_id_of_basename() {
 	return 0
 }
 
-# Closure gate findings for a task about to be completed: the count of
-# unchecked Success Criteria boxes (the same section-scoped, fence-blind
-# count the board lint records, so gate and lint can never disagree about
-# what "unchecked" means) and every named child task that is still open. A
-# child is named when a task-ID-shaped token anywhere in the file resolves
-# to a board file whose leading Task ID equals the token; the file's own ID
-# and tokens naming no board file are ignored, and a child blocks unless
-# its status is terminal (Completed/Cancelled). Appends one finding per
-# element to the named array; an empty array means the closure may proceed.
-closure_gate_findings() { # <array-name> <tasks_dir> <file>
-	# The nameref must not share its target's name: a `local -n findings`
-	# pointed at the caller's array of the same name is a circular self
-	# reference, and bash resolves it to an empty local instead of an error.
+# One awk pass over a task file, emitting the closure gate's records:
+# "U<TAB>n" (unticked Success Criteria boxes; the same section-scoped,
+# fence-blind count the board lint records, so gate and lint can never
+# disagree about what "unchecked" means), one "S<TAB>text" per ~-marked
+# superseded criterion in file order, and one "I<TAB>token" per task-ID-
+# shaped token carried by a dedicated dependency surface. The dedicated
+# surfaces are the ## Dependencies section body, the template's
+# **Dependencies:** field lines, and explicit **Child tasks:** declaration
+# lines; prose citations in Work Log entries, risk notes, and report
+# digests are not dependency surfaces and yield no tokens (citation is not
+# dependency).
+closure_gate_scan() { # <file>
+	awk '
+		/^## / {
+			sec = substr($0, 4)
+			sub(/[ \t\r]+$/, "", sec)
+			insc = (sec == "Success Criteria") ? 1 : 0
+			indeps = (sec == "Dependencies") ? 1 : 0
+			next
+		}
+		insc && /^- \[ \] / { unticked++ }
+		insc && /^- ~ \[ \] / {
+			text = substr($0, 9)
+			sub(/[ \t\r]+$/, "", text)
+			print "S\t" text
+		}
+		indeps || /^[ \t]*\*\*Dependencies:\*\*/ || /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/ {
+			rest = $0
+			while (match(rest, /[A-Za-z]+(-[0-9]+)+/)) {
+				print "I\t" substr(rest, RSTART, RLENGTH)
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+		}
+		END { print "U\t" unticked + 0 }
+	' "$1"
+}
+
+# The superseded-criteria fragment of a closure note: "<n> superseded
+# Success Criteria: <text>; <text>" from the gate scan's S records (file
+# order), empty when the file carries none. A ~-marked criterion counts
+# as resolved for the gate while staying visibly unfulfilled, so close
+# lists the marked criteria in its Work Log entry and the --force
+# override note carries the fragment alongside the overridden findings.
+superseded_note() { # <array-name>
+	local -n sup="$1"
+	((${#sup[@]} > 0)) || return 0
+	local joined
+	joined="$(IFS=';'; printf '%s' "${sup[*]}")"
+	printf '%d superseded Success Criteria: %s' "${#sup[@]}" "$joined"
+}
+
+# Closure gate findings for a task about to be completed: every refusal
+# finding, appended to the named findings array (an empty array means the
+# closure may proceed), plus the file's superseded criteria appended to
+# the named superseded array for the closure note. Two finding classes:
+# the unticked Success Criteria boxes count, and every child task declared
+# on a dedicated dependency surface (see closure_gate_scan) that is still
+# open. A declared child is matched when the token resolves to a board
+# file whose leading Task ID equals the token; the file's own ID and
+# tokens naming no board file are ignored, and a child blocks unless its
+# status is terminal (Completed/Cancelled).
+closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <file>
+	# The namerefs must not share their targets' names: a `local -n
+	# findings` pointed at the caller's array of the same name is a
+	# circular self reference, and bash resolves it to an empty local
+	# instead of an error.
 	local -n gate_findings="$1"
-	local tasks_dir="$2" file="$3"
-	local unchecked
-	unchecked="$(awk '
-		/^## / { sec = substr($0, 4); sub(/[ \t\r]+$/, "", sec); insc = (sec == "Success Criteria") ? 1 : 0; next }
-		insc && /^- \[ \] / { n++ }
-		END { if (n > 0) print n }
-	' "$file")"
-	[[ -n "$unchecked" ]] && gate_findings+=("unchecked Success Criteria boxes: $unchecked")
+	local -n gate_superseded="$2"
+	local tasks_dir="$3" file="$4"
+	local rec tag unticked=0
+	local -a child_tokens=()
+	while IFS=$'\t' read -r tag rec; do
+		case "$tag" in
+			U) unticked="$rec" ;;
+			S) gate_superseded+=("$rec") ;;
+			I) child_tokens+=("$rec") ;;
+		esac
+	done < <(closure_gate_scan "$file")
+	((unticked > 0)) && gate_findings+=("unchecked Success Criteria boxes: $unticked")
 	local own_id cand f child_id child_status child_rel
 	own_id="$(task_id_of_basename "${file##*/}")"
 	local -a children=()
-	while IFS= read -r cand; do
-		[[ -n "$cand" && "$cand" != "$own_id" ]] || continue
-		for f in "$tasks_dir/$CURRENT_DIR/$cand"*.md "$tasks_dir/$ARCHIVE_DIR/$cand"*.md; do
-			[[ -e "$f" ]] || continue
-			child_id="$(task_id_of_basename "${f##*/}")"
-			[[ "$child_id" == "$cand" ]] || continue
-			child_status="$(header_status "$f")"
-			is_terminal_status "$child_status" && continue
-			child_rel="${f#"$tasks_dir"/}"
-			children+=("$cand ($child_rel, Status: ${child_status:-missing})")
-		done
-	done < <(grep -oE '[A-Za-z]+(-[0-9]+)+' "$file" | sort -u)
+	if ((${#child_tokens[@]} > 0)); then
+		while IFS= read -r cand; do
+			[[ -n "$cand" && "$cand" != "$own_id" ]] || continue
+			for f in "$tasks_dir/$CURRENT_DIR/$cand"*.md "$tasks_dir/$ARCHIVE_DIR/$cand"*.md; do
+				[[ -e "$f" ]] || continue
+				child_id="$(task_id_of_basename "${f##*/}")"
+				[[ "$child_id" == "$cand" ]] || continue
+				child_status="$(header_status "$f")"
+				is_terminal_status "$child_status" && continue
+				child_rel="${f#"$tasks_dir"/}"
+				children+=("$cand ($child_rel, Status: ${child_status:-missing})")
+				done
+			done < <(printf '%s\n' "${child_tokens[@]}" | LC_ALL=C sort -u)
+	fi
 	((${#children[@]} > 0)) && gate_findings+=("unfinished named child task(s): ${children[*]}")
 	return 0
 }
@@ -1672,11 +1738,17 @@ closure_gate_findings() { # <array-name> <tasks_dir> <file>
 # from the CLI clock, as the one sanctioned write path for closure. Sets
 # Status, Completed, the elapsed Duration (first-to-last Work Log anchor,
 # N/A when they cannot produce a span), and Updated in one locked header
-# rewrite; drops the
-# Status Reason (the header contract carries it only under
-# Blocked/Cancelled) and releases any claim sidecar with its Owner field,
-# then renders. The assembler and dashboard formats are the locked write
-# path's own, so closure rows render byte-compatibly.
+# rewrite; drops the Status Reason (the header contract carries it only
+# under Blocked/Cancelled) and releases any claim sidecar with its Owner
+# field, then renders. The completion gate refuses before any write on
+# unticked Success Criteria (a ~-marked superseded annotation counts as
+# resolved) or an unfinished child declared on a dedicated dependency
+# surface; --force closes past it, recording the override (with any
+# superseded fragment) as a Work Log anchor, and a gate that passes on
+# ~-marked criteria alone records them as its own Work Log anchor, both
+# stamped at the closure clock so Duration derives after the append. The
+# assembler and dashboard formats are the locked write path's own, so
+# closure rows render byte-compatibly.
 cmd_close() {
 	local dir="" cancelled=0 force=0 args=()
 	while (($#)); do
@@ -1704,9 +1776,10 @@ cmd_close() {
 
 	local ts duration reason
 	ts="$(now)"
+	local -a superseded=()
 	if ((cancelled == 0)); then
 		local -a findings=()
-		closure_gate_findings findings "$tasks_dir" "$file"
+		closure_gate_findings findings superseded "$tasks_dir" "$file"
 		if ((${#findings[@]} > 0)); then
 			if ((force == 0)); then
 				local finding msg
@@ -1715,8 +1788,10 @@ cmd_close() {
 				msg+=$'\n'"close anyway with --force; the override is recorded in the Work Log"
 				die "$msg"
 			fi
-			local summary entry
+			local summary entry note
 			summary="$(IFS=';'; printf '%s' "${findings[*]}")"
+			note="$(superseded_note superseded)"
+			[[ -n "$note" ]] && summary+="; $note"
 			# The override note is a Work Log anchor stamped by the same clock
 			# the closure stamps, so deriving Duration after the append makes
 			# the stamped span read first anchor to closure, matching the
@@ -1724,6 +1799,14 @@ cmd_close() {
 			printf -v entry '### %s: close: closure gate overridden (--force): %s\n\n' "$ts" "$summary"
 			append_work_log_entry "$file" "$entry" "" "" \
 				|| die "close: failed to record the override in $(basename "$file")"
+		elif ((${#superseded[@]} > 0)); then
+			# A gate that passes on ~-marked criteria alone still records
+			# them: the same Work Log anchor pattern as the override note, so
+			# the closure stays visibly annotated in the file it closes.
+			local entry
+			printf -v entry '### %s: close: %s\n\n' "$ts" "$(superseded_note superseded)"
+			append_work_log_entry "$file" "$entry" "" "" \
+				|| die "close: failed to record the superseded criteria in $(basename "$file")"
 		fi
 	fi
 	duration="$(derive_duration "$file")"
@@ -2062,10 +2145,10 @@ LINT_ADVISORY_CAP=20
 
 # The lint scanner itself: one awk pass over every task file, emitting
 # tab-separated records the bash side classifies. S (file, status, archive
-# bit, have-status), O (file, Owner value), C (file, checked, unchecked
-# Success Criteria boxes), M (file, missing section), H (file, field,
-# value, expected), L (file, line, ../reports/ link target), T (file, line,
-# commit-hash candidate). Links inside code spans or fences and lines that
+# bit, have-status), O (file, Owner value), C (file, checked, unchecked,
+# superseded Success Criteria boxes), M (file, missing section), H (file,
+# field, value, expected), L (file, line, ../reports/ link target), T
+# (file, line, commit-hash candidate). Links inside code spans or fences and lines that
 # carry an explicit "dead link" annotation are skipped; hash lines that
 # document known drift ("unreachable", "superseded", "accepted-lost") are
 # skipped, so a recorded disposition never re-reports itself. Hash
@@ -2175,7 +2258,7 @@ lint_scan_files() { # tasks_dir files...
 			status = ""; owner = ""; reason = ""
 			have_status = 0; have_created = 0; have_updated = 0; have_completed = 0
 			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0; have_reason = 0
-			checked = 0; unchecked = 0
+			checked = 0; unchecked = 0; superseded = 0
 			inhdr = 1; insc = 0; fence = 0; fnr = 0
 			while ((getline line < (td fpath)) > 0) {
 				fnr++
@@ -2222,6 +2305,7 @@ lint_scan_files() { # tasks_dir files...
 				if (insc) {
 					if (line ~ /^- \[[xX]\] /) checked++
 					else if (line ~ /^- \[ \] /) unchecked++
+					else if (line ~ /^- ~ \[ \] /) superseded++
 				}
 				if (!fence) {
 					scan_links(line, rel, fnr)
@@ -2232,7 +2316,7 @@ lint_scan_files() { # tasks_dir files...
 			print "S" sep rel sep (have_status ? status : "-") sep archbit sep have_status
 			print "O" sep rel sep owner
 			print "R" sep rel sep reason
-			print "C" sep rel sep checked sep unchecked
+			print "C" sep rel sep checked sep unchecked sep superseded
 			for (s in reqsec) if (!(s in have_sec)) print "M" sep rel sep s
 			}
 		}
@@ -2272,7 +2356,7 @@ cmd_lint() {
 		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
 	fi
 
-	local -A status_of arch_of have_status_of checked_of unchecked_of owner_of reason_of findings_of
+	local -A status_of arch_of have_status_of checked_of unchecked_of superseded_of owner_of reason_of findings_of
 	local rec tag rel
 	for rec in "${scan_recs[@]}"; do
 		local -a parts=()
@@ -2282,7 +2366,7 @@ cmd_lint() {
 			S) status_of["$rel"]="${parts[2]:-}"; arch_of["$rel"]="${parts[3]:-}"; have_status_of["$rel"]="${parts[4]:-}" ;;
 			O) owner_of["$rel"]="${parts[2]:-}" ;;
 			R) reason_of["$rel"]="${parts[2]:-}" ;;
-			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}" ;;
+			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}"; superseded_of["$rel"]="${parts[4]:-}" ;;
 			M) findings_of["$rel"]+="M"$'\t'"${parts[2]:-}"$'\n' ;;
 			H) findings_of["$rel"]+="H"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\t'"${parts[4]:-}"$'\n' ;;
 			L) findings_of["$rel"]+="L"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
@@ -2354,9 +2438,14 @@ cmd_lint() {
 		fi
 		# Checkbox-vs-Status reconciliation lives in the body (Success
 		# Criteria), so it stays advisory everywhere per the Option-1 split.
+		# The ~ superseded annotation is its own state, neither unchecked
+		# nor ticked: it never reports as an unchecked box on a terminal
+		# file, and an open file whose boxes are all ticked reports only
+		# when no ~ annotation stands (the "all checked" message would
+		# otherwise be a ticked lie about the whole section).
 		if (( "${unchecked_of[$rel]}" > 0 )) && is_terminal_status "$st"; then
 			advisory_out+=("ADVISORY $rel: Status $st with ${unchecked_of[$rel]} unchecked Success Criteria boxes")
-		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 )) && ! is_terminal_status "$st"; then
+		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 && "${superseded_of[$rel]:-0}" == 0 )) && ! is_terminal_status "$st"; then
 			advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st (closure is 'tasks close')")
 		fi
 		# Archive hygiene: an archived file still carrying an open status is
