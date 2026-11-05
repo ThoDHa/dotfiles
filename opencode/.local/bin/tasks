@@ -235,6 +235,9 @@ Commands:
                                        findings. --verbose lists every advisory.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render.
+  archive [--dir DIR] <taskfile>       Move a terminal (Completed or Cancelled) task
+                                       from current/ into archive/, dropping any
+                                       claim sidecar; render.
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
                                        (CLI clock), Duration (Work Log anchors), Updated;
                                        drops Status Reason and any claim; render.
@@ -1415,6 +1418,46 @@ cmd_stamp() {
 	printf 'stamped %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
+# Archive a terminal task: move the file from current/ into archive/ under
+# the board lock, then render. Only Completed or Cancelled tasks archive
+# (the header contract's terminal statuses, the same rule the lint's
+# archive hygiene enforces); anything else is refused with the closure
+# path named. Any claim sidecar is dropped on the way: a terminal task
+# owns nothing, so a surviving sidecar is stale by definition. The move
+# refuses to overwrite an existing archive file (which also refuses
+# re-archiving an already-archived task), and the reports/ tree is
+# untouched: deposits are keyed by the task filename, whose basename the
+# move preserves, so every ../reports/ link keeps resolving from the new
+# directory.
+cmd_archive() {
+	local dir="" target=""
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "archive: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			*) target="$1"; shift ;;
+		esac
+	done
+	[[ -n "$target" ]] || die "archive: usage: tasks archive <taskfile>"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
+
+	local status
+	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	is_terminal_status "$status" \
+		|| die "archive: $(basename "$file") is not terminal (status: ${status:-missing}); only Completed or Cancelled tasks archive (use 'tasks close')"
+
+	local dest="$tasks_dir/$ARCHIVE_DIR/${file##*/}"
+	[[ -e "$dest" ]] && die "archive: refusing to overwrite existing archive file: $ARCHIVE_DIR/${dest##*/}"
+	rm -f "$file$CLAIM_SUFFIX"
+	mv "$file" "$dest" || die "archive: cannot move $(basename "$file") into $ARCHIVE_DIR (check permissions)"
+	render_unlocked "$tasks_dir"
+	printf 'archived %s\n' "${dest##*/}"
+}
+
 # Close a task: transition to Completed with the header timeline stamped
 # from the CLI clock, as the one sanctioned write path for closure. Sets
 # Status, Completed, Duration (Work Log anchors, N/A when they cannot
@@ -2179,6 +2222,7 @@ main() {
 		set) cmd_set "$@" ;;
 		claim) cmd_claim "$@" ;;
 		release) cmd_release "$@" ;;
+		archive) cmd_archive "$@" ;;
 		close) cmd_close "$@" ;;
 		stamp) cmd_stamp "$@" ;;
 		report) cmd_report "$@" ;;

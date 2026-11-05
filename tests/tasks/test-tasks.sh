@@ -1821,6 +1821,49 @@ assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
 refuse "close without a taskfile is refused" close
 refuse "stamp without a taskfile is refused" stamp
 
+echo "== archive: terminal tasks move to archive/ =="
+# The sanctioned alternative to the hand mv the battery's earlier archive
+# lane tests used: archive refuses open tasks, moves a terminal one under
+# the lock, drops any claim sidecar on the way, and re-renders. Reports
+# deposited before and after the move share one reports dir keyed by the
+# preserved basename, so every ../reports/ link keeps resolving.
+f_ar="$(t new --id ARC-1 --name "Archive Move Target")"
+ar_err="$(t archive "$f_ar" 2>&1 >/dev/null || true)"
+refuse "archive refuses a non-terminal task" archive "$f_ar"
+assert_contains "archive refusal names the closure path" "$ar_err" "use 'tasks close'"
+TASKS_TEST_CLOCK="2026-06-16 09:00" t close "$f_ar" >/dev/null
+printf 'pre-archive report body\n' | t report "$f_ar" --slug pre-archive --digest "before the move" >/dev/null
+ar_out="$(t archive "$f_ar")"
+assert_contains "archive reports the moved file" "$ar_out" "$(basename "$f_ar")"
+[[ -f "$TASKS_DIR/archive/$(basename "$f_ar")" ]] && ok "the archived file lives in archive/" || bad "the archived file lives in archive/"
+[[ ! -e "$f_ar" ]] && ok "current/ no longer carries the file" || bad "current/ no longer carries the file"
+[[ ! -f "$TASKS_DIR/archive/$(basename "$f_ar").claim" ]] && ok "no claim sidecar travels to archive/" || bad "no claim sidecar travels to archive/"
+arch_lane="$(awk '/^## Archive/{f=1} f' <"$DASH")"
+assert_contains "the Archive lane renders the moved task" "$arch_lane" "(./archive/$(basename "$f_ar"))"
+comp_lane="$(awk '/^## Completed/{f=1} /^## Archive/{f=0} f' <"$DASH")"
+assert_not_contains "the Completed lane drops the moved task" "$comp_lane" "Archive Move Target"
+printf 'post-archive report body\n' | t report "$TASKS_DIR/archive/$(basename "$f_ar")" --slug post-archive --digest "after the move" >/dev/null
+[[ -f "$TASKS_DIR/reports/$(basename "$f_ar")/02-post-archive.md" ]] \
+	&& ok "post-archive report deposits under the same reports dir" || bad "post-archive report deposits under the same reports dir"
+assert_contains "the archived file links the post-archive report" \
+	"$(cat "$TASKS_DIR/archive/$(basename "$f_ar")")" "(../reports/$(basename "$f_ar")/02-post-archive.md)"
+refuse "archive refuses an already-archived task" archive "$TASKS_DIR/archive/$(basename "$f_ar")"
+refuse "archive refuses an unknown task file" archive NOPE-9.md
+refuse "archive without a taskfile is refused" archive
+f_ar2="$(t new --id ARC-2 --name "Archive Claim Drop")"
+t close "$f_ar2" >/dev/null
+printf 'sess-ghost\n' >"$f_ar2.claim"
+t archive "$f_ar2" >/dev/null
+[[ ! -f "$TASKS_DIR/archive/$(basename "$f_ar2").claim" ]] && ok "archive drops a stale claim sidecar" || bad "archive drops a stale claim sidecar"
+f_ar3="$(t new --id ARC-3 --name "Archive Cancelled Target")"
+t set "$f_ar3" Status=Cancelled "Status Reason=archive probe" >/dev/null
+t archive "$f_ar3" >/dev/null
+[[ -f "$TASKS_DIR/archive/$(basename "$f_ar3")" ]] && ok "a Cancelled task archives" || bad "a Cancelled task archives"
+assert_contains "the Archive lane renders the cancelled task too" "$(awk '/^## Archive/{f=1} f' <"$DASH")" "Archive Cancelled Target"
+rm -f "$TASKS_DIR/archive/"ARC-*.md
+rm -rf "$TASKS_DIR/reports/$(basename "$f_ar")"
+t render >/dev/null
+
  echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
