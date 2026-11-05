@@ -215,9 +215,11 @@ Commands:
   init [--dir DIR]                     Scaffold a .tasks/ directory and empty board.
   render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
-                                       opts: --status S --priority P --dir DIR;
-                                       --force admits a deliberate task ID reuse
-                                       (IDs are unique across current/ and archive/)
+                                       opts: --status S (Triage or Ready; a test board
+                                       pinning the clock seam may set deeper states)
+                                       --priority P --dir DIR; --force admits a
+                                       deliberate task ID reuse (IDs are unique across
+                                       current/ and archive/)
   set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
                                        CLI-owned timeline fields (Created, Updated,
                                        Completed, Duration, Latest Update) refuse
@@ -1040,6 +1042,18 @@ cmd_new() {
 		|| die "new: --name must be a single line"
 	valid_task_id "$id" || die "new: invalid task ID: $id (expected PREFIX-N, hierarchically PREFIX-N-N)"
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
+	# Creation admits only the two intake states: deeper states are
+	# lifecycle positions reachable through set/claim/release/close, and a
+	# directly created Blocked file would skip the reason coupling while a
+	# directly created terminal file would carry no closure stamps. Test
+	# boards pinning the clock seam (TASKS_TEST_CLOCK with TASKS_DIR) admit
+	# the full vocabulary for fixtures, mirroring the set guard.
+	if [[ -z "$TEST_CLOCK" ]]; then
+		case "$status" in
+			"$STATUS_TRIAGE"|"$STATUS_READY") ;;
+			*) die "new: --status accepts only $STATUS_TRIAGE or $STATUS_READY (got: $status; deeper states are lifecycle positions reachable through set/claim/release/close)" ;;
+		esac
+	fi
 	valid_priority "$priority" || die "new: unknown priority: $priority (valid: $PRIORITY_VALUES)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"

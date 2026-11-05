@@ -410,6 +410,36 @@ assert_contains "multi-line refusal states the single-line contract" "$nl_err" "
 refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
 assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
 
+echo "== new: --status is restricted to Triage and Ready outside the test seam =="
+# Creation admits only the two intake states: deeper states are lifecycle
+# positions (set/claim/release/close), a directly created Blocked file
+# would skip the reason coupling, and a directly created terminal file
+# would carry no closure stamps. Probes run with the clock seam unset, in
+# production conditions, via env -u like the CLI-owned-fields guard above;
+# the battery's own fixtures (created under the exported TASKS_TEST_CLOCK)
+# keep the full vocabulary through the seam.
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-1 --name "IP Status Probe" --status "In Progress" 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status In Progress outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+assert_contains "the refusal names the lifecycle route" "$nst_err" "set/claim/release/close"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-2 --name "Blocked Status Probe" --status Blocked 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Blocked outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-3 --name "Cancelled Status Probe" --status Cancelled 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Cancelled outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-4 --name "Completed Status Probe" --status Completed 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Completed outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+assert_eq "the refused creations left no files behind" "0" "$(ls "$TASKS_DIR/current" | grep -c '^NST-[1-4]-')"
+if env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-1 --name "IP Status Probe" --status "In Progress" </dev/null >/dev/null 2>&1; then bad "new --status In Progress exits nonzero outside the seam"; else ok "new --status In Progress exits nonzero outside the seam"; fi
+nst_f="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-5 --name "Ready Status Probe" --status Ready)"
+assert_contains "new accepts --status Ready outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_f")" "Ready"
+nst_t="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-6 --name "Triage Status Probe" --status Triage)"
+assert_contains "new accepts --status Triage outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_t")" "Triage"
+nst_d="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-7 --name "Default Status Probe")"
+assert_contains "the default status stays Triage outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_d")" "Triage"
+nst_s="$(t new --id NST-8 --name "Seam Status Probe" --status "In Progress")"
+assert_contains "the seam admits deeper states for fixtures" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_s")" "In Progress"
+rm -f "$nst_f" "$nst_t" "$nst_d" "$nst_s"
+t render >/dev/null
+
 echo "== set: Owner is claim-owned =="
 # Ownership never moves through set: the Owner field is written by claim
 # (atomically, alongside its O_EXCL sidecar) and cleared by release. The
