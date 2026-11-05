@@ -93,21 +93,57 @@ readonly TEMPLATE_SECTION_LEVEL=2
 # so linting their absence would fire on every lean file.
 readonly -a LINT_REQUIRED_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Work Log" "Execution Log")
 
-# Shared awk function source: parse the current line's markdown heading
-# level (0 when the line is not a level-1..6 heading followed by a space),
-# setting HTEXT to the heading text with trailing whitespace stripped.
-# Concatenated ahead of the program body in the three heading-delimited
-# passes below (section_level, replace_section_body, insert_section_body),
+# Shared awk function source: parse a line's markdown heading level (0
+# when it is not a level-1..6 heading followed by a space), setting HTEXT
+# to the heading text with trailing whitespace stripped. The line arrives
+# as the argument (record-driven passes pass $0; getline-driven loops
+# pass the variable getline filled, which never touches $0). Concatenated
+# ahead of the program body in every heading-delimited pass (section_level,
+# replace_section_body, insert_section_body, the closure gate's scan, and
+# the board lint's scanner, the latter two also via AWK_CRITERIA_COUNTER),
 # so the heading parser exists exactly once.
-readonly AWK_HEADING_LEVEL='		function heading_level(    h) {
+readonly AWK_HEADING_LEVEL='		function heading_level(text,    h) {
 			HTEXT = ""
-			if (substr($0, 1, 1) != "#") return 0
+			if (substr(text, 1, 1) != "#") return 0
 			h = 0
-			while (substr($0, h + 1, 1) == "#") h++
-			if (h > 6 || substr($0, h + 1, 1) != " ") return 0
-			HTEXT = substr($0, h + 2)
+			while (substr(text, h + 1, 1) == "#") h++
+			if (h > 6 || substr(text, h + 1, 1) != " ") return 0
+			HTEXT = substr(text, h + 2)
 			sub(/[ \t\r]+$/, "", HTEXT)
 			return h
+		}
+'
+
+# Shared awk function source: the Success-Criteria counter both the
+# closure gate and the board lint run, so the two can never drift apart
+# on what counts as checked, unchecked, or superseded. Requires
+# AWK_HEADING_LEVEL concatenated ahead of it: track_criteria_section
+# builds on heading_level, whose parser and trailing-whitespace trim are
+# the single heading-reading implementation. Call track_criteria_section
+# on heading lines; on a level-2 heading it sets SECNAME to the trimmed
+# heading text and INSC to whether that heading opens the Success
+# Criteria section, leaving both untouched on any other line. criteria_box
+# classifies a Success Criteria body line as "checked" (- [x] / - [X]),
+# "unchecked" (- [ ]), or "superseded" (- ~ [ ], the resolved-but-
+# unfulfilled annotation), returning "" for everything else;
+# superseded_text strips the exact marker prefix criteria_box matched.
+readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
+			lvl = heading_level(line)
+			if (lvl != 2) { SECNAME = ""; return }
+			SECNAME = HTEXT
+			INSC = (SECNAME == "Success Criteria") ? 1 : 0
+		}
+		function criteria_box(line) {
+			if (!INSC) return ""
+			if (line ~ /^- \[[xX]\] /) return "checked"
+			if (line ~ /^- \[ \] /) return "unchecked"
+			if (line ~ /^- ~ \[ \] /) return "superseded"
+			return ""
+		}
+		function superseded_text(line,    text) {
+			text = substr(line, 9)
+			sub(/[ \t\r]+$/, "", text)
+			return text
 		}
 '
 
@@ -839,7 +875,7 @@ section_level() {
 	SECTION="$2" awk "$AWK_HEADING_LEVEL"'
 		BEGIN { section = ENVIRON["SECTION"]; found = 0 }
 		{
-			level = heading_level()
+			level = heading_level($0)
 			if (level >= 2 && HTEXT == section) { print level; found = 1; exit }
 		}
 		END { exit found ? 0 : 1 }
@@ -908,7 +944,7 @@ insert_section_body() {
 		}
 		{
 			if (!inserted && !atend) {
-				level = heading_level()
+				level = heading_level($0)
 				if (level >= 2 && HTEXT == anchor) {
 					emit_section()
 				}
@@ -953,7 +989,7 @@ replace_section_body() {
 		}
 		{
 			if (state == 2) { print; next }
-			level = heading_level()
+			level = heading_level($0)
 			if (state == 0) {
 				if (level >= 2 && HTEXT == section) {
 					found = 1; sec_level = level; state = 1; fresh = 1
@@ -1635,36 +1671,32 @@ task_id_of_basename() {
 }
 
 # One awk pass over a task file, emitting the closure gate's records:
-# "U<TAB>n" (unticked Success Criteria boxes; the same section-scoped,
-# fence-blind count the board lint records, so gate and lint can never
-# disagree about what "unchecked" means), one "S<TAB>text" per ~-marked
-# superseded criterion in file order, and one "I<TAB>token" per task-ID-
-# shaped token carried by a dedicated dependency surface. The dedicated
-# surfaces are the ## Dependencies section body, the template's
-# **Dependencies:** field lines, and explicit **Child tasks:** declaration
-# lines; prose citations in Work Log entries, risk notes, and report
-# digests are not dependency surfaces and yield no tokens (citation is not
-# dependency).
+# "U<TAB>n" (unticked Success Criteria boxes, counted by the shared
+# criteria counter AWK_CRITERIA_COUNTER, the exact code the board lint's
+# C record runs), one "S<TAB>text" per ~-marked superseded criterion in
+# file order, and one "I<TAB>token" per task-ID-shaped token carried by a
+# dedicated dependency surface. The dedicated surfaces are the ##
+# Dependencies section body, the template's **Dependencies:** field
+# lines, and explicit **Child tasks:** declaration lines; prose citations
+# in Work Log entries, risk notes, and report digests are not dependency
+# surfaces and yield no tokens (citation is not dependency).
 closure_gate_scan() { # <file>
-	awk '
+	awk "$AWK_HEADING_LEVEL$AWK_CRITERIA_COUNTER"'
 		/^## / {
-			sec = substr($0, 4)
-			sub(/[ \t\r]+$/, "", sec)
-			insc = (sec == "Success Criteria") ? 1 : 0
-			indeps = (sec == "Dependencies") ? 1 : 0
+			track_criteria_section($0)
+			indeps = (SECNAME == "Dependencies") ? 1 : 0
 			next
 		}
-		insc && /^- \[ \] / { unticked++ }
-		insc && /^- ~ \[ \] / {
-			text = substr($0, 9)
-			sub(/[ \t\r]+$/, "", text)
-			print "S\t" text
-		}
-		indeps || /^[ \t]*\*\*Dependencies:\*\*/ || /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/ {
-			rest = $0
-			while (match(rest, /[A-Za-z]+(-[0-9]+)+/)) {
-				print "I\t" substr(rest, RSTART, RLENGTH)
-				rest = substr(rest, RSTART + RLENGTH)
+		{
+			box = criteria_box($0)
+			if (box == "unchecked") unticked++
+			else if (box == "superseded") print "S\t" superseded_text($0)
+			if (indeps || $0 ~ /^[ \t]*\*\*Dependencies:\*\*/ || $0 ~ /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/) {
+				rest = $0
+				while (match(rest, /[A-Za-z]+(-[0-9]+)+/)) {
+					print "I\t" substr(rest, RSTART, RLENGTH)
+					rest = substr(rest, RSTART + RLENGTH)
+				}
 			}
 		}
 		END { print "U\t" unticked + 0 }
@@ -2146,9 +2178,11 @@ LINT_ADVISORY_CAP=20
 # The lint scanner itself: one awk pass over every task file, emitting
 # tab-separated records the bash side classifies. S (file, status, archive
 # bit, have-status), O (file, Owner value), C (file, checked, unchecked,
-# superseded Success Criteria boxes), M (file, missing section), H (file,
-# field, value, expected), L (file, line, ../reports/ link target), T
-# (file, line, commit-hash candidate). Links inside code spans or fences and lines that
+# superseded Success Criteria boxes, counted by the shared criteria
+# counter AWK_CRITERIA_COUNTER the closure gate also runs), M (file,
+# missing section), H (file, field, value, expected), L (file, line,
+# ../reports/ link target), T (file, line, commit-hash candidate). Links
+# inside code spans or fences and lines that
 # carry an explicit "dead link" annotation are skipped; hash lines that
 # document known drift ("unreachable", "superseded", "accepted-lost") are
 # skipped, so a recorded disposition never re-reports itself. Hash
@@ -2164,7 +2198,7 @@ lint_scan_files() { # tasks_dir files...
 	local tasks_dir="$1"; shift
 	AWK_TASKS_DIR="$tasks_dir" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
 		AWK_LINT_SECTIONS="$(printf '%s\034' "${LINT_REQUIRED_SECTIONS[@]}")" \
-		awk '
+		awk "$AWK_HEADING_LEVEL$AWK_CRITERIA_COUNTER"'
 		BEGIN {
 			sep = "\t"
 			td = ENVIRON["AWK_TASKS_DIR"] "/"
@@ -2259,16 +2293,14 @@ lint_scan_files() { # tasks_dir files...
 			have_status = 0; have_created = 0; have_updated = 0; have_completed = 0
 			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0; have_reason = 0
 			checked = 0; unchecked = 0; superseded = 0
-			inhdr = 1; insc = 0; fence = 0; fnr = 0
+			inhdr = 1; INSC = 0; SECNAME = ""; fence = 0; fnr = 0
 			while ((getline line < (td fpath)) > 0) {
 				fnr++
 				if (line ~ /^```/) { fence = !fence; continue }
-				if (line ~ /^## /) {
+				track_criteria_section(line)
+				if (SECNAME != "") {
 					inhdr = 0
-					sec = substr(line, 4)
-					sub(/[ \t\r]+$/, "", sec)
-					if (sec in reqsec) have_sec[sec] = 1
-					insc = (sec == "Success Criteria") ? 1 : 0
+					if (SECNAME in reqsec) have_sec[SECNAME] = 1
 					continue
 				}
 				if (inhdr) {
@@ -2302,11 +2334,10 @@ lint_scan_files() { # tasks_dir files...
 						have_reason = 1
 					}
 				}
-				if (insc) {
-					if (line ~ /^- \[[xX]\] /) checked++
-					else if (line ~ /^- \[ \] /) unchecked++
-					else if (line ~ /^- ~ \[ \] /) superseded++
-				}
+				box = criteria_box(line)
+				if (box == "checked") checked++
+				else if (box == "unchecked") unchecked++
+				else if (box == "superseded") superseded++
 				if (!fence) {
 					scan_links(line, rel, fnr)
 					scan_hashes(line, rel, fnr)
