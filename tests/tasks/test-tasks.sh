@@ -1895,6 +1895,48 @@ assert_eq "the refused --cancelled keeps Updated untouched" "$cc_upd_before" "$(
 rm -f "$f_cc"
 t render >/dev/null
 
+echo "== stamp --repair: malformed CLI-owned fields get a CLI route back =="
+# The MGR-11 class: a malformed Latest Update left a file no CLI write
+# could repair (log refreshes Updated but not Latest Update, set refuses
+# the field). --repair re-stamps the stamped timeline in one locked
+# write: Updated and Duration from clock and anchors, Latest Update as a
+# dated line naming the tool that wrote it, Completed per the file's
+# status (deleted on an open task, where absence is canonical).
+f_rpr="$(t new --id RPR-1 --name "Repair Probe Target")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpr" "anchor one" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:30" t log "$f_rpr" "anchor two" >/dev/null
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** hand-mangled garbage/' "$f_rpr"
+sed -i 's/^\*\*Updated:.*/**Updated:** 2026-06-15/' "$f_rpr"
+sed -i '/^\*\*Updated:/a **Completed:** 2026-06-15 00:00' "$f_rpr"
+rep_out="$(TASKS_TEST_CLOCK="2026-06-16 08:00" t stamp "$f_rpr" --repair)"
+assert_contains "repair reports the repaired file" "$rep_out" "repaired $(basename "$f_rpr")"
+assert_eq "repair re-stamps Updated to the clock" "2026-06-16 08:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rpr")"
+assert_contains "repair rewrites Latest Update as a dated repair line" \
+	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rpr")" \
+	"[2026-06-16 08:00] CLI-owned header repaired via 'tasks stamp --repair'"
+assert_eq "repair derives Duration from the anchors" "30m" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_rpr")"
+assert_eq "repair on an open task deletes the stray Completed field" "0" "$(grep -c '^\*\*Completed:\*\*' "$f_rpr")"
+assert_eq "repair keeps the canonical header order" \
+	"$(printf '%s\n' Created Status Priority Progress Owner Updated Duration "Latest Update")" \
+	"$(awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_rpr")"
+refuse "plain stamp still refuses an open task" stamp "$f_rpr"
+rm -f "$f_rpr"
+
+f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
+TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpc" "second anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:00" t close "$f_rpc" >/dev/null
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** broken//' "$f_rpc"
+sed -i 's/^\*\*Completed:.*/**Completed:** garbage/' "$f_rpc"
+TASKS_TEST_CLOCK="2026-06-17 07:00" t stamp "$f_rpc" --repair >/dev/null
+assert_eq "repair on a Completed task re-stamps Completed" "2026-06-17 07:00" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_rpc")"
+assert_contains "repair on a Completed task fixes Latest Update too" \
+	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rpc")" "repaired via 'tasks stamp --repair'"
+assert_eq "repair on a Completed task keeps Duration derived" "1h" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_rpc")"
+refuse "repair without a taskfile is refused" stamp --repair
+rm -f "$f_rpc"
+t render >/dev/null
+
  echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \

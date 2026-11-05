@@ -247,6 +247,10 @@ Commands:
   stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
                                        Completed task from the CLI clock and Work Log
                                        anchors; render.
+                                       --repair re-stamps the stamped timeline fields
+                                       (Updated, Duration, Completed, Latest Update)
+                                       on any task: the sanctioned repair for
+                                       malformed CLI-owned header fields.
   help                                 Show this help.
 
 Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
@@ -1390,15 +1394,16 @@ derive_duration() {
 # hand-stamps and re-closure bumps; closing a task that is not Completed
 # belongs to `tasks close`.
 cmd_stamp() {
-	local dir="" args=()
+	local dir="" repair=0 args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "stamp: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
+			--repair) repair=1; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "stamp: usage: tasks stamp <taskfile>"
+	((${#args[@]} == 1)) || die "stamp: usage: tasks stamp <taskfile> [--repair]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
@@ -1407,12 +1412,39 @@ cmd_stamp() {
 
 	local status
 	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
-	[[ "$status" == "$STATUS_COMPLETED" ]] \
-		|| die "stamp: $(basename "$file") is not Completed (status: ${status:-missing}); use 'tasks close' to close it"
+	if ((repair == 0)); then
+		[[ "$status" == "$STATUS_COMPLETED" ]] \
+			|| die "stamp: $(basename "$file") is not Completed (status: ${status:-missing}); use 'tasks close' to close it"
+	fi
 
 	local ts duration
 	ts="$(now)"
 	duration="$(derive_duration "$file")"
+	if ((repair == 1)); then
+		# Repair path for malformed CLI-owned header fields: a hand-mangled
+		# Latest Update or Updated left a file with no CLI route back to
+		# canonical shape (log refreshes Updated but not Latest Update, and
+		# set refuses the fields), so repair re-stamps the whole stamped
+		# timeline in one locked write. Completed follows the file's status:
+		# re-stamped from the clock on a Completed file, deleted on an open
+		# one, where absence is canonical. Created is left alone: its true
+		# value is not reconstructible, and replacing it with the clock would
+		# be a worse drift than the one being repaired.
+		local -a writes=(
+			"Updated"$'\034'"**Updated:** $ts"
+			"Duration"$'\034'"**Duration:** $duration"
+			"Latest Update"$'\034'"**Latest Update:** [$ts] CLI-owned header repaired via 'tasks stamp --repair'"
+		)
+		if [[ "$status" == "$STATUS_COMPLETED" ]]; then
+			writes+=("Completed"$'\034'"**Completed:** $ts")
+		else
+			writes+=("Completed"$'\034')
+		fi
+		write_header_fields "$file" ${writes[@]+"${writes[@]}"}
+		render_unlocked "$tasks_dir"
+		printf 'repaired %s (Updated %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+		return
+	fi
 	write_header_fields "$file" \
 		"Completed"$'\034'"**Completed:** $ts" \
 		"Duration"$'\034'"**Duration:** $duration" \
