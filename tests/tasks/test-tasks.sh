@@ -1756,6 +1756,27 @@ lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags an orphan claim sidecar as hard" "$lint_out" "claim sidecar with no task file"
 rm -f "$lint_dir/current/20240101-0900-ghost-task.md.claim"
 
+# Status Reason coupling: the header contract ties the reason to
+# Blocked/Cancelled, so a Cancelled header without one is hard on an
+# open task and advisory once archived. The stale-sidecar fixture above
+# is dropped first: the archived leg must carry only the reason finding,
+# and a stranded current/ sidecar would read as a harder orphan.
+rm -f "$f_lp.claim"
+sed -i 's/^\*\*Status:.*/**Status:** Cancelled/' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags Cancelled without a Status Reason as hard" "$lint_out" \
+	"HARD current/LP-1-"
+assert_contains "the Cancelled coupling finding names the missing reason" "$lint_out" \
+	"Status Cancelled requires a Status Reason"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then bad "lint exits 1 on Cancelled without a reason"; else ok "lint exits 1 on Cancelled without a reason"; fi
+mv "$f_lp" "$lint_dir/archive/$(basename "$f_lp")"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "archived Cancelled without a reason is advisory" "$lint_out" \
+	"ADVISORY archive/$(basename "$f_lp"): Status Cancelled requires a Status Reason"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "archived Cancelled drift keeps lint green"; else bad "archived Cancelled drift keeps lint green"; fi
+mv "$lint_dir/archive/$(basename "$f_lp")" "$f_lp"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lp"
+
 # Archive hygiene: archiving an open task is advisory.
 printf '%s\n' '# Task: Archived Open' '' '**Created:** 2024-01-01 09:01' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2024-01-01 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '## Execution Log' >"$lint_dir/archive/20240101-0901-archived-open.md"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
@@ -1959,6 +1980,23 @@ refuse "close --cancelled refuses a Completed task" close "$f_cl" --cancelled
 cc_upd_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
 refuse "refused --cancelled calls leave no trace" close "$f_cc" --cancelled
 assert_eq "the refused --cancelled keeps Updated untouched" "$cc_upd_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+
+# The coupling close --cancelled enforces: cancelling a task that never
+# carried a Status Reason is refused before any write (the header
+# contract ties the reason to Blocked/Cancelled), naming the sanctioned
+# route; a refused call leaves the file byte-identical. The reason reuse
+# on the success path is pinned above (waiting on requeue survives).
+f_cn="$(t new --id CCX-2 --name "Cancelled Reason Refusal Probe")"
+cn_before="$(cat "$f_cn")"
+cn_err="$(t close "$f_cn" --cancelled 2>&1 >/dev/null || true)"
+assert_contains "close --cancelled refuses a task with no Status Reason" "$cn_err" \
+	"requires a non-empty Status Reason"
+assert_contains "the refusal names the sanctioned route" "$cn_err" \
+	"set Status=Blocked with one first"
+refuse "close --cancelled without a reason exits nonzero" close "$f_cn" --cancelled
+assert_eq "the refused cancellation leaves the file byte-identical" "$cn_before" "$(cat "$f_cn")"
+rm -f "$f_cn"
+t render >/dev/null
 rm -f "$f_cc"
 t render >/dev/null
 
@@ -1988,6 +2026,39 @@ assert_eq "repair keeps the canonical header order" \
 	"$(awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_rpr")"
 refuse "plain stamp still refuses an open task" stamp "$f_rpr"
 rm -f "$f_rpr"
+
+# Repair is scoped to the fields that actually fail their canonical
+# shape: a repair triggered by a mangled Updated leaves a valid
+# hand-curated Latest Update byte-identical, a mangled Duration re-derives
+# alone, and a missing Completed re-stamps alone, each leaving the
+# well-formed siblings untouched; a clean file reports nothing to repair
+# without a write.
+f_sc="$(t new --id RPR-2 --name "Repair Scope Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_sc" "anchor one" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_sc" "anchor two" >/dev/null
+sed -i 's/^\*\*Updated:.*/**Updated:** not a stamp/' "$f_sc"
+sc_lu="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_sc")"
+sc_out="$(TASKS_TEST_CLOCK="2026-06-16 08:00" t stamp "$f_sc" --repair)"
+assert_contains "scoped repair names only the fields it rewrote" "$sc_out" "(Updated Duration)"
+assert_eq "a repair triggered by a mangled Updated re-stamps it" "2026-06-16 08:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_sc")"
+assert_eq "a valid Latest Update survives the repair untouched" "$sc_lu" "$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_sc")"
+TASKS_TEST_CLOCK="2026-06-16 09:00" t close "$f_sc" >/dev/null
+sed -i 's/^\*\*Duration:.*/**Duration:** garbage/' "$f_sc"
+sc_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t stamp "$f_sc" --repair)"
+assert_contains "a repair triggered by a mangled Duration names only it" "$sc_out" "(Duration)"
+assert_eq "a mangled Duration re-derives from the anchors" "2h" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_sc")"
+assert_eq "the Duration repair leaves the close stamps alone" "2026-06-16 09:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_sc")"
+sc_upd="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_sc")"
+sed -i '/^\*\*Completed:/d' "$f_sc"
+sc_out="$(TASKS_TEST_CLOCK="2026-06-16 11:00" t stamp "$f_sc" --repair)"
+assert_contains "a missing Completed on a Completed task is the only repair" "$sc_out" "(Completed)"
+assert_eq "repair re-stamps the missing Completed from the clock" "2026-06-16 11:00" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_sc")"
+assert_eq "the Completed re-stamp leaves a valid Updated untouched" "$sc_upd" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_sc")"
+sc_before="$(cat "$f_sc")"
+sc_out="$(t stamp "$f_sc" --repair)"
+assert_contains "a clean file reports nothing to repair" "$sc_out" "nothing to repair in $(basename "$f_sc")"
+assert_eq "the nothing-to-repair pass leaves the file byte-identical" "$sc_before" "$(cat "$f_sc")"
+rm -f "$f_sc"
 
 f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
