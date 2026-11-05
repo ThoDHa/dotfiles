@@ -50,6 +50,21 @@ for lane in "## Triage" "## Ready" "## In Progress" "## Blocked/Cancelled" "## C
 	assert_contains "board has lane $lane" "$board" "$lane"
 done
 
+echo "== init: idempotent on an existing board (G14 pin) =="
+# Running init on a live board must scaffold nothing away and rewrite
+# nothing: both subdirs still exist, existing task files survive, and the
+# derived dashboard comes back byte-identical (init only ever renders,
+# and render is a pure function of the task files).
+f_idem="$(t new --id IDM-1 --name "Idempotent Init Target")"
+idem_board="$(cat "$DASH")"
+idem_out="$(t init)"
+assert_eq "init on an existing board reports the same directory" "$TASKS_DIR" "$idem_out"
+[[ -d "$TASKS_DIR/current" && -d "$TASKS_DIR/archive" ]] && ok "init keeps both subdirs" || bad "init keeps both subdirs"
+[[ -f "$f_idem" ]] && ok "init leaves existing task files in place" || bad "init leaves existing task files in place"
+assert_eq "init on an existing board leaves the dashboard byte-identical" "$idem_board" "$(cat "$DASH")"
+rm -f "$f_idem"
+t render >/dev/null
+
 echo "== new =="
 f_ip="$(t new --id API-1 --name "Refactor the Auth Flow" --status "In Progress" --priority High)"
 f_tr="$(t new --id API-2 --name "Add Rate Limiting" --priority Low)"
@@ -152,6 +167,21 @@ owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
 assert_eq "release leaves the Owner field present and empty" "1" \
 	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
+
+echo "== release: any session may release a foreign claim (G15 pin) =="
+# Release is a cooperative unlock, not an ownership transfer: the
+# stale-sidecar recovery path depends on any board-writer session being
+# able to release a claim left behind by a dead session, so release
+# deliberately performs no owner identity check. Pinned here as intent.
+f_xo="$(t new --id XOWN-1 --name "Cross Owner Release Target")"
+t claim "$f_xo" --owner session-alice >/dev/null
+assert_contains "claim sets the owning session" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
+TASKS_SESSION=session-bob t release "$f_xo" >/dev/null
+[[ ! -f "$f_xo.claim" ]] && ok "a foreign session's release removes the sidecar" || bad "a foreign session's release removes the sidecar"
+owner_cross="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo" || true)"
+assert_eq "a foreign session's release clears Owner" "" "${owner_cross:-}"
+rm -f "$f_xo"
+t render >/dev/null
 
 echo "== blocked lane =="
 t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
@@ -305,6 +335,130 @@ refuse "new rejects an unknown status" new --id API-5 --name "Bogus Status Task"
 if t set "$f_cs" Status=Blocked "Status Reason=enum probe" >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
 t set "$f_cs" Status=Triage >/dev/null
 
+echo "== priority enum validation =="
+# The Priority vocabulary is pinned to the corpus's own set (Low, Medium,
+# High); new and set must reject anything else before any write lands.
+f_pri="$(t new --id PRI-1 --name "Priority Enum Target")"
+pri_before="$(cat "$f_pri")"
+pri_err="$(t new --id PRI-2 --name "Bad Priority" --priority Critical 2>&1 >/dev/null || true)"
+refuse "new rejects an unknown priority" new --id PRI-2 --name "Bad Priority" --priority Critical
+assert_contains "new's priority refusal names the vocabulary" "$pri_err" "valid: Low, Medium, High"
+pri_err="$(t set "$f_pri" Priority=Critical 2>&1 >/dev/null || true)"
+refuse "set rejects an unknown priority" set "$f_pri" Priority=Critical
+assert_contains "set's priority refusal names the vocabulary" "$pri_err" "valid: Low, Medium, High"
+assert_eq "rejected priorities leave the file byte-identical" "$pri_before" "$(cat "$f_pri")"
+refuse "set rejects an empty-value Priority pair" set "$f_pri" Priority=
+if t set "$f_pri" Priority=High >/dev/null 2>&1; then ok "set accepts a valid priority"; else bad "set accepts a valid priority"; fi
+f_pri_low="$(t new --id PRI-3 --name "Low Priority Task" --priority Low)"
+assert_contains "new writes a valid priority" "$(grep -oP '^\*\*Priority:\*\*\s+\K.*' "$f_pri_low")" "Low"
+rm -f "$f_pri" "$f_pri_low"
+t render >/dev/null
+
+echo "== set: Progress must be N% form =="
+# The render's percent normalization is a legacy-file fallback, not a
+# license for set: a bare number is refused outright instead of landing
+# unmarked and getting silently coerced at render time.
+f_prg="$(t new --id PRG-1 --name "Progress Format Target")"
+prg_before="$(cat "$f_prg")"
+prg_err="$(t set "$f_prg" Progress=45 2>&1 >/dev/null || true)"
+refuse "set rejects a bare-number Progress" set "$f_prg" Progress=45
+assert_contains "bare-number refusal names the N% contract" "$prg_err" "Progress must be an N% percentage"
+refuse "set rejects a non-numeric Progress" set "$f_prg" Progress=half
+refuse "set rejects a spaced Progress suffix" set "$f_prg" "Progress=45 %"
+refuse "set validates Progress before applying other pairs" set "$f_prg" Priority=High Progress=45
+assert_not_contains "a refused Progress writes none of the batch" "$(cat "$f_prg")" "**Priority:** High"
+assert_eq "rejected Progress values leave the file byte-identical" "$prg_before" "$(cat "$f_prg")"
+t set "$f_prg" Progress=45% >/dev/null
+assert_contains "N%-form Progress still lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "45%"
+t set "$f_prg" Progress= >/dev/null
+assert_eq "Progress deletion stays allowed" "0" "$(grep -c '^\*\*Progress:\*\*' "$f_prg")"
+rm -f "$f_prg"
+t render >/dev/null
+
+echo "== new: duplicate ID guard =="
+# An ID names one piece of work across the whole board: a second new with
+# a live ID must refuse instead of silently splitting it across two files,
+# current/ and archive/ alike. --force is the documented override for
+# deliberate reuse, and the dash-anchored glob must not false-positive on
+# a longer ID sharing a prefix.
+f_d1="$(t new --id DUP-1 --name "Duplicate Guard First")"
+dup_err="$(t new --id DUP-1 --name "Duplicate Guard Second" 2>&1 >/dev/null || true)"
+refuse "new refuses a duplicate task ID in current/" new --id DUP-1 --name "Duplicate Guard Second"
+assert_contains "duplicate refusal names the existing file" "$dup_err" "$(basename "$f_d1")"
+assert_contains "duplicate refusal names the override" "$dup_err" "--force"
+mv "$f_d1" "$TASKS_DIR/archive/"
+t render >/dev/null
+dup_err="$(t new --id DUP-1 --name "Duplicate Guard Third" 2>&1 >/dev/null || true)"
+refuse "new refuses a duplicate task ID in archive/" new --id DUP-1 --name "Duplicate Guard Third"
+assert_contains "archive-side refusal carries the same override note" "$dup_err" "--force"
+mv "$TASKS_DIR/archive/$(basename "$f_d1")" "$TASKS_DIR/current/"
+t render >/dev/null
+f_d2="$(t new --id DUP-1 --name "Duplicate Guard Second" --force)"
+[[ -f "$f_d2" ]] && ok "--force admits a deliberate ID reuse" || bad "--force admits a deliberate ID reuse"
+f_d3="$(t new --id DUP-11 --name "Near Miss ID")"
+[[ -f "$f_d3" ]] && ok "a longer ID sharing a prefix is not a duplicate" || bad "a longer ID sharing a prefix is not a duplicate"
+rm -f "$f_d1" "$f_d2" "$f_d3"
+t render >/dev/null
+
+echo "== new: --name must be a single line =="
+# The name titles the level-1 heading and the dashboard row; a newline
+# would inject bogus structure into both, so it is refused outright.
+nl_before="$(ls "$TASKS_DIR/current" | wc -l)"
+nl_err="$(t new --id NL-1 --name "$(printf 'two\nlines')" 2>&1 >/dev/null || true)"
+refuse "new rejects a multi-line --name" new --id NL-1 --name "$(printf 'two\nlines')"
+assert_contains "multi-line refusal states the single-line contract" "$nl_err" "--name must be a single line"
+refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
+assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
+
+echo "== set: Owner is claim-owned =="
+# Ownership never moves through set: the Owner field is written by claim
+# (atomically, alongside its O_EXCL sidecar) and cleared by release. The
+# refusal is unconditional - it does not open under the battery's clock
+# seam, which exists for timeline backdating, not ownership.
+f_own="$(t new --id OWN-1 --name "Owner Guard Target")"
+own_before="$(cat "$f_own")"
+own_err="$(t set "$f_own" Owner=ghost-session 2>&1 >/dev/null || true)"
+refuse "set refuses an Owner write" set "$f_own" Owner=ghost-session
+assert_contains "Owner refusal names the claim path" "$own_err" "'tasks claim' and 'tasks release'"
+own_err="$(t set "$f_own" Owner= 2>&1 >/dev/null || true)"
+refuse "set refuses Owner deletion too" set "$f_own" Owner=
+assert_contains "Owner deletion refusal names the claim path too" "$own_err" "claim-owned"
+assert_eq "Owner refusals leave the file byte-identical" "$own_before" "$(cat "$f_own")"
+if t claim "$f_own" --owner claim-owner >/dev/null 2>&1; then ok "claim stays the ownership write path"; else bad "claim stays the ownership write path"; fi
+assert_contains "claim sets Owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_own")" "claim-owner"
+t release "$f_own" >/dev/null
+rm -f "$f_own"
+t render >/dev/null
+
+echo "== terminal status transitions release a live claim =="
+# Mirroring close: a terminal task owns nothing. A Cancelled transition
+# through set is the one terminal write that would otherwise leave the
+# sidecar behind (Completed goes through close, and the seam-admitted
+# Completed pair is pinned for the same guarantee).
+f_t1="$(t new --id TRL-1 --name "Terminal Release Target")"
+t claim "$f_t1" --owner sess-terminal >/dev/null
+t set "$f_t1" Status=Cancelled "Status Reason=terminal probe" >/dev/null
+[[ ! -f "$f_t1.claim" ]] && ok "set to Cancelled removes the claim sidecar" || bad "set to Cancelled removes the claim sidecar"
+assert_eq "set to Cancelled leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t1")"
+assert_contains "set to Cancelled lands the status" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_t1")" "Cancelled"
+f_t2="$(t new --id TRL-2 --name "Terminal Completed Target")"
+t claim "$f_t2" --owner sess-completed >/dev/null
+t set "$f_t2" Status=Completed >/dev/null
+[[ ! -f "$f_t2.claim" ]] && ok "set to Completed removes the claim sidecar" || bad "set to Completed removes the claim sidecar"
+assert_eq "set to Completed leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t2")"
+f_t3="$(t new --id TRL-3 --name "Stale Claim On Terminal")"
+t set "$f_t3" Status=Cancelled "Status Reason=stale probe" >/dev/null
+printf 'sess-stale\n' >"$f_t3.claim"
+t set "$f_t3" Priority=High >/dev/null
+[[ ! -f "$f_t3.claim" ]] && ok "a set on an already-terminal file releases its stale sidecar" || bad "a set on an already-terminal file releases its stale sidecar"
+f_t4="$(t new --id TRL-4 --name "Open Set Claim Target")"
+t claim "$f_t4" --owner sess-open >/dev/null
+t set "$f_t4" Priority=High >/dev/null
+[[ -f "$f_t4.claim" ]] && ok "an open-status set keeps the live claim" || bad "an open-status set keeps the live claim"
+t release "$f_t4" >/dev/null
+rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4"
+t render >/dev/null
+
 echo "== set: unknown header keys are rejected before any write =="
 f_kv="$(t new --id SET-1 --name "Set Validation Target")"
 kv_hdr() { awk '/^## /{exit} {print}' "$f_kv"; }
@@ -369,16 +523,29 @@ pos_order() {
 	awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_pos"
 }
 POS_CANONICAL_ORDER="$(printf '%s\n' Created Status Priority Progress Owner "Checkpoint Gating" Updated "Latest Update")"
-t set "$f_pos" Owner= >/dev/null
+# Ownership refuses set (claim-owned), so the deletion/re-insert legs of
+# this ordering pin drive the internal writer seam directly, the same
+# sanctioned sourcing pattern the set_header_field section below uses:
+# the subject is write_header_fields slot behavior, not the ownership
+# protocol, and claim/release legs of the pin follow unchanged.
+owner_seam() { # value; set or clear the fixture's Owner through the sourced writer seam
+	local value="$1"
+	(
+		set -euo pipefail
+		source "$TASKS_BIN" help >/dev/null 2>&1
+		set_header_field "$f_pos" "Owner" "$value"
+	)
+}
+owner_seam ""
 assert_not_contains "Owner deletion removes the field" "$(awk '/^## /{exit}{print}' "$f_pos")" "**Owner:**"
-t set "$f_pos" Owner=worker-pos >/dev/null
+owner_seam "worker-pos"
 assert_eq "re-set Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
-t set "$f_pos" Owner= >/dev/null
+owner_seam ""
 t claim "$f_pos" --owner claim-pos >/dev/null
 assert_eq "claimed Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
 t release "$f_pos" >/dev/null
 assert_eq "release keeps Owner in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
-t set "$f_pos" Owner= >/dev/null
+owner_seam ""
 t release "$f_pos" >/dev/null
 assert_eq "blank-path Owner insert lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
 assert_eq "blank-path Owner insert writes the bare field" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_pos")"
@@ -390,9 +557,12 @@ t render >/dev/null
 
 echo "== set: backslash values survive verbatim =="
 f_bs="$(t new --id BS-1 --name "Backslash Target")"
-t set "$f_bs" 'Priority=c\\d' 'Duration=e\tf' >/dev/null
+# Checkpoint Gating and Duration are the free-form carriers here (the
+# subject is backslash survival through the header writer, not the field
+# semantics; Duration admits fixture values under the battery's clock seam).
+t set "$f_bs" 'Checkpoint Gating=c\\d' 'Duration=e\tf' >/dev/null
 assert_contains "double backslash in a set value survives verbatim" \
-	"$(grep -m1 '^\*\*Priority:' "$f_bs")" 'Priority:** c\\d'
+	"$(grep -m1 '^\*\*Checkpoint Gating:' "$f_bs")" 'Checkpoint Gating:** c\\d'
 assert_contains "backslash-t in a set value survives verbatim" \
 	"$(grep -m1 '^\*\*Duration:' "$f_bs")" 'Duration:** e\tf'
 rm -f "$f_bs"
@@ -422,11 +592,11 @@ f_pipe="$(t new --id API-6 --name "Piped | Name ](evil")"
 pipe_row="$(grep -F 'Piped' "$DASH")"
 assert_contains "pipe and brackets in name are escaped" "$pipe_row" 'Piped \| Name \](evil'
 assert_not_contains "raw pipe does not split the name cell" "$pipe_row" "Piped | Name"
-if t set "$f_pipe" 'Priority=High | Critical' >/dev/null 2>&1; then ok "set accepts a pipe-bearing value"; else bad "set accepts a pipe-bearing value"; fi
+if t set "$f_pipe" Status=Completed Completed="2026-06-15 12:00" 'Duration=1h | 2m' >/dev/null 2>&1; then ok "set accepts a pipe-bearing value"; else bad "set accepts a pipe-bearing value"; fi
 t render >/dev/null
 pipe_row="$(grep -F 'Piped' "$DASH")"
-assert_contains "pipe in field value is escaped" "$pipe_row" 'High \| Critical'
-assert_not_contains "field pipe does not add a column" "$pipe_row" "High | Critical"
+assert_contains "pipe in field value is escaped" "$pipe_row" '1h \| 2m'
+assert_not_contains "field pipe does not add a column" "$pipe_row" "1h | 2m"
 # Repeated renders must stay byte-identical even with escaped content present
 esc_before="$(cat "$DASH")"
 t render >/dev/null
@@ -1106,6 +1276,30 @@ assert_eq "refused nested edits keep Updated untouched" "$nested_upd_before" \
 rm -f "$nested"
 t render >/dev/null
 
+echo "== edit: Work Log entry anchors are CLI-stamped (forgery stance: guarded) =="
+# G9 stance: guarded. Entry anchors are the Duration-derivation input and
+# the CLI's audit trail; Option-1's free-form principle covers prose, not
+# CLI-shaped timeline data, so edit refuses anchor-shaped lines in Work
+# Log bodies (append and replace alike) while every other section keeps
+# taking them as ordinary deeper headings.
+forge_anchor="$ROOT/forge-anchor.md"
+printf '### 2026-01-01 00:00: Manager: forged entry\n' >"$forge_anchor"
+f_forg="$(t new --id FRG-1 --name "Forgery Guard Target")"
+forge_before="$(cat "$f_forg")"
+forge_err="$(t edit "$f_forg" --section "Work Log" --append "$forge_anchor" 2>&1 >/dev/null || true)"
+refuse "edit refuses an anchor line appended to Work Log" edit "$f_forg" --section "Work Log" --append "$forge_anchor"
+assert_contains "anchor refusal names the CLI route" "$forge_err" "via 'tasks log'"
+refuse "edit refuses an anchor line replacing Work Log" edit "$f_forg" --section "Work Log" "$forge_anchor"
+assert_eq "refused anchor edits leave the file byte-identical" "$forge_before" "$(cat "$f_forg")"
+printf 'status note for 2026-01-01 00:00 recorded here\n\n#### a deeper note heading\n' | t edit "$f_forg" --section "Work Log" --append >/dev/null
+assert_contains "prose dates and deeper headings stay legal in Work Log" \
+	"$(cat "$f_forg")" "status note for 2026-01-01 00:00 recorded here"
+printf '### 2026-01-01 00:00: not an entry here\n' | t edit "$f_forg" --section "Objective" >/dev/null
+assert_contains "anchor-shaped lines stay legal outside Work Log" \
+	"$(cat "$f_forg")" "### 2026-01-01 00:00: not an entry here"
+rm -f "$f_forg"
+t render >/dev/null
+
 echo "== edit: creates missing template sections at their canonical position =="
 # The skill's planning pass needs Technical Approach, Risk Assessment,
 # Testing Strategy, TDD Workflow, and Task Breakdown on a freshly created
@@ -1441,7 +1635,9 @@ assert_eq "Archive sorts by Completed ascending with undated last" \
 # Residual ties (same date, same task ID) still render exactly once each
 # and repeated renders stay byte-identical.
 f_dup1="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
-f_dup2="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
+# --force: the deliberate duplicate is the fixture under test here (the
+# subject is residual-tie rendering, not the duplicate ID guard).
+f_dup2="$(t new --id ORD-50 --name "Duplicate ID Task" --force --dir "$orddir")"
 [[ "$f_dup1" != "$f_dup2" ]] && ok "duplicate-ID creation yields two files" || bad "duplicate-ID creation yields two files"
 t set --dir "$orddir" "$(basename "$f_dup1")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null
 t set --dir "$orddir" "$(basename "$f_dup2")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null
@@ -1523,19 +1719,22 @@ assert_not_contains "a drift-disposition hash line is skipped" "$lint_out" "dead
 sed -i '/commit deadbee99 pushed to origin/d' "$f_lp"
 
 # Claim hygiene: Owner without sidecar, sidecar without Owner, and an
-# owner mismatch are hard on an open task; parity passes silently.
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=ghost-session >/dev/null
+# owner mismatch are hard on an open task; parity passes silently. Owner
+# is claim-owned now, so the drift fixtures are written directly into the
+# header (sed), the same direct-fixture approach the rest of this section
+# uses (lint is the subject under test, not the write path).
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** ghost-session/' "$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags Owner without a claim sidecar" "$lint_out" "Owner 'ghost-session' set without a claim sidecar"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner= >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:**/' "$f_lp"
 printf 'orphan-owner\n' >"$f_lp.claim"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags a sidecar whose header Owner is empty" "$lint_out" \
 	"claim sidecar present but header Owner is empty"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=live-owner >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** live-owner/' "$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags a sidecar-owner mismatch" "$lint_out" "does not match header Owner 'live-owner'"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=orphan-owner >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** orphan-owner/' "$f_lp"
 if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "matching owner and sidecar passes"; else bad "matching owner and sidecar passes"; fi
 
 # Terminal files are advisory-only: a Completed task with unchecked boxes
@@ -1599,6 +1798,9 @@ guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Latest Up
 assert_contains "set refuses Latest Update outside the seam" "$guard_err" "'Latest Update' is CLI-owned"
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Completed" 2>&1 >/dev/null || true)"
 assert_contains "set redirects Status=Completed to close" "$guard_err" "must go through 'tasks close'"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Cancelled" 2>&1 >/dev/null || true)"
+assert_contains "set redirects Status=Cancelled to close --cancelled" "$guard_err" "must go through 'tasks close --cancelled'"
+assert_eq "the Status=Cancelled refusal leaves the file byte-identical" "$guard_before" "$(cat "$guard_target")"
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
 assert_contains "the refusal points at the stamping subcommands" "$guard_err" "log/report/claim/close/stamp"
 assert_not_contains "the refusal no longer names the seam variable" "$guard_err" "TASKS_TEST_CLOCK"
@@ -1613,6 +1815,16 @@ guard_err="$(TASKS_TEST_CLOCK=garbage t show "$guard_target" 2>&1 >/dev/null || 
 assert_contains "a malformed clock dies at startup" "$guard_err" "TASKS_TEST_CLOCK must be CLI-shaped"
 guard_err="$(env -u TASKS_DIR "$TASKS_BIN" show "$guard_target" 2>&1 >/dev/null || true)"
 assert_contains "the clock dies without an exported TASKS_DIR" "$guard_err" "honored only when TASKS_DIR is also exported"
+# The redirect's target, pinned under the same production conditions: set
+# cannot land Cancelled, so the reason rides Blocked and survives close
+# --cancelled.
+guard_reason="$(t new --id GRD-6 --name "Cancelled Reason Route Probe")"
+env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_reason" "Status=Blocked" "Status Reason=awaiting decision" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 09:00" t close "$guard_reason" --cancelled >/dev/null
+assert_eq "the sanctioned Cancelled route lands the closure" "Cancelled" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$guard_reason")"
+assert_contains "the sanctioned Cancelled route keeps the reason set while Blocked" \
+	"$(awk '/^## /{exit}{print}' "$guard_reason")" "**Status Reason:** awaiting decision"
+rm -f "$guard_reason"
 rm -f "$guard_target"
 t render >/dev/null
 
@@ -1675,6 +1887,122 @@ assert_not_contains "close drops the Status Reason" "$(awk '/^## /{exit}{print}'
 assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
 refuse "close without a taskfile is refused" close
 refuse "stamp without a taskfile is refused" stamp
+
+echo "== archive: terminal tasks move to archive/ =="
+# The sanctioned alternative to the hand mv the battery's earlier archive
+# lane tests used: archive refuses open tasks, moves a terminal one under
+# the lock, drops any claim sidecar on the way, and re-renders. Reports
+# deposited before and after the move share one reports dir keyed by the
+# preserved basename, so every ../reports/ link keeps resolving.
+f_ar="$(t new --id ARC-1 --name "Archive Move Target")"
+ar_err="$(t archive "$f_ar" 2>&1 >/dev/null || true)"
+refuse "archive refuses a non-terminal task" archive "$f_ar"
+assert_contains "archive refusal names the closure path" "$ar_err" "use 'tasks close'"
+TASKS_TEST_CLOCK="2026-06-16 09:00" t close "$f_ar" >/dev/null
+printf 'pre-archive report body\n' | t report "$f_ar" --slug pre-archive --digest "before the move" >/dev/null
+ar_out="$(t archive "$f_ar")"
+assert_contains "archive reports the moved file" "$ar_out" "$(basename "$f_ar")"
+[[ -f "$TASKS_DIR/archive/$(basename "$f_ar")" ]] && ok "the archived file lives in archive/" || bad "the archived file lives in archive/"
+[[ ! -e "$f_ar" ]] && ok "current/ no longer carries the file" || bad "current/ no longer carries the file"
+[[ ! -f "$TASKS_DIR/archive/$(basename "$f_ar").claim" ]] && ok "no claim sidecar travels to archive/" || bad "no claim sidecar travels to archive/"
+arch_lane="$(awk '/^## Archive/{f=1} f' <"$DASH")"
+assert_contains "the Archive lane renders the moved task" "$arch_lane" "(./archive/$(basename "$f_ar"))"
+comp_lane="$(awk '/^## Completed/{f=1} /^## Archive/{f=0} f' <"$DASH")"
+assert_not_contains "the Completed lane drops the moved task" "$comp_lane" "Archive Move Target"
+printf 'post-archive report body\n' | t report "$TASKS_DIR/archive/$(basename "$f_ar")" --slug post-archive --digest "after the move" >/dev/null
+[[ -f "$TASKS_DIR/reports/$(basename "$f_ar")/02-post-archive.md" ]] \
+	&& ok "post-archive report deposits under the same reports dir" || bad "post-archive report deposits under the same reports dir"
+assert_contains "the archived file links the post-archive report" \
+	"$(cat "$TASKS_DIR/archive/$(basename "$f_ar")")" "(../reports/$(basename "$f_ar")/02-post-archive.md)"
+refuse "archive refuses an already-archived task" archive "$TASKS_DIR/archive/$(basename "$f_ar")"
+refuse "archive refuses an unknown task file" archive NOPE-9.md
+refuse "archive without a taskfile is refused" archive
+f_ar2="$(t new --id ARC-2 --name "Archive Claim Drop")"
+t close "$f_ar2" >/dev/null
+printf 'sess-ghost\n' >"$f_ar2.claim"
+t archive "$f_ar2" >/dev/null
+[[ ! -f "$TASKS_DIR/archive/$(basename "$f_ar2").claim" ]] && ok "archive drops a stale claim sidecar" || bad "archive drops a stale claim sidecar"
+f_ar3="$(t new --id ARC-3 --name "Archive Cancelled Target")"
+t set "$f_ar3" Status=Cancelled "Status Reason=archive probe" >/dev/null
+t archive "$f_ar3" >/dev/null
+[[ -f "$TASKS_DIR/archive/$(basename "$f_ar3")" ]] && ok "a Cancelled task archives" || bad "a Cancelled task archives"
+assert_contains "the Archive lane renders the cancelled task too" "$(awk '/^## Archive/{f=1} f' <"$DASH")" "Archive Cancelled Target"
+rm -f "$TASKS_DIR/archive/"ARC-*.md
+rm -rf "$TASKS_DIR/reports/$(basename "$f_ar")"
+t render >/dev/null
+
+echo "== close --cancelled: terminal-transition symmetry =="
+# G17: Cancelled files get the same CLI-stamped closure semantics as
+# Completed ones, through close's second path, so neither terminal status
+# carries hand-derived closure data. Both paths are pinned here and in the
+# close/stamp section above: plain close stamps Completed+Duration+Updated,
+# close --cancelled stamps Duration+Updated with no Completed field.
+f_cc="$(t new --id CCX-1 --name "Cancelled Closure Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cc" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_cc" "second anchor" >/dev/null
+t set "$f_cc" Status=Blocked "Status Reason=waiting on requeue" >/dev/null
+t claim "$f_cc" --owner sess-cancel >/dev/null
+cc_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cc" --cancelled)"
+assert_contains "close --cancelled reports the cancellation" "$cc_out" "cancelled $(basename "$f_cc")"
+assert_contains "close --cancelled reports the derived duration" "$cc_out" "Duration 2h"
+assert_eq "close --cancelled stamps Status Cancelled" "Cancelled" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cc")"
+assert_eq "close --cancelled derives Duration from the anchors" "2h" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cc")"
+assert_eq "close --cancelled refreshes Updated from the clock" "2026-06-16 10:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+assert_not_contains "close --cancelled stamps no Completed field" "$(awk '/^## /{exit}{print}' "$f_cc")" "**Completed:**"
+assert_contains "close --cancelled keeps the Status Reason" "$(awk '/^## /{exit}{print}' "$f_cc")" "**Status Reason:** waiting on requeue"
+[[ ! -f "$f_cc.claim" ]] && ok "close --cancelled releases the claim" || bad "close --cancelled releases the claim"
+assert_eq "close --cancelled leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_cc")"
+cc_lane="$(awk '/^## Blocked\/Cancelled/{f=1} /^## Completed/{f=0} f' <"$DASH")"
+assert_contains "the cancelled closure renders in Blocked/Cancelled" "$cc_lane" "Cancelled Closure Probe"
+refuse "close --cancelled refuses an already-Cancelled task" close "$f_cc" --cancelled
+refuse "close --cancelled refuses a Completed task" close "$f_cl" --cancelled
+cc_upd_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+refuse "refused --cancelled calls leave no trace" close "$f_cc" --cancelled
+assert_eq "the refused --cancelled keeps Updated untouched" "$cc_upd_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+rm -f "$f_cc"
+t render >/dev/null
+
+echo "== stamp --repair: malformed CLI-owned fields get a CLI route back =="
+# The MGR-11 class: a malformed Latest Update left a file no CLI write
+# could repair (log refreshes Updated but not Latest Update, set refuses
+# the field). --repair re-stamps the stamped timeline in one locked
+# write: Updated and Duration from clock and anchors, Latest Update as a
+# dated line naming the tool that wrote it, Completed per the file's
+# status (deleted on an open task, where absence is canonical).
+f_rpr="$(t new --id RPR-1 --name "Repair Probe Target")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpr" "anchor one" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:30" t log "$f_rpr" "anchor two" >/dev/null
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** hand-mangled garbage/' "$f_rpr"
+sed -i 's/^\*\*Updated:.*/**Updated:** 2026-06-15/' "$f_rpr"
+sed -i '/^\*\*Updated:/a **Completed:** 2026-06-15 00:00' "$f_rpr"
+rep_out="$(TASKS_TEST_CLOCK="2026-06-16 08:00" t stamp "$f_rpr" --repair)"
+assert_contains "repair reports the repaired file" "$rep_out" "repaired $(basename "$f_rpr")"
+assert_eq "repair re-stamps Updated to the clock" "2026-06-16 08:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rpr")"
+assert_contains "repair rewrites Latest Update as a dated repair line" \
+	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rpr")" \
+	"[2026-06-16 08:00] CLI-owned header repaired via 'tasks stamp --repair'"
+assert_eq "repair derives Duration from the anchors" "30m" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_rpr")"
+assert_eq "repair on an open task deletes the stray Completed field" "0" "$(grep -c '^\*\*Completed:\*\*' "$f_rpr")"
+assert_eq "repair keeps the canonical header order" \
+	"$(printf '%s\n' Created Status Priority Progress Owner Updated Duration "Latest Update")" \
+	"$(awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_rpr")"
+refuse "plain stamp still refuses an open task" stamp "$f_rpr"
+rm -f "$f_rpr"
+
+f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
+TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpc" "second anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 09:00" t close "$f_rpc" >/dev/null
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** broken/' "$f_rpc"
+sed -i 's/^\*\*Completed:.*/**Completed:** garbage/' "$f_rpc"
+TASKS_TEST_CLOCK="2026-06-17 07:00" t stamp "$f_rpc" --repair >/dev/null
+assert_eq "repair on a Completed task re-stamps Completed" "2026-06-17 07:00" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_rpc")"
+assert_contains "repair on a Completed task fixes Latest Update too" \
+	"$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rpc")" "repaired via 'tasks stamp --repair'"
+assert_eq "repair on a Completed task keeps Duration derived" "1h" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_rpc")"
+refuse "repair without a taskfile is refused" stamp --repair
+rm -f "$f_rpc"
+t render >/dev/null
 
  echo "== usage: canonical option order =="
 usage_out="$(t help)"

@@ -51,7 +51,9 @@
 # Reads only tracked files (git ls-files basis), so the result is
 # reproducible locally and in CI. The lint's own files (this script, the
 # CI workflow) stay outside lint scope, the same self-exclusion contract
-# INVENTORY.md states for itself.
+# INVENTORY.md states for itself. Scope note for the board surface: .tasks/
+# is gitignored, so no check here - link liveness included - ever scans it;
+# that surface is owned by `tasks lint`.
 #
 # Usage: lint-corpus.sh [--root DIR]
 #   --root DIR   lint the corpus copy at DIR instead of this repo
