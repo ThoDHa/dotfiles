@@ -248,15 +248,16 @@ Commands:
                                        from current/ into archive/, dropping any
                                        claim sidecar; render.
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
-                                       (CLI clock), Duration (Work Log anchors), Updated;
-                                       drops Status Reason and any claim; render.
+                                       (CLI clock), elapsed Duration (first-to-last Work
+                                       Log anchors), Updated; drops Status Reason and
+                                       any claim; render.
                                        --cancelled transitions to Cancelled instead: Status,
                                        Duration, Updated (no Completed stamp); keeps the
                                        Status Reason already on file (refused without one),
                                        drops any claim; render.
-  stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
-                                       Completed task from the CLI clock and Work Log
-                                       anchors; render.
+  stamp [--dir DIR] <taskfile>         Re-stamp Completed and the elapsed Duration (first
+                                       to last Work Log anchor) on an already Completed
+                                       task from the CLI clock; render.
                                        --repair inspects each stamped timeline field
                                        (Updated, Duration, Completed, Latest Update)
                                        against its canonical shape and re-stamps only
@@ -1419,9 +1420,11 @@ work_log_span() {
 	' "$1"
 }
 
-# Duration between the Work Log anchors in minutes, N/A when the anchors
-# cannot produce a nonnegative span (fewer than two parseable entries,
-# unparseable timestamps, or a log whose entries run backwards).
+# Elapsed time from the first to the last Work Log anchor, in minutes;
+# N/A when the anchors cannot produce a nonnegative span (fewer than two
+# parseable entries, unparseable timestamps, or a log whose entries run
+# backwards). The span is wall-clock: Blocked periods and idle waits ride
+# inside it, only the anchors bound it.
 derive_duration() {
 	local span first last a b
 	span="$(work_log_span "$1")" || span=""
@@ -1434,9 +1437,9 @@ derive_duration() {
 }
 
 # Re-stamp a Completed task: Completed and Updated follow the CLI clock and
-# Duration re-derives from the Work Log anchors. The repair path for legacy
-# hand-stamps and re-closure bumps; closing a task that is not Completed
-# belongs to `tasks close`.
+# the elapsed Duration re-derives from the Work Log anchors. The repair path
+# for legacy hand-stamps and re-closure bumps; closing a task that is not
+# Completed belongs to `tasks close`.
 cmd_stamp() {
 	local dir="" repair=0 args=()
 	while (($#)); do
@@ -1513,7 +1516,7 @@ cmd_stamp() {
 		"Duration"$'\034'"**Duration:** $duration" \
 		"Updated"$'\034'"**Updated:** $ts"
 	render_unlocked "$tasks_dir"
-	printf 'stamped %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+	printf 'stamped %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
 # Archive a terminal task: move the file from current/ into archive/ under
@@ -1562,8 +1565,9 @@ cmd_archive() {
 
 # Close a task: transition to Completed with the header timeline stamped
 # from the CLI clock, as the one sanctioned write path for closure. Sets
-# Status, Completed, Duration (Work Log anchors, N/A when they cannot
-# produce a span), and Updated in one locked header rewrite; drops the
+# Status, Completed, the elapsed Duration (first-to-last Work Log anchor,
+# N/A when they cannot produce a span), and Updated in one locked header
+# rewrite; drops the
 # Status Reason (the header contract carries it only under
 # Blocked/Cancelled) and releases any claim sidecar with its Owner field,
 # then renders. The assembler and dashboard formats are the locked write
@@ -1615,7 +1619,7 @@ cmd_close() {
 			"$CLAIM_RELEASE_WRITE"
 		release_claim "$file"
 		render_unlocked "$tasks_dir"
-		printf 'cancelled %s (Duration %s)\n' "$(basename "$file")" "$duration"
+		printf 'cancelled %s (elapsed Duration %s)\n' "$(basename "$file")" "$duration"
 		return
 	fi
 	write_header_fields "$file" \
@@ -1627,7 +1631,7 @@ cmd_close() {
 		"$CLAIM_RELEASE_WRITE"
 	release_claim "$file"
 	render_unlocked "$tasks_dir"
-	printf 'closed %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+	printf 'closed %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
 # Next report sequence number for a task's reports directory: one past the
