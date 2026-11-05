@@ -241,6 +241,9 @@ Commands:
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
                                        (CLI clock), Duration (Work Log anchors), Updated;
                                        drops Status Reason and any claim; render.
+                                       --cancelled transitions to Cancelled instead:
+                                       Status, Duration, Updated (no Completed stamp);
+                                       keeps Status Reason, drops any claim.
   stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
                                        Completed task from the CLI clock and Work Log
                                        anchors; render.
@@ -1467,15 +1470,16 @@ cmd_archive() {
 # then renders. The assembler and dashboard formats are the locked write
 # path's own, so closure rows render byte-compatibly.
 cmd_close() {
-	local dir="" args=()
+	local dir="" cancelled=0 args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "close: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
+			--cancelled) cancelled=1; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile>"
+	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
@@ -1490,6 +1494,24 @@ cmd_close() {
 	local ts duration
 	ts="$(now)"
 	duration="$(derive_duration "$file")"
+	if ((cancelled == 1)); then
+		# Cancelled closure: the same CLI-stamped semantics as completion
+		# minus the Completed field, so Cancelled files stop carrying
+		# hand-derived closure data. The header contract ties Status Reason
+		# to Blocked/Cancelled, so unlike completion it stays; a claim
+		# still releases (a terminal task owns nothing).
+		[[ "$status" == "$STATUS_CANCELLED" ]] \
+			&& die "close: $(basename "$file") is already Cancelled"
+		write_header_fields "$file" \
+			"Status"$'\034'"**Status:** $STATUS_CANCELLED" \
+			"Duration"$'\034'"**Duration:** $duration" \
+			"Updated"$'\034'"**Updated:** $ts" \
+			"Owner"$'\034'"**Owner:**"
+		rm -f "$file$CLAIM_SUFFIX"
+		render_unlocked "$tasks_dir"
+		printf 'cancelled %s (Duration %s)\n' "$(basename "$file")" "$duration"
+		return
+	fi
 	write_header_fields "$file" \
 		"Status"$'\034'"**Status:** $STATUS_COMPLETED" \
 		"Completed"$'\034'"**Completed:** $ts" \

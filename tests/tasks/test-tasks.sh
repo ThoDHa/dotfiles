@@ -1864,6 +1864,37 @@ rm -f "$TASKS_DIR/archive/"ARC-*.md
 rm -rf "$TASKS_DIR/reports/$(basename "$f_ar")"
 t render >/dev/null
 
+echo "== close --cancelled: terminal-transition symmetry =="
+# G17: Cancelled files get the same CLI-stamped closure semantics as
+# Completed ones, through close's second path, so neither terminal status
+# carries hand-derived closure data. Both paths are pinned here and in the
+# close/stamp section above: plain close stamps Completed+Duration+Updated,
+# close --cancelled stamps Duration+Updated with no Completed field.
+f_cc="$(t new --id CCX-1 --name "Cancelled Closure Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cc" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_cc" "second anchor" >/dev/null
+t set "$f_cc" Status=Blocked "Status Reason=waiting on requeue" >/dev/null
+t claim "$f_cc" --owner sess-cancel >/dev/null
+cc_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cc" --cancelled)"
+assert_contains "close --cancelled reports the cancellation" "$cc_out" "cancelled $(basename "$f_cc")"
+assert_contains "close --cancelled reports the derived duration" "$cc_out" "Duration 2h"
+assert_eq "close --cancelled stamps Status Cancelled" "Cancelled" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cc")"
+assert_eq "close --cancelled derives Duration from the anchors" "2h" "$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cc")"
+assert_eq "close --cancelled refreshes Updated from the clock" "2026-06-16 10:00" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+assert_not_contains "close --cancelled stamps no Completed field" "$(awk '/^## /{exit}{print}' "$f_cc")" "**Completed:**"
+assert_contains "close --cancelled keeps the Status Reason" "$(awk '/^## /{exit}{print}' "$f_cc")" "**Status Reason:** waiting on requeue"
+[[ ! -f "$f_cc.claim" ]] && ok "close --cancelled releases the claim" || bad "close --cancelled releases the claim"
+assert_eq "close --cancelled leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_cc")"
+cc_lane="$(awk '/^## Blocked\/Cancelled/{f=1} /^## Completed/{f=0} f' <"$DASH")"
+assert_contains "the cancelled closure renders in Blocked/Cancelled" "$cc_lane" "Cancelled Closure Probe"
+refuse "close --cancelled refuses an already-Cancelled task" close "$f_cc" --cancelled
+refuse "close --cancelled refuses a Completed task" close "$f_cl" --cancelled
+cc_upd_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+refuse "refused --cancelled calls leave no trace" close "$f_cc" --cancelled
+assert_eq "the refused --cancelled keeps Updated untouched" "$cc_upd_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cc")"
+rm -f "$f_cc"
+t render >/dev/null
+
  echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
