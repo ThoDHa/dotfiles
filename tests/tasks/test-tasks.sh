@@ -50,6 +50,21 @@ for lane in "## Triage" "## Ready" "## In Progress" "## Blocked/Cancelled" "## C
 	assert_contains "board has lane $lane" "$board" "$lane"
 done
 
+echo "== init: idempotent on an existing board (G14 pin) =="
+# Running init on a live board must scaffold nothing away and rewrite
+# nothing: both subdirs still exist, existing task files survive, and the
+# derived dashboard comes back byte-identical (init only ever renders,
+# and render is a pure function of the task files).
+f_idem="$(t new --id IDM-1 --name "Idempotent Init Target")"
+idem_board="$(cat "$DASH")"
+idem_out="$(t init)"
+assert_eq "init on an existing board reports the same directory" "$TASKS_DIR" "$idem_out"
+[[ -d "$TASKS_DIR/current" && -d "$TASKS_DIR/archive" ]] && ok "init keeps both subdirs" || bad "init keeps both subdirs"
+[[ -f "$f_idem" ]] && ok "init leaves existing task files in place" || bad "init leaves existing task files in place"
+assert_eq "init on an existing board leaves the dashboard byte-identical" "$idem_board" "$(cat "$DASH")"
+rm -f "$f_idem"
+t render >/dev/null
+
 echo "== new =="
 f_ip="$(t new --id API-1 --name "Refactor the Auth Flow" --status "In Progress" --priority High)"
 f_tr="$(t new --id API-2 --name "Add Rate Limiting" --priority Low)"
@@ -152,6 +167,21 @@ owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
 assert_eq "release leaves the Owner field present and empty" "1" \
 	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
+
+echo "== release: any session may release a foreign claim (G15 pin) =="
+# Release is a cooperative unlock, not an ownership transfer: the
+# stale-sidecar recovery path depends on any board-writer session being
+# able to release a claim left behind by a dead session, so release
+# deliberately performs no owner identity check. Pinned here as intent.
+f_xo="$(t new --id XOWN-1 --name "Cross Owner Release Target")"
+t claim "$f_xo" --owner session-alice >/dev/null
+assert_contains "claim sets the owning session" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
+TASKS_SESSION=session-bob t release "$f_xo" >/dev/null
+[[ ! -f "$f_xo.claim" ]] && ok "a foreign session's release removes the sidecar" || bad "a foreign session's release removes the sidecar"
+owner_cross="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo" || true)"
+assert_eq "a foreign session's release clears Owner" "" "${owner_cross:-}"
+rm -f "$f_xo"
+t render >/dev/null
 
 echo "== blocked lane =="
 t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
