@@ -2090,7 +2090,44 @@ sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_ready"
 t close "$f_gate_ready" --force >/dev/null
 assert_not_contains "close --force on a ready gate writes no override note" \
 	"$(awk '/^## Work Log/{f=1} f' "$f_gate_ready")" "closure gate overridden"
-rm -f "$f_gate" "$f_gate_child" "$f_gate_prose" "$f_gate_own" "$f_gate_parent" "$f_gate_field" "$f_gate_decl" "$f_gate_ready"
+
+# The field-form dependency surfaces bind only before the ## Work Log
+# heading: a line-initial **Dependencies:** citation inside a Work Log
+# entry quotes the template form as prose, so it closes clean, while the
+# same line in the header region still refuses.
+f_gate_logfield="$(t new --id CGT-8 --name "Gate Log Field Probe")"
+f_gate_sibling="$(t new --id CGT-9 --name "Gate Log Field Sibling")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_logfield"
+TASKS_TEST_CLOCK="2026-06-16 09:00" t log "$f_gate_logfield" "$(printf 'digest quoting the template field form\n**Dependencies:** CGT-9')" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 09:15" t close "$f_gate_logfield" >/dev/null
+assert_eq "a Work Log field-form citation of an open sibling closes clean" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_logfield")"
+f_gate_hdrfield="$(t new --id CGT-10 --name "Gate Header Field Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_hdrfield"
+sed -i '0,/^## /s//**Dependencies:** CGT-9\n&/' "$f_gate_hdrfield"
+gate_err="$(t close "$f_gate_hdrfield" 2>&1 >/dev/null || true)"
+assert_contains "a header-region field-form line still refuses" "$gate_err" "unfinished named child task(s): CGT-9"
+
+# The ^``` fence toggle rides the shared criteria counter: a fenced
+# example box inside Success Criteria counts zero in both the closure
+# gate and the lint, so close proceeds without --force and the closed
+# file reports no unchecked-box advisory.
+f_gate_fence="$(t new --id CGT-11 --name "Gate Fence Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_fence"
+t edit "$f_gate_fence" --section "Success Criteria" --append <<'IN' >/dev/null
+Fenced example:
+
+```
+- [ ] example box, fenced
+```
+IN
+TASKS_TEST_CLOCK="2026-06-16 09:30" t close "$f_gate_fence" >/dev/null
+assert_eq "a fenced unticked example box does not block close" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_fence")"
+fence_lint="$(t lint --verbose 2>&1 || true)"
+assert_not_contains "lint does not count the fenced box as unchecked" "$fence_lint" \
+	"current/$(basename "$f_gate_fence"): Status Completed with 1 unchecked Success Criteria boxes"
+rm -f "$f_gate" "$f_gate_child" "$f_gate_prose" "$f_gate_own" "$f_gate_parent" "$f_gate_field" "$f_gate_decl" "$f_gate_ready" "$f_gate_logfield" "$f_gate_sibling" "$f_gate_hdrfield" "$f_gate_fence"
 t render >/dev/null
 
 echo "== close: the ~ superseded annotation resolves unticked criteria =="

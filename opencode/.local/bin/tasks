@@ -125,8 +125,13 @@ readonly AWK_HEADING_LEVEL='		function heading_level(text,    h) {
 # Criteria section, leaving both untouched on any other line. criteria_box
 # classifies a Success Criteria body line as "checked" (- [x] / - [X]),
 # "unchecked" (- [ ]), or "superseded" (- ~ [ ], the resolved-but-
-# unfulfilled annotation), returning "" for everything else;
-# superseded_text strips the exact marker prefix criteria_box matched.
+# unfulfilled annotation), returning "" for everything else. The ^```
+# fence toggle rides here too: criteria_box tracks fenced regions in
+# fence and returns "" for every line inside one (delimiters included),
+# so a fenced example box counts zero in both consumers and the gate and
+# lint cannot drift on fenced content; each file must start with fence
+# unset. superseded_text strips the exact marker prefix criteria_box
+# matched.
 readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 			lvl = heading_level(line)
 			if (lvl != 2) { SECNAME = ""; return }
@@ -134,7 +139,8 @@ readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 			INSC = (SECNAME == "Success Criteria") ? 1 : 0
 		}
 		function criteria_box(line) {
-			if (!INSC) return ""
+			if (line ~ /^```/) fence = !fence
+			if (fence || !INSC) return ""
 			if (line ~ /^- \[[xX]\] /) return "checked"
 			if (line ~ /^- \[ \] /) return "unchecked"
 			if (line ~ /^- ~ \[ \] /) return "superseded"
@@ -1677,21 +1683,24 @@ task_id_of_basename() {
 # file order, and one "I<TAB>token" per task-ID-shaped token carried by a
 # dedicated dependency surface. The dedicated surfaces are the ##
 # Dependencies section body, the template's **Dependencies:** field
-# lines, and explicit **Child tasks:** declaration lines; prose citations
-# in Work Log entries, risk notes, and report digests are not dependency
-# surfaces and yield no tokens (citation is not dependency).
+# lines, and explicit **Child tasks:** declaration lines; the two field
+# forms bind only before the ## Work Log heading, because Work Log
+# entries and report digests quote those field forms as prose. Prose
+# citations in Work Log entries, risk notes, and report digests are not
+# dependency surfaces and yield no tokens (citation is not dependency).
 closure_gate_scan() { # <file>
 	awk "$AWK_HEADING_LEVEL$AWK_CRITERIA_COUNTER"'
 		/^## / {
 			track_criteria_section($0)
 			indeps = (SECNAME == "Dependencies") ? 1 : 0
+			if (!fence && SECNAME == "Work Log") inwork = 1
 			next
 		}
 		{
 			box = criteria_box($0)
 			if (box == "unchecked") unticked++
 			else if (box == "superseded") print "S\t" superseded_text($0)
-			if (indeps || $0 ~ /^[ \t]*\*\*Dependencies:\*\*/ || $0 ~ /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/) {
+			if (indeps || (!inwork && ($0 ~ /^[ \t]*\*\*Dependencies:\*\*/ || $0 ~ /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/))) {
 				rest = $0
 				while (match(rest, /[A-Za-z]+(-[0-9]+)+/)) {
 					print "I\t" substr(rest, RSTART, RLENGTH)
@@ -1759,8 +1768,8 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 				is_terminal_status "$child_status" && continue
 				child_rel="${f#"$tasks_dir"/}"
 				children+=("$cand ($child_rel, Status: ${child_status:-missing})")
-				done
-			done < <(printf '%s\n' "${child_tokens[@]}" | LC_ALL=C sort -u)
+			done
+		done < <(printf '%s\n' "${child_tokens[@]}" | LC_ALL=C sort -u)
 	fi
 	((${#children[@]} > 0)) && gate_findings+=("unfinished named child task(s): ${children[*]}")
 	return 0
@@ -1809,6 +1818,7 @@ cmd_close() {
 	local ts duration reason
 	ts="$(now)"
 	local -a superseded=()
+	local summary entry note=""
 	if ((cancelled == 0)); then
 		local -a findings=()
 		closure_gate_findings findings superseded "$tasks_dir" "$file"
@@ -1820,7 +1830,6 @@ cmd_close() {
 				msg+=$'\n'"close anyway with --force; the override is recorded in the Work Log"
 				die "$msg"
 			fi
-			local summary entry note
 			summary="$(IFS=';'; printf '%s' "${findings[*]}")"
 			note="$(superseded_note superseded)"
 			[[ -n "$note" ]] && summary+="; $note"
@@ -1835,7 +1844,6 @@ cmd_close() {
 			# A gate that passes on ~-marked criteria alone still records
 			# them: the same Work Log anchor pattern as the override note, so
 			# the closure stays visibly annotated in the file it closes.
-			local entry
 			printf -v entry '### %s: close: %s\n\n' "$ts" "$(superseded_note superseded)"
 			append_work_log_entry "$file" "$entry" "" "" \
 				|| die "close: failed to record the superseded criteria in $(basename "$file")"
@@ -2296,7 +2304,6 @@ lint_scan_files() { # tasks_dir files...
 			inhdr = 1; INSC = 0; SECNAME = ""; fence = 0; fnr = 0
 			while ((getline line < (td fpath)) > 0) {
 				fnr++
-				if (line ~ /^```/) { fence = !fence; continue }
 				track_criteria_section(line)
 				if (SECNAME != "") {
 					inhdr = 0
