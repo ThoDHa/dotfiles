@@ -1853,7 +1853,11 @@ t render >/dev/null
 # close derives Duration from the Work Log anchors and stamps Completed
 # from the CLI clock; the header rewrite rides write_header_fields, so
 # field order stays canonical and the dashboard rows stay byte-compatible.
+# Plain-close fixtures carry their Success Criteria checked: the completion
+# gate (section below) refuses unchecked boxes, and these probes exercise
+# the stamping, not the gate.
 f_cl="$(t new --id CLS-9 --name "Closure Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_cl"
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cl" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 11:30" t log "$f_cl" "second anchor" >/dev/null
 close_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cl")"
@@ -1885,12 +1889,14 @@ assert_eq "stamp keeps Duration derived from the anchors" "2h 30m" \
 # A multi-day span renders in the compact d/h form; fewer than two
 # parseable anchors yields N/A.
 f_md="$(t new --id CLS-10 --name "Multi Day Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_md"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_md" "day one" >/dev/null
 TASKS_TEST_CLOCK="2026-06-18 11:00" t log "$f_md" "day four" >/dev/null
 TASKS_TEST_CLOCK="2026-06-18 12:00" t close "$f_md" >/dev/null
 assert_eq "close renders multi-day durations in the compact form" "3d 3h" \
 	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_md")"
 f_na="$(t new --id CLS-11 --name "No Anchor Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_na"
 refuse "stamp refuses a task that is not Completed" stamp "$f_na"
 TASKS_TEST_CLOCK="2026-06-16 12:00" t close "$f_na" >/dev/null
 assert_eq "close without two anchors stamps N/A" "N/A" \
@@ -1900,6 +1906,7 @@ assert_eq "close without two anchors stamps N/A" "N/A" \
 # the header contract carries the reason only under Blocked/Cancelled, and
 # a closed task owns nothing.
 f_blk="$(t new --id CLS-12 --name "Blocked Closure Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_blk"
 t set "$f_blk" Status=Blocked "Status Reason=waiting on deps" >/dev/null
 t claim "$f_blk" --owner sess-closer >/dev/null
 TASKS_TEST_CLOCK="2026-06-16 11:00" t close "$f_blk" >/dev/null
@@ -1909,6 +1916,65 @@ assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
 refuse "close without a taskfile is refused" close
 refuse "stamp without a taskfile is refused" stamp
 
+echo "== close: the completion gate (unchecked boxes, named children, --force override) =="
+# The gate refuses before any write when the Success Criteria carry
+# unchecked boxes or a named child task is still open; a named child is a
+# task-ID-shaped token in the file that resolves to a board file, with the
+# file's own ID, tokens naming no board file, and terminal children
+# ignored. --force closes past a refusing gate and records the override as
+# a Work Log anchor stamped at closure, so the elapsed Duration spans
+# first anchor to closure on the forced path.
+f_gate="$(t new --id CGT-1 --name "Closure Gate Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_gate" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 10:00" t log "$f_gate" "second anchor" >/dev/null
+gate_before="$(cat "$f_gate")"
+gate_err="$(t close "$f_gate" 2>&1 >/dev/null || true)"
+assert_contains "close refuses unchecked Success Criteria" "$gate_err" "fails the closure gate"
+assert_contains "the refusal counts the unchecked boxes" "$gate_err" "unchecked Success Criteria boxes: 1"
+assert_contains "the refusal offers the --force route" "$gate_err" "close anyway with --force"
+assert_eq "the refused closure leaves the file byte-identical" "$gate_before" "$(cat "$f_gate")"
+refuse "close without --force exits nonzero" close "$f_gate"
+
+# A named child blocks even with every box checked; mentioning the
+# parent's own ID and an ID that names no board file must not. Completing
+# the child unlocks the parent.
+f_gate_child="$(t new --id CGT-2 --name "Gate Child Probe")"
+f_gate_parent="$(t new --id CGT-3 --name "Gate Parent Probe")"
+t edit "$f_gate_parent" --section Objective --append <<<"Depends on CGT-2; tracked here as CGT-3; NOPE-9 names no board task." >/dev/null
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_parent"
+gate_err="$(t close "$f_gate_parent" 2>&1 >/dev/null || true)"
+assert_contains "close refuses an unfinished named child" "$gate_err" "unfinished named child task(s): CGT-2"
+refuse "the child gate refuses before any write" close "$f_gate_parent"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_child"
+TASKS_TEST_CLOCK="2026-06-16 08:00" t close "$f_gate_child" >/dev/null
+t close "$f_gate_parent" >/dev/null
+assert_eq "a parent closes once the named child is terminal" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_parent")"
+
+# The override: --force closes past the refusing gate and records the
+# note as a Work Log anchor at the closure clock, and the Duration
+# re-derives after that append, so the stamped span reads first anchor
+# (09:00) to closure (12:00), not the pre-existing 1h span.
+gate_out="$(TASKS_TEST_CLOCK="2026-06-15 12:00" t close "$f_gate" --force)"
+assert_contains "close --force closes past the gate" "$gate_out" "closed $(basename "$f_gate")"
+gate_log="$(awk '/^## Work Log/{f=1} f' "$f_gate")"
+assert_contains "the override is recorded in the Work Log" "$gate_log" "closure gate overridden (--force)"
+assert_contains "the override note names the finding" "$gate_log" "unchecked Success Criteria boxes: 1"
+assert_eq "close --force still stamps Completed" "Completed" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate")"
+assert_eq "the override anchor bounds the elapsed Duration" "3h" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_gate")"
+gate_err="$(t close "$f_gate" --cancelled --force 2>&1 >/dev/null || true)"
+assert_contains "the cancelled path refuses --force" "$gate_err" "--force gates the completion path only"
+
+# --force on a gate that passes is a plain closure: no override note.
+f_gate_ready="$(t new --id CGT-4 --name "Gate Ready Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_ready"
+t close "$f_gate_ready" --force >/dev/null
+assert_not_contains "close --force on a ready gate writes no override note" \
+	"$(awk '/^## Work Log/{f=1} f' "$f_gate_ready")" "closure gate overridden"
+rm -f "$f_gate" "$f_gate_child" "$f_gate_parent" "$f_gate_ready"
+t render >/dev/null
+
 echo "== archive: terminal tasks move to archive/ =="
 # The sanctioned alternative to the hand mv the battery's earlier archive
 # lane tests used: archive refuses open tasks, moves a terminal one under
@@ -1916,6 +1982,7 @@ echo "== archive: terminal tasks move to archive/ =="
 # deposited before and after the move share one reports dir keyed by the
 # preserved basename, so every ../reports/ link keeps resolving.
 f_ar="$(t new --id ARC-1 --name "Archive Move Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_ar"
 ar_err="$(t archive "$f_ar" 2>&1 >/dev/null || true)"
 refuse "archive refuses a non-terminal task" archive "$f_ar"
 assert_contains "archive refusal names the closure path" "$ar_err" "use 'tasks close'"
@@ -1939,6 +2006,7 @@ refuse "archive refuses an already-archived task" archive "$TASKS_DIR/archive/$(
 refuse "archive refuses an unknown task file" archive NOPE-9.md
 refuse "archive without a taskfile is refused" archive
 f_ar2="$(t new --id ARC-2 --name "Archive Claim Drop")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_ar2"
 t close "$f_ar2" >/dev/null
 printf 'sess-ghost\n' >"$f_ar2.claim"
 t archive "$f_ar2" >/dev/null
@@ -2034,6 +2102,7 @@ rm -f "$f_rpr"
 # well-formed siblings untouched; a clean file reports nothing to repair
 # without a write.
 f_sc="$(t new --id RPR-2 --name "Repair Scope Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_sc"
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_sc" "anchor one" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_sc" "anchor two" >/dev/null
 sed -i 's/^\*\*Updated:.*/**Updated:** not a stamp/' "$f_sc"
@@ -2061,6 +2130,7 @@ assert_eq "the nothing-to-repair pass leaves the file byte-identical" "$sc_befor
 rm -f "$f_sc"
 
 f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_rpc"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpc" "second anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t close "$f_rpc" >/dev/null

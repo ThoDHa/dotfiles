@@ -250,7 +250,10 @@ Commands:
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
                                        (CLI clock), elapsed Duration (first-to-last Work
                                        Log anchors), Updated; drops Status Reason and
-                                       any claim; render.
+                                       any claim; render. The closure gate refuses when
+                                       Success Criteria carry unchecked boxes or a
+                                       named child task is unfinished; --force closes
+                                       anyway and records the override in the Work Log.
                                        --cancelled transitions to Cancelled instead: Status,
                                        Duration, Updated (no Completed stamp); keeps the
                                        Status Reason already on file (refused without one),
@@ -1563,6 +1566,70 @@ cmd_archive() {
 	printf 'archived %s\n' "${dest##*/}"
 }
 
+# The leading Task ID of a task-file basename, mirroring the assembler's
+# taskid() extraction: the longest segment-terminated prefix whose
+# remainder is exactly ".md" or the stamp form "-YYYYMMDD-HHMM" plus an
+# optional slug. Prints nothing when no boundary qualifies.
+task_id_of_basename() {
+	local fb="$1" p rest cand remainder len
+	for ((p = ${#fb} - 1; p > 1; p--)); do
+		[[ "${fb:p:1}" == "-" ]] || continue
+		rest="${fb:p}"
+		[[ "$rest" =~ ^-[0-9]+ ]] || continue
+		len=${#BASH_REMATCH[0]}
+		cand="${fb:0:p+len}"
+		remainder="${fb:p+len}"
+		[[ "$cand" =~ ^[A-Za-z]+(-[0-9]+)+$ ]] || continue
+		if [[ "$remainder" == ".md" ]] \
+			|| [[ "$remainder" =~ ^-[0-9]{8}-[0-9]{4}(-.*)?\.md$ ]]; then
+			printf '%s\n' "$cand"
+			return
+		fi
+	done
+	return 0
+}
+
+# Closure gate findings for a task about to be completed: the count of
+# unchecked Success Criteria boxes (the same section-scoped, fence-blind
+# count the board lint records, so gate and lint can never disagree about
+# what "unchecked" means) and every named child task that is still open. A
+# child is named when a task-ID-shaped token anywhere in the file resolves
+# to a board file whose leading Task ID equals the token; the file's own ID
+# and tokens naming no board file are ignored, and a child blocks unless
+# its status is terminal (Completed/Cancelled). Appends one finding per
+# element to the named array; an empty array means the closure may proceed.
+closure_gate_findings() { # <array-name> <tasks_dir> <file>
+	# The nameref must not share its target's name: a `local -n findings`
+	# pointed at the caller's array of the same name is a circular self
+	# reference, and bash resolves it to an empty local instead of an error.
+	local -n gate_findings="$1"
+	local tasks_dir="$2" file="$3"
+	local unchecked
+	unchecked="$(awk '
+		/^## / { insc = (substr($0, 4) == "Success Criteria") ? 1 : 0; next }
+		insc && /^- \[ \] / { n++ }
+		END { if (n > 0) print n }
+	' "$file")"
+	[[ -n "$unchecked" ]] && gate_findings+=("unchecked Success Criteria boxes: $unchecked")
+	local own_id cand f child_id child_status child_rel
+	own_id="$(task_id_of_basename "${file##*/}")"
+	local -a children=()
+	while IFS= read -r cand; do
+		[[ -n "$cand" && "$cand" != "$own_id" ]] || continue
+		for f in "$tasks_dir/$CURRENT_DIR/$cand"*.md "$tasks_dir/$ARCHIVE_DIR/$cand"*.md; do
+			[[ -e "$f" ]] || continue
+			child_id="$(task_id_of_basename "${f##*/}")"
+			[[ "$child_id" == "$cand" ]] || continue
+			child_status="$(header_status "$f")"
+			is_terminal_status "$child_status" && continue
+			child_rel="${f#"$tasks_dir"/}"
+			children+=("$cand ($child_rel, Status: ${child_status:-missing})")
+		done
+	done < <(grep -oE '[A-Za-z]+(-[0-9]+)+' "$file" | sort -u)
+	((${#children[@]} > 0)) && gate_findings+=("unfinished named child task(s): ${children[*]}")
+	return 0
+}
+
 # Close a task: transition to Completed with the header timeline stamped
 # from the CLI clock, as the one sanctioned write path for closure. Sets
 # Status, Completed, the elapsed Duration (first-to-last Work Log anchor,
@@ -1573,16 +1640,19 @@ cmd_archive() {
 # then renders. The assembler and dashboard formats are the locked write
 # path's own, so closure rows render byte-compatibly.
 cmd_close() {
-	local dir="" cancelled=0 args=()
+	local dir="" cancelled=0 force=0 args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "close: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
 			--cancelled) cancelled=1; shift ;;
+			--force) force=1; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled]"
+	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled] [--force]"
+	((cancelled == 1 && force == 1)) \
+		&& die "close: --force gates the completion path only; --cancelled closure already requires a deliberate Status Reason"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
@@ -1596,6 +1666,28 @@ cmd_close() {
 
 	local ts duration reason
 	ts="$(now)"
+	if ((cancelled == 0)); then
+		local -a findings=()
+		closure_gate_findings findings "$tasks_dir" "$file"
+		if ((${#findings[@]} > 0)); then
+			if ((force == 0)); then
+				local finding msg
+				msg="close: $(basename "$file") fails the closure gate:"
+				for finding in "${findings[@]}"; do msg+=$'\n'"  - $finding"; done
+				msg+=$'\n'"close anyway with --force; the override is recorded in the Work Log"
+				die "$msg"
+			fi
+			local summary entry
+			summary="$(IFS=';'; printf '%s' "${findings[*]}")"
+			# The override note is a Work Log anchor stamped by the same clock
+			# the closure stamps, so deriving Duration after the append makes
+			# the stamped span read first anchor to closure, matching the
+			# elapsed definition the file itself now carries.
+			printf -v entry '### %s: close: closure gate overridden (--force): %s\n\n' "$ts" "$summary"
+			append_work_log_entry "$file" "$entry" "" "" \
+				|| die "close: failed to record the override in $(basename "$file")"
+		fi
+	fi
 	duration="$(derive_duration "$file")"
 	if ((cancelled == 1)); then
 		# Cancelled closure: the same CLI-stamped semantics as completion
