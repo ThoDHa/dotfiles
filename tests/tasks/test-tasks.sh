@@ -171,16 +171,32 @@ assert_eq "release leaves the Owner field present and empty" "1" \
 echo "== release: any session may release a foreign claim (G15 pin) =="
 # Release is a cooperative unlock, not an ownership transfer: the
 # stale-sidecar recovery path depends on any board-writer session being
-# able to release a claim left behind by a dead session, so release
-# deliberately performs no owner identity check. Pinned here as intent.
+# able to release a claim left behind by a dead session. The mismatch is
+# announced, never refused: a foreign release warns with both identities
+# and then succeeds, so recovery can never dead-end on a dead owner.
 f_xo="$(t new --id XOWN-1 --name "Cross Owner Release Target")"
 t claim "$f_xo" --owner session-alice >/dev/null
 assert_contains "claim sets the owning session" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
-TASKS_SESSION=session-bob t release "$f_xo" >/dev/null
+xo_err_file="$ROOT/xo-release-err.txt"
+xo_out="$(TASKS_SESSION=session-bob t release "$f_xo" 2>"$xo_err_file")" && xo_rc=0 || xo_rc=$?
+assert_eq "a foreign session's release succeeds" "0" "$xo_rc"
+assert_contains "a foreign session's release reports success" "$xo_out" "released XOWN-1"
+xo_err="$(cat "$xo_err_file")"
+assert_contains "the foreign-release warning reads as a warning" "$xo_err" "warning:"
+assert_contains "the warning names the sidecar's recorded owner" "$xo_err" "session-alice"
+assert_contains "the warning names the releasing session" "$xo_err" "session-bob"
+assert_contains "the warning announces the recovery unlock" "$xo_err" "recovery unlock"
 [[ ! -f "$f_xo.claim" ]] && ok "a foreign session's release removes the sidecar" || bad "a foreign session's release removes the sidecar"
 owner_cross="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo" || true)"
 assert_eq "a foreign session's release clears Owner" "" "${owner_cross:-}"
-rm -f "$f_xo"
+rm -f "$f_xo" "$xo_err_file"
+# The matching-identity leg stays silent: the warning fires on the
+# mismatch, not on release itself.
+f_xo2="$(t new --id XOWN-2 --name "Same Owner Release Target")"
+TASKS_SESSION=session-carol t claim "$f_xo2" >/dev/null
+xo2_err="$(TASKS_SESSION=session-carol t release "$f_xo2" 2>&1 >/dev/null || true)"
+assert_not_contains "a same-session release does not warn" "$xo2_err" "warning:"
+rm -f "$f_xo2"
 t render >/dev/null
 
 echo "== blocked lane =="
