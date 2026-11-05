@@ -305,6 +305,81 @@ refuse "new rejects an unknown status" new --id API-5 --name "Bogus Status Task"
 if t set "$f_cs" Status=Blocked "Status Reason=enum probe" >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
 t set "$f_cs" Status=Triage >/dev/null
 
+echo "== priority enum validation =="
+# The Priority vocabulary is pinned to the corpus's own set (Low, Medium,
+# High); new and set must reject anything else before any write lands.
+f_pri="$(t new --id PRI-1 --name "Priority Enum Target")"
+pri_before="$(cat "$f_pri")"
+pri_err="$(t new --id PRI-2 --name "Bad Priority" --priority Critical 2>&1 >/dev/null || true)"
+refuse "new rejects an unknown priority" new --id PRI-2 --name "Bad Priority" --priority Critical
+assert_contains "new's priority refusal names the vocabulary" "$pri_err" "valid: Low, Medium, High"
+pri_err="$(t set "$f_pri" Priority=Critical 2>&1 >/dev/null || true)"
+refuse "set rejects an unknown priority" set "$f_pri" Priority=Critical
+assert_contains "set's priority refusal names the vocabulary" "$pri_err" "valid: Low, Medium, High"
+assert_eq "rejected priorities leave the file byte-identical" "$pri_before" "$(cat "$f_pri")"
+refuse "set rejects an empty-value Priority pair" set "$f_pri" Priority=
+if t set "$f_pri" Priority=High >/dev/null 2>&1; then ok "set accepts a valid priority"; else bad "set accepts a valid priority"; fi
+f_pri_low="$(t new --id PRI-3 --name "Low Priority Task" --priority Low)"
+assert_contains "new writes a valid priority" "$(grep -oP '^\*\*Priority:\*\*\s+\K.*' "$f_pri_low")" "Low"
+rm -f "$f_pri" "$f_pri_low"
+t render >/dev/null
+
+echo "== set: Progress must be N% form =="
+# The render's percent normalization is a legacy-file fallback, not a
+# license for set: a bare number is refused outright instead of landing
+# unmarked and getting silently coerced at render time.
+f_prg="$(t new --id PRG-1 --name "Progress Format Target")"
+prg_before="$(cat "$f_prg")"
+prg_err="$(t set "$f_prg" Progress=45 2>&1 >/dev/null || true)"
+refuse "set rejects a bare-number Progress" set "$f_prg" Progress=45
+assert_contains "bare-number refusal names the N% contract" "$prg_err" "Progress must be an N% percentage"
+refuse "set rejects a non-numeric Progress" set "$f_prg" Progress=half
+refuse "set rejects a spaced Progress suffix" set "$f_prg" "Progress=45 %"
+refuse "set validates Progress before applying other pairs" set "$f_prg" Priority=High Progress=45
+assert_not_contains "a refused Progress writes none of the batch" "$(cat "$f_prg")" "**Priority:** High"
+assert_eq "rejected Progress values leave the file byte-identical" "$prg_before" "$(cat "$f_prg")"
+t set "$f_prg" Progress=45% >/dev/null
+assert_contains "N%-form Progress still lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "45%"
+t set "$f_prg" Progress= >/dev/null
+assert_eq "Progress deletion stays allowed" "0" "$(grep -c '^\*\*Progress:\*\*' "$f_prg")"
+rm -f "$f_prg"
+t render >/dev/null
+
+echo "== new: duplicate ID guard =="
+# An ID names one piece of work across the whole board: a second new with
+# a live ID must refuse instead of silently splitting it across two files,
+# current/ and archive/ alike. --force is the documented override for
+# deliberate reuse, and the dash-anchored glob must not false-positive on
+# a longer ID sharing a prefix.
+f_d1="$(t new --id DUP-1 --name "Duplicate Guard First")"
+dup_err="$(t new --id DUP-1 --name "Duplicate Guard Second" 2>&1 >/dev/null || true)"
+refuse "new refuses a duplicate task ID in current/" new --id DUP-1 --name "Duplicate Guard Second"
+assert_contains "duplicate refusal names the existing file" "$dup_err" "$(basename "$f_d1")"
+assert_contains "duplicate refusal names the override" "$dup_err" "--force"
+mv "$f_d1" "$TASKS_DIR/archive/"
+t render >/dev/null
+dup_err="$(t new --id DUP-1 --name "Duplicate Guard Third" 2>&1 >/dev/null || true)"
+refuse "new refuses a duplicate task ID in archive/" new --id DUP-1 --name "Duplicate Guard Third"
+assert_contains "archive-side refusal carries the same override note" "$dup_err" "--force"
+mv "$TASKS_DIR/archive/$(basename "$f_d1")" "$TASKS_DIR/current/"
+t render >/dev/null
+f_d2="$(t new --id DUP-1 --name "Duplicate Guard Second" --force)"
+[[ -f "$f_d2" ]] && ok "--force admits a deliberate ID reuse" || bad "--force admits a deliberate ID reuse"
+f_d3="$(t new --id DUP-11 --name "Near Miss ID")"
+[[ -f "$f_d3" ]] && ok "a longer ID sharing a prefix is not a duplicate" || bad "a longer ID sharing a prefix is not a duplicate"
+rm -f "$f_d1" "$f_d2" "$f_d3"
+t render >/dev/null
+
+echo "== new: --name must be a single line =="
+# The name titles the level-1 heading and the dashboard row; a newline
+# would inject bogus structure into both, so it is refused outright.
+nl_before="$(ls "$TASKS_DIR/current" | wc -l)"
+nl_err="$(t new --id NL-1 --name "$(printf 'two\nlines')" 2>&1 >/dev/null || true)"
+refuse "new rejects a multi-line --name" new --id NL-1 --name "$(printf 'two\nlines')"
+assert_contains "multi-line refusal states the single-line contract" "$nl_err" "--name must be a single line"
+refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
+assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
+
 echo "== set: unknown header keys are rejected before any write =="
 f_kv="$(t new --id SET-1 --name "Set Validation Target")"
 kv_hdr() { awk '/^## /{exit} {print}' "$f_kv"; }
@@ -390,9 +465,12 @@ t render >/dev/null
 
 echo "== set: backslash values survive verbatim =="
 f_bs="$(t new --id BS-1 --name "Backslash Target")"
-t set "$f_bs" 'Priority=c\\d' 'Duration=e\tf' >/dev/null
+# Checkpoint Gating and Duration are the free-form carriers here (the
+# subject is backslash survival through the header writer, not the field
+# semantics; Duration admits fixture values under the battery's clock seam).
+t set "$f_bs" 'Checkpoint Gating=c\\d' 'Duration=e\tf' >/dev/null
 assert_contains "double backslash in a set value survives verbatim" \
-	"$(grep -m1 '^\*\*Priority:' "$f_bs")" 'Priority:** c\\d'
+	"$(grep -m1 '^\*\*Checkpoint Gating:' "$f_bs")" 'Checkpoint Gating:** c\\d'
 assert_contains "backslash-t in a set value survives verbatim" \
 	"$(grep -m1 '^\*\*Duration:' "$f_bs")" 'Duration:** e\tf'
 rm -f "$f_bs"
@@ -422,11 +500,11 @@ f_pipe="$(t new --id API-6 --name "Piped | Name ](evil")"
 pipe_row="$(grep -F 'Piped' "$DASH")"
 assert_contains "pipe and brackets in name are escaped" "$pipe_row" 'Piped \| Name \](evil'
 assert_not_contains "raw pipe does not split the name cell" "$pipe_row" "Piped | Name"
-if t set "$f_pipe" 'Priority=High | Critical' >/dev/null 2>&1; then ok "set accepts a pipe-bearing value"; else bad "set accepts a pipe-bearing value"; fi
+if t set "$f_pipe" Status=Completed Completed="2026-06-15 12:00" 'Duration=1h | 2m' >/dev/null 2>&1; then ok "set accepts a pipe-bearing value"; else bad "set accepts a pipe-bearing value"; fi
 t render >/dev/null
 pipe_row="$(grep -F 'Piped' "$DASH")"
-assert_contains "pipe in field value is escaped" "$pipe_row" 'High \| Critical'
-assert_not_contains "field pipe does not add a column" "$pipe_row" "High | Critical"
+assert_contains "pipe in field value is escaped" "$pipe_row" '1h \| 2m'
+assert_not_contains "field pipe does not add a column" "$pipe_row" "1h | 2m"
 # Repeated renders must stay byte-identical even with escaped content present
 esc_before="$(cat "$DASH")"
 t render >/dev/null
@@ -1441,7 +1519,9 @@ assert_eq "Archive sorts by Completed ascending with undated last" \
 # Residual ties (same date, same task ID) still render exactly once each
 # and repeated renders stay byte-identical.
 f_dup1="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
-f_dup2="$(t new --id ORD-50 --name "Duplicate ID Task" --dir "$orddir")"
+# --force: the deliberate duplicate is the fixture under test here (the
+# subject is residual-tie rendering, not the duplicate ID guard).
+f_dup2="$(t new --id ORD-50 --name "Duplicate ID Task" --force --dir "$orddir")"
 [[ "$f_dup1" != "$f_dup2" ]] && ok "duplicate-ID creation yields two files" || bad "duplicate-ID creation yields two files"
 t set --dir "$orddir" "$(basename "$f_dup1")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null
 t set --dir "$orddir" "$(basename "$f_dup2")" Created="2026-07-07 07:07" Updated="2026-01-01 00:00" >/dev/null

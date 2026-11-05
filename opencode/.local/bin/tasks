@@ -104,6 +104,11 @@ readonly DEFAULT_FROM="Manager"
 readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
+
+# The Priority vocabulary is fixed; new/set must reject anything else. The
+# board's own corpus uses exactly these three values; the render's
+# missing-field default stays Medium.
+readonly PRIORITY_VALUES="Low, Medium, High"
 # The header fields the task-file template defines, in the canonical order
 # the new-task scaffold lays them out in: valid_header_key checks membership
 # against this list, HEADER_FIELDS is derived from it for error messages,
@@ -166,6 +171,14 @@ valid_task_id() {
 	[[ "$1" =~ ^[A-Za-z]+(-[0-9]+)+$ ]]
 }
 
+# The Priority vocabulary is fixed; new/set must reject anything else.
+valid_priority() {
+	case "$1" in
+		Low|Medium|High) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 # The header keys `tasks set` may write are exactly the fields the task-file
 # template defines (see the task-files skill's Task File Template). A near
 # miss like "StatusReason" must be rejected, not inserted as a new field.
@@ -193,11 +206,16 @@ Commands:
   init [--dir DIR]                     Scaffold a .tasks/ directory and empty board.
   render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
-                                       opts: --status S --priority P --dir DIR
+                                       opts: --status S --priority P --dir DIR;
+                                       --force admits a deliberate task ID reuse
+                                       (IDs are unique across current/ and archive/)
   set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
                                        CLI-owned timeline fields (Created, Updated,
                                        Completed, Duration, Latest Update) refuse
-                                       direct writes; closure goes through close.
+                                       direct writes; closure goes through close;
+                                       Owner is claim-owned (claim/release only);
+                                       Priority and Progress validate against the
+                                       header contract
   report [--dir DIR] <taskfile> --slug SLUG [--from WORKER] --digest TEXT [<file>|-]
                                        Deposit a report file under reports/ and
                                        link it from the Work Log (locked).
@@ -972,7 +990,7 @@ cmd_render() {
 }
 
 cmd_new() {
-	local id="" name="" status="$DEFAULT_STATUS" priority="$DEFAULT_PRIORITY" dir=""
+	local id="" name="" status="$DEFAULT_STATUS" priority="$DEFAULT_PRIORITY" dir="" force=0
 	while (($#)); do
 		case "$1" in
 			--id) [[ $# -ge 2 && "$2" != --* ]] || die "new: --id requires a value"; id="$2"; shift 2 ;;
@@ -983,6 +1001,7 @@ cmd_new() {
 			--status=*) status="${1#*=}"; shift ;;
 			--priority) [[ $# -ge 2 && "$2" != --* ]] || die "new: --priority requires a value"; priority="$2"; shift 2 ;;
 			--priority=*) priority="${1#*=}"; shift ;;
+			--force) force=1; shift ;;
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "new: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
 			*) die "new: unknown option: $1" ;;
@@ -990,12 +1009,33 @@ cmd_new() {
 	done
 	[[ -n "$id" ]] || die "new: --id is required"
 	[[ -n "$name" ]] || die "new: --name is required"
+	# The name titles the file's level-1 heading and the dashboard row, both
+	# single-line surfaces; a newline would inject bogus structure into both.
+	[[ "$name" != *$'\n'* && "$name" != *$'\r'* ]] \
+		|| die "new: --name must be a single line"
 	valid_task_id "$id" || die "new: invalid task ID: $id (expected PREFIX-N, hierarchically PREFIX-N-N)"
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
+	valid_priority "$priority" || die "new: unknown priority: $priority (valid: $PRIORITY_VALUES)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
+
+	# An ID names one piece of work across the whole board, current/ and
+	# archive/ alike: a second new carrying a live ID would split it across
+	# two files, so it is refused unless --force admits the deliberate
+	# reuse. The glob carries the dash of the "<id>-<stamp>-<slug>" naming
+	# scheme, so API-10 never trips API-1's guard.
+	if ((force == 0)); then
+		local -a dupes=()
+		local dupe
+		for dupe in "$tasks_dir/$CURRENT_DIR/$id-"*.md "$tasks_dir/$ARCHIVE_DIR/$id-"*.md; do
+			[[ -e "$dupe" ]] || continue
+			dupes+=("${dupe#"$tasks_dir"/}")
+		done
+		((${#dupes[@]} > 0)) \
+			&& die "new: task ID $id already exists: ${dupes[*]} (pass --force to reuse it deliberately)"
+	fi
 
 	local ts; ts="$(now)"
 	local stamp; stamp="$(now_stamp)"
@@ -1098,6 +1138,15 @@ cmd_set() {
 		if [[ "$key" == "Status" ]]; then
 			valid_status "$value" || die "set: unknown status: $value (valid: $STATUS_VALUES)"
 			new_status="$value"
+		elif [[ "$key" == "Priority" ]]; then
+			valid_priority "$value" || die "set: unknown priority: $value (valid: $PRIORITY_VALUES)"
+		elif [[ "$key" == "Progress" && -n "$value" ]]; then
+			# The dashboard's percent normalization is a render fallback for
+			# legacy files, never a license for set to write one: the header
+			# contract carries Progress as N%, so anything else is refused
+			# here instead of being silently coerced at render time.
+			[[ "$value" =~ ^[0-9]+%$ ]] \
+				|| die "set: Progress must be an N% percentage, got: $value (e.g. 45%)"
 		elif [[ "$key" == "$STATUS_REASON_KEY" ]]; then
 			status_reason_value="$value"
 			status_reason_given=1
