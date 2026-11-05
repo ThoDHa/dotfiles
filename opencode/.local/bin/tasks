@@ -1153,6 +1153,9 @@ cmd_set() {
 			if [[ "$key" == "Status" && "$value" == "$STATUS_COMPLETED" ]]; then
 				die "set: Status=$STATUS_COMPLETED must go through 'tasks close' (closure stamps Completed, Duration, and Updated)"
 			fi
+			if [[ "$key" == "Status" && "$value" == "$STATUS_CANCELLED" ]]; then
+				die "set: Status=$STATUS_CANCELLED must go through 'tasks close --cancelled' (closure stamps Duration and Updated; set the $STATUS_REASON_KEY while $STATUS_BLOCKED and it survives the closure)"
+			fi
 		fi
 		if [[ "$key" == "Status" ]]; then
 			valid_status "$value" || die "set: unknown status: $value (valid: $STATUS_VALUES)"
@@ -1268,11 +1271,13 @@ cmd_set() {
 		&& ((status_reason_given == 0)) && [[ -n "$current_reason" ]]; then
 		writes+=("$STATUS_REASON_KEY"$'\034')
 	fi
-	if is_terminal_status "$target_status"; then
+	local release_claim=0
+	is_terminal_status "$target_status" && release_claim=1
+	if ((release_claim == 1)); then
 		writes+=("Owner"$'\034'"**Owner:**")
 	fi
 	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
-	if is_terminal_status "$target_status"; then
+	if ((release_claim == 1)); then
 		rm -f "$file$CLAIM_SUFFIX"
 	fi
 	render_unlocked "$tasks_dir"
@@ -1336,6 +1341,14 @@ cmd_release() {
 }
 
 # --- closure stamping -------------------------------------------------------
+
+# Read a task file's header Status value: the first "**Status:**" line's
+# text, whitespace-trimmed per the CLI's canonical extraction, empty when
+# the field is missing or no header region exists. Shared by the closure
+# paths (close, stamp, archive), which all gate on the current status.
+header_status() {
+	awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$1"
+}
 
 # Compact CLI duration form from a minute count: "45m", "2h 15m",
 # "1d 3h", segments descending and only the nonzero trailing ones carried.
@@ -1411,7 +1424,7 @@ cmd_stamp() {
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
 	local status
-	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	status="$(header_status "$file")"
 	if ((repair == 0)); then
 		[[ "$status" == "$STATUS_COMPLETED" ]] \
 			|| die "stamp: $(basename "$file") is not Completed (status: ${status:-missing}); use 'tasks close' to close it"
@@ -1481,14 +1494,16 @@ cmd_archive() {
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 
 	local status
-	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	status="$(header_status "$file")"
 	is_terminal_status "$status" \
 		|| die "archive: $(basename "$file") is not terminal (status: ${status:-missing}); only Completed or Cancelled tasks archive (use 'tasks close')"
 
 	local dest="$tasks_dir/$ARCHIVE_DIR/${file##*/}"
 	[[ -e "$dest" ]] && die "archive: refusing to overwrite existing archive file: $ARCHIVE_DIR/${dest##*/}"
-	rm -f "$file$CLAIM_SUFFIX"
+	# Move first, drop the sidecar second: a failed mv must leave the
+	# current/ state exactly as it was, sidecar included.
 	mv "$file" "$dest" || die "archive: cannot move $(basename "$file") into $ARCHIVE_DIR (check permissions)"
+	rm -f "$file$CLAIM_SUFFIX"
 	render_unlocked "$tasks_dir"
 	printf 'archived %s\n' "${dest##*/}"
 }
@@ -1519,7 +1534,7 @@ cmd_close() {
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
 	local status
-	status="$(awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$file")"
+	status="$(header_status "$file")"
 	[[ "$status" == "$STATUS_COMPLETED" ]] \
 		&& die "close: $(basename "$file") is already Completed (use 'tasks stamp' to re-stamp)"
 

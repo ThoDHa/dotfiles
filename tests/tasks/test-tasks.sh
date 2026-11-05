@@ -1798,6 +1798,9 @@ guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Latest Up
 assert_contains "set refuses Latest Update outside the seam" "$guard_err" "'Latest Update' is CLI-owned"
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Completed" 2>&1 >/dev/null || true)"
 assert_contains "set redirects Status=Completed to close" "$guard_err" "must go through 'tasks close'"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Cancelled" 2>&1 >/dev/null || true)"
+assert_contains "set redirects Status=Cancelled to close --cancelled" "$guard_err" "must go through 'tasks close --cancelled'"
+assert_eq "the Status=Cancelled refusal leaves the file byte-identical" "$guard_before" "$(cat "$guard_target")"
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
 assert_contains "the refusal points at the stamping subcommands" "$guard_err" "log/report/claim/close/stamp"
 assert_not_contains "the refusal no longer names the seam variable" "$guard_err" "TASKS_TEST_CLOCK"
@@ -1812,6 +1815,16 @@ guard_err="$(TASKS_TEST_CLOCK=garbage t show "$guard_target" 2>&1 >/dev/null || 
 assert_contains "a malformed clock dies at startup" "$guard_err" "TASKS_TEST_CLOCK must be CLI-shaped"
 guard_err="$(env -u TASKS_DIR "$TASKS_BIN" show "$guard_target" 2>&1 >/dev/null || true)"
 assert_contains "the clock dies without an exported TASKS_DIR" "$guard_err" "honored only when TASKS_DIR is also exported"
+# The redirect's target, pinned under the same production conditions: set
+# cannot land Cancelled, so the reason rides Blocked and survives close
+# --cancelled.
+guard_reason="$(t new --id GRD-6 --name "Cancelled Reason Route Probe")"
+env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_reason" "Status=Blocked" "Status Reason=awaiting decision" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 09:00" t close "$guard_reason" --cancelled >/dev/null
+assert_eq "the sanctioned Cancelled route lands the closure" "Cancelled" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$guard_reason")"
+assert_contains "the sanctioned Cancelled route keeps the reason set while Blocked" \
+	"$(awk '/^## /{exit}{print}' "$guard_reason")" "**Status Reason:** awaiting decision"
+rm -f "$guard_reason"
 rm -f "$guard_target"
 t render >/dev/null
 
@@ -1980,7 +1993,7 @@ f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpc" "second anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t close "$f_rpc" >/dev/null
-sed -i 's/^\*\*Latest Update:.*/**Latest Update:** broken//' "$f_rpc"
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** broken/' "$f_rpc"
 sed -i 's/^\*\*Completed:.*/**Completed:** garbage/' "$f_rpc"
 TASKS_TEST_CLOCK="2026-06-17 07:00" t stamp "$f_rpc" --repair >/dev/null
 assert_eq "repair on a Completed task re-stamps Completed" "2026-06-17 07:00" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_rpc")"
