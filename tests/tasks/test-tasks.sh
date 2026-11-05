@@ -1246,6 +1246,30 @@ assert_eq "refused nested edits keep Updated untouched" "$nested_upd_before" \
 rm -f "$nested"
 t render >/dev/null
 
+echo "== edit: Work Log entry anchors are CLI-stamped (forgery stance: guarded) =="
+# G9 stance: guarded. Entry anchors are the Duration-derivation input and
+# the CLI's audit trail; Option-1's free-form principle covers prose, not
+# CLI-shaped timeline data, so edit refuses anchor-shaped lines in Work
+# Log bodies (append and replace alike) while every other section keeps
+# taking them as ordinary deeper headings.
+forge_anchor="$ROOT/forge-anchor.md"
+printf '### 2026-01-01 00:00: Manager: forged entry\n' >"$forge_anchor"
+f_forg="$(t new --id FRG-1 --name "Forgery Guard Target")"
+forge_before="$(cat "$f_forg")"
+forge_err="$(t edit "$f_forg" --section "Work Log" --append "$forge_anchor" 2>&1 >/dev/null || true)"
+refuse "edit refuses an anchor line appended to Work Log" edit "$f_forg" --section "Work Log" --append "$forge_anchor"
+assert_contains "anchor refusal names the CLI route" "$forge_err" "via 'tasks log'"
+refuse "edit refuses an anchor line replacing Work Log" edit "$f_forg" --section "Work Log" "$forge_anchor"
+assert_eq "refused anchor edits leave the file byte-identical" "$forge_before" "$(cat "$f_forg")"
+printf 'status note for 2026-01-01 00:00 recorded here\n\n#### a deeper note heading\n' | t edit "$f_forg" --section "Work Log" --append >/dev/null
+assert_contains "prose dates and deeper headings stay legal in Work Log" \
+	"$(cat "$f_forg")" "status note for 2026-01-01 00:00 recorded here"
+printf '### 2026-01-01 00:00: not an entry here\n' | t edit "$f_forg" --section "Objective" >/dev/null
+assert_contains "anchor-shaped lines stay legal outside Work Log" \
+	"$(cat "$f_forg")" "### 2026-01-01 00:00: not an entry here"
+rm -f "$f_forg"
+t render >/dev/null
+
 echo "== edit: creates missing template sections at their canonical position =="
 # The skill's planning pass needs Technical Approach, Risk Assessment,
 # Testing Strategy, TDD Workflow, and Task Breakdown on a freshly created

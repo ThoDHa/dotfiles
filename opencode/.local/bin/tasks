@@ -1783,6 +1783,24 @@ cmd_edit() {
 			&& die "edit: body lines must not begin with a heading at or above the '$section' section's own level"
 	done <<<"$content"
 
+	# Work Log entry anchors are CLI-stamped timeline data even though they
+	# live in a body section: close and stamp derive Duration from the
+	# "### <date> <time>:" headings, and log/report write them from the CLI
+	# clock. Option-1's free-form principle covers prose, not CLI-shaped
+	# timeline data, so an edit body carrying an anchor-shaped line is
+	# refused (append and replace alike); entries go through tasks log and
+	# tasks report. The guard's shape is exactly the anchor regex the
+	# duration derivation scans for, so anything it would count as an
+	# anchor cannot be forged here, and anything looser cannot corrupt the
+	# derivation either.
+	if [[ "$section" == "Work Log" ]]; then
+		local anchor_re='^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:'
+		while IFS= read -r line; do
+			[[ "$line" =~ $anchor_re ]] \
+				&& die "edit: Work Log entry anchors (### <date> <time>: ...) are CLI-stamped; append entries via 'tasks log'"
+		done <<<"$content"
+	fi
+
 	# --append with empty input is a no-op: skip the rewrite, keep the
 	# uniform success bookkeeping (Updated refresh plus render). A created
 	# section always has a body, so it never takes this branch.
