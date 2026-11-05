@@ -677,6 +677,34 @@ assert_eq "numeric slugs sort chronologically in their lane" \
 rm -f "$f_bs" "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md" "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
 t render >/dev/null
 
+echo "== task ID extraction: bash mirror and assembler taskid() agree =="
+# Differential over adversarial basenames (numeric-only slugs, stamp
+# forms with and without slugs, recreated stamps, segment-less names):
+# one side runs the real bash mirror (task_id_of_basename, sourced from
+# the script), the other the real assembler (render over fixture files,
+# ID read back from the dashboard row's label). A disagreement would let
+# a child declared by ID miss the very file the dashboard shows.
+source <(awk '/^task_id_of_basename\(\)/{f=1} f{print} f&&/^\}$/{exit}' "$TASKS_BIN")
+tid_names=("NUM-1.md" "NUM-2-20260101-1200.md" "NUM-3-20260101-1200-9-lives.md" \
+	"NUM-4-20260101-1200-12.md" "NUM-5-20260101-1200-20260102-1300.md" \
+	"NUM-6-20260101-1200-20260102-1300-again.md" "NUM-7-12.md" "NUM-8-2026.md" \
+	"NUM-9-20260101-1200-lives.md" "9.md")
+for fb in "${tid_names[@]}"; do
+	printf '%s\n' "# Task: Tid Probe ${fb%.md}" "" "**Status:** Ready" "" "## Objective" \
+		>"$TASKS_DIR/current/$fb"
+done
+t render >/dev/null
+for fb in "${tid_names[@]}"; do
+	tid_expected="$(task_id_of_basename "$fb")"
+	tid_row="$(grep -F "(./current/$fb)" "$DASH")"
+	tid_label="${tid_row#*| \[}"
+	tid_label="${tid_label%%]*}"
+	if [[ "$tid_label" == *": "* ]]; then tid_actual="${tid_label%%: *}"; else tid_actual=""; fi
+	assert_eq "taskid extraction agrees on $fb" "$tid_expected" "$tid_actual"
+done
+rm -f "$TASKS_DIR/current/"NUM-*.md "$TASKS_DIR/current/9.md"
+t render >/dev/null
+
 echo "== claim/release with a stale sidecar =="
 printf '%s\n' "stale-session" >"$f_cs.claim"
 refuse "claim under a stale sidecar is rejected" claim "$f_cs" --owner newcomer
