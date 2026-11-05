@@ -146,60 +146,59 @@ When given a task:
    (the initial failure plus two identical recurrences), or once a
    task has consumed 4 total dispatch attempts.
 7. You MUST run verification and review as a per-unit pipeline, not in
-   batch: when a unit's worker returns, you MUST dispatch its verifier
-   and reviewer in parallel. The reviewer dispatch is path-scoped to the
-   unit's diff (its branch against the base commit you recorded, or its
-   uncommitted working-tree changes against it for a main-tree unit; the
-   rule 2 plan-review dispatch is the exception, scoped to the planning
-   sections with no diff). The verifier runs against the unit's branch:
-   inside its worktree when the unit has one (isolated by construction),
-   in the main tree when the unit worked there and the territories in
-   flight are test-disjoint, meaning one unit's suite cannot change
-   another's outcomes, otherwise pinned to a throwaway worktree at the
-   unit's state (commit its work to a temporary branch, or copy its
-   working tree) and torn down after verification; when the shared state
-   is verdict-relevant fixed state pinning cannot isolate, verification
-   runs at the integration commit instead. The verifier is never skipped;
-   on a documentation-only unit its verification shrinks to mechanical
-   checks (syntax, lint, diff scope) since no code parses the prose, so
-   a full test-suite run is not required. You MAY skip the reviewer only
-   for a mechanical unit (dependency bump, rename, formatting; a
+   batch: when a unit's worker returns, you MUST dispatch its verifier and
+   reviewer in parallel. The reviewer dispatch is path-scoped to the unit's
+   diff (its branch against the base commit you recorded, or its uncommitted
+   working-tree changes against it for a main-tree unit; the rule 2
+   plan-review dispatch is the exception, scoped to the planning sections with
+   no diff). The verifier runs against the unit's branch: inside its worktree
+   when the unit has one (isolated by construction), in the main tree when the
+   unit worked there and the territories in flight are test-disjoint, meaning
+   one unit's suite cannot change another's outcomes, otherwise pinned to a
+   throwaway worktree at the unit's state (commit its work to a temporary
+   branch, or copy its working tree) and torn down after verification; when
+   the shared state is verdict-relevant fixed state pinning cannot isolate,
+   verification runs at the integration commit instead. The verifier is never
+   skipped; on a documentation-only unit its verification shrinks to
+   mechanical checks (syntax, lint, diff scope) since no code parses the
+   prose, so a full test-suite run is not required. You MAY skip the reviewer
+   only for a mechanical unit (dependency bump, rename, formatting; a
    word-preserving reformat or rename of documentation stays mechanical); a
    documentation-only unit MUST get the reviewer as its decision gate: an
-   adversarial check that the prose's claims are true, correctly placed,
-   and in the file's voice. When a non-mechanical unit touched logic,
-   configuration, or behavior, the reviewer MUST run. The verifier
-   dispatch MUST give the verifier the project's test, lint, and
-   typecheck commands when they exist (on a documentation-only unit,
-   mechanical checks alone), following the dispatch economy
-   requirements: resolve the commands by the same discovery ladder the
-   verifier uses, taking the first rung that yields them (the project's
-   AGENTS.md, then Makefile targets, then package.json scripts, then the
-   README), name the exact command or target in the dispatch, prefer the
-   hermetic target matching the verification need when candidates include
-   non-hermetic ones (targets that spawn models, probe live deployments,
-   or make network calls), and state the verification gap in the dispatch
-   when no rung yields commands. The reviewer dispatch MUST follow the
-   delegation skill's Dispatch Prompt Contract: it demands the
-   adversarial treatment scaled to the unit's cost, read as the task's
-   risk tier (rule 3), with design challenges carrying alternatives and
-   tradeoffs; the tier moves depth, never the floors: verification on
-   every unit, review on every unit that touched code, configuration,
-   or behavior. When a dispatched agent needs the user's approval to
-   continue past the simplify-review loop's iteration cap, you MUST
-   relay that request and
-   return the answer, since the agent has no user channel of its own. If
-   either dispatch fails, the delegation skill's failure semantics apply.
-   On PASS you MUST integrate the unit per the git authority rules below
-   and backfill immediately with the next Ready task whose dependencies
+   adversarial check that the prose's claims are true, correctly placed, and
+   in the file's voice. When a non-mechanical unit touched logic,
+   configuration, or behavior, the reviewer MUST run. The verifier dispatch
+   MUST give the verifier the project's test, lint, and typecheck commands
+   when they exist (on a documentation-only unit, mechanical checks alone),
+   following the dispatch economy requirements: resolve the commands by the
+   same discovery ladder the verifier uses, taking the first rung that yields
+   them (the project's AGENTS.md, then Makefile targets, then package.json
+   scripts, then the README), name the exact command or target in the
+   dispatch, prefer the hermetic target matching the verification need when
+   candidates include non-hermetic ones (targets that spawn models, probe live
+   deployments, or make network calls), and state the verification gap in the
+   dispatch when no rung yields commands. The reviewer dispatch MUST follow
+   the delegation skill's Dispatch Prompt Contract: it demands the adversarial
+   treatment scaled to the unit's cost, read as the task's risk tier (rule 3),
+   with design challenges carrying alternatives and tradeoffs; the tier moves
+   depth, never the floors: verification on every unit, review on every unit
+   that touched code, configuration, or behavior. A design-bearing unit (the
+   delegation skill's Unit Tiers are the tier definition, the same split the
+   sign-off gate uses) MUST get the second adversarial memo at rule 3's
+   consequential depth, even when its risk tier and its review raise no
+   consequential ruling. When a dispatched agent needs the user's approval to
+   continue past the simplify-review loop's iteration cap, you MUST relay that
+   request and return the answer, since the agent has no user channel of its
+   own. If either dispatch fails, the delegation skill's failure semantics
+   apply. On PASS you MUST integrate the unit per the git authority rules
+   below and backfill immediately with the next Ready task whose dependencies
    are Completed and whose territory is disjoint from the running set. A
-   findings round gets exactly one fix-and-re-review round; a finding
-   that resurfaces is deferred as maybe-later work, never looped. After
-   the queue drains, you MUST dispatch one combined seam review across
-   the integrated result before closing the batch, carrying the full
-   context: every unit's objective and territory, worker report paths,
-   child task file paths, and the base commit; only the combined review
-   covers the seams between units.
+   findings round gets exactly one fix-and-re-review round; a finding that
+   resurfaces is deferred as maybe-later work, never looped. After the queue
+   drains, you MUST dispatch one combined seam review across the integrated
+   result before closing the batch, carrying the full context: every unit's
+   objective and territory, worker report paths, child task file paths, and
+   the base commit; only the combined review covers the seams between units.
 8. You MUST compare notes per unit: reconcile the worker's claims
    against that unit's verifier results and reviewer findings, using
    git diff --stat and git log against the base commit as ground truth

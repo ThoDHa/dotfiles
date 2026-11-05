@@ -27,6 +27,15 @@ readonly CLAIM_SUFFIX=".claim"
 # board order and orders rows within a lane by their keys.
 readonly SORT_SEP=$'\034'
 
+# The claim release a terminal transition performs, as two pieces: the
+# blank Owner line joins the caller's single locked header rewrite (the
+# same whole-file commit as its other pairs), and release_claim drops
+# the sidecar once that write commits. A terminal task owns nothing, so
+# a surviving sidecar is stale by definition. close (both branches), set,
+# release, and archive route through these pieces, so a sidecar
+# semantics change lands in one place.
+readonly CLAIM_RELEASE_WRITE="Owner${SORT_SEP}**Owner:**"
+
 # Section headers for the six dashboard lanes, indexed by the lane ordinal
 # the row assembler emits (lane 7 is the latest-updated tag and has none).
 # Each string carries the exact bytes of the old per-lane printf block,
@@ -229,8 +238,8 @@ Commands:
   show [--dir DIR] <taskfile> [--tail N]
                                        Print header fields, Latest Update, and
                                        the last N Work Log entries (default 10).
-  lint [--dir DIR] [--verbose]         Read-only board lint (sections, header shape, dead
-                                       report links, checkbox drift, claim/archive
+  lint [--dir DIR] [--verbose]         Read-only board lint (sections, header shape, reason
+                                       coupling, dead report links, checkbox drift, claim/archive
                                        hygiene, commit reachability); exits 1 on hard
                                        findings. --verbose lists every advisory.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
@@ -241,16 +250,18 @@ Commands:
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
                                        (CLI clock), Duration (Work Log anchors), Updated;
                                        drops Status Reason and any claim; render.
-                                       --cancelled transitions to Cancelled instead:
-                                       Status, Duration, Updated (no Completed stamp);
-                                       keeps Status Reason, drops any claim.
+                                       --cancelled transitions to Cancelled instead: Status,
+                                       Duration, Updated (no Completed stamp); keeps the
+                                       Status Reason already on file (refused without one),
+                                       drops any claim; render.
   stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
                                        Completed task from the CLI clock and Work Log
                                        anchors; render.
-                                       --repair re-stamps the stamped timeline fields
+                                       --repair inspects each stamped timeline field
                                        (Updated, Duration, Completed, Latest Update)
-                                       on any task: the sanctioned repair for
-                                       malformed CLI-owned header fields.
+                                       against its canonical shape and re-stamps only
+                                       the malformed ones, on any task: the sanctioned
+                                       repair for malformed CLI-owned header fields.
   help                                 Show this help.
 
 Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
@@ -1274,11 +1285,11 @@ cmd_set() {
 	local release_claim=0
 	is_terminal_status "$target_status" && release_claim=1
 	if ((release_claim == 1)); then
-		writes+=("Owner"$'\034'"**Owner:**")
+		writes+=("$CLAIM_RELEASE_WRITE")
 	fi
 	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
 	if ((release_claim == 1)); then
-		rm -f "$file$CLAIM_SUFFIX"
+		release_claim "$file"
 	fi
 	render_unlocked "$tasks_dir"
 }
@@ -1332,23 +1343,43 @@ cmd_release() {
 	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
-	rm -f "$file$CLAIM_SUFFIX"
+	release_claim "$file"
 	write_header_fields "$file" \
-		"Owner"$'\034'"**Owner:**" \
+		"$CLAIM_RELEASE_WRITE" \
 		"Updated"$'\034'"**Updated:** $(now)"
 	render_unlocked "$tasks_dir"
 	printf 'released %s\n' "$(basename "$file")"
 }
 
+# Drop a released task's claim sidecar: the rm half of the terminal claim
+# release (CLAIM_RELEASE_WRITE carries the blank Owner line, which rides
+# the caller's locked header rewrite and commits before this runs).
+release_claim() { # file
+	rm -f "$1$CLAIM_SUFFIX"
+}
+
 # --- closure stamping -------------------------------------------------------
 
-# Read a task file's header Status value: the first "**Status:**" line's
+# Read a task file's header field value: the first "**<field>:**" line's
 # text, whitespace-trimmed per the CLI's canonical extraction, empty when
-# the field is missing or no header region exists. Shared by the closure
-# paths (close, stamp, archive), which all gate on the current status.
-header_status() {
-	awk '/^## /{exit} /^\*\*Status:\*\*/{sub(/^\*\*Status:\*\*[ \t]*/, ""); print; exit}' "$1"
+# the field is missing, empty, or no header region exists. Shared by the
+# closure paths (close, stamp, archive), which gate on Status through
+# header_status, and by the callers that inspect a specific field: close
+# --cancelled's Status Reason coupling and stamp --repair's per-field
+# malformed check.
+header_field_value() { # file field
+	local file="$1" field="$2"
+	awk -v field="$field" '
+		/^## / {exit}
+		index($0, "**" field ":**") == 1 {
+			sub(("^\\*\\*" field ":\\*\\*[ \t]*"), "")
+			print
+			exit
+		}
+	' "$file"
 }
+
+header_status() { header_field_value "$1" "Status"; }
 
 # Compact CLI duration form from a minute count: "45m", "2h 15m",
 # "1d 3h", segments descending and only the nonzero trailing ones carried.
@@ -1437,25 +1468,44 @@ cmd_stamp() {
 		# Repair path for malformed CLI-owned header fields: a hand-mangled
 		# Latest Update or Updated left a file with no CLI route back to
 		# canonical shape (log refreshes Updated but not Latest Update, and
-		# set refuses the fields), so repair re-stamps the whole stamped
-		# timeline in one locked write. Completed follows the file's status:
-		# re-stamped from the clock on a Completed file, deleted on an open
-		# one, where absence is canonical. Created is left alone: its true
-		# value is not reconstructible, and replacing it with the clock would
-		# be a worse drift than the one being repaired.
-		local -a writes=(
-			"Updated"$'\034'"**Updated:** $ts"
-			"Duration"$'\034'"**Duration:** $duration"
-			"Latest Update"$'\034'"**Latest Update:** [$ts] CLI-owned header repaired via 'tasks stamp --repair'"
-		)
+		# set refuses the fields). Scoped to the fields that actually fail
+		# their canonical shape (the lint's own shapes): a repair triggered
+		# by one mangled field leaves well-formed siblings (a hand-curated
+		# Latest Update note, a close-stamped Duration) untouched, and a
+		# file with nothing to repair is reported without a write. An absent
+		# or empty stamped field fails its shape and is restored, except
+		# Completed, which follows the file's status: present on an open
+		# task is the defect itself (deleted) and absent there is canonical
+		# (nothing to restore); on a Completed file a missing or malformed
+		# Completed is missing closure data and is re-stamped from the
+		# clock. Created is left alone: its true value is not
+		# reconstructible, and replacing it with the clock would be a worse
+		# drift than the one being repaired.
+		local tsre='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]$'
+		local durre='^(N/A|([0-9]+(d|h|m))( ([0-9]+(d|h|m)))*)$'
+		local lure='^\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]\] '
+		local value repaired=""
+		local -a writes=()
+		value="$(header_field_value "$file" "Updated")"
+		[[ "$value" =~ $tsre ]] || { writes+=("Updated"$'\034'"**Updated:** $ts"); repaired+=" Updated"; }
+		value="$(header_field_value "$file" "Duration")"
+		[[ "$value" =~ $durre ]] || { writes+=("Duration"$'\034'"**Duration:** $duration"); repaired+=" Duration"; }
+		value="$(header_field_value "$file" "Latest Update")"
+		[[ "$value" =~ $lure ]] || { writes+=("Latest Update"$'\034'"**Latest Update:** [$ts] CLI-owned header repaired via 'tasks stamp --repair'"); repaired+=" Latest Update"; }
+		value="$(header_field_value "$file" "Completed")"
 		if [[ "$status" == "$STATUS_COMPLETED" ]]; then
-			writes+=("Completed"$'\034'"**Completed:** $ts")
-		else
+			[[ "$value" =~ $tsre ]] || { writes+=("Completed"$'\034'"**Completed:** $ts"); repaired+=" Completed"; }
+		elif [[ -n "$value" ]]; then
 			writes+=("Completed"$'\034')
+			repaired+=" Completed"
+		fi
+		if ((${#writes[@]} == 0)); then
+			printf 'nothing to repair in %s\n' "$(basename "$file")"
+			return
 		fi
 		write_header_fields "$file" ${writes[@]+"${writes[@]}"}
 		render_unlocked "$tasks_dir"
-		printf 'repaired %s (Updated %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+		printf 'repaired %s (%s)\n' "$(basename "$file")" "${repaired# }"
 		return
 	fi
 	write_header_fields "$file" \
@@ -1501,9 +1551,11 @@ cmd_archive() {
 	local dest="$tasks_dir/$ARCHIVE_DIR/${file##*/}"
 	[[ -e "$dest" ]] && die "archive: refusing to overwrite existing archive file: $ARCHIVE_DIR/${dest##*/}"
 	# Move first, drop the sidecar second: a failed mv must leave the
-	# current/ state exactly as it was, sidecar included.
+	# current/ state exactly as it was, sidecar included. The archived
+	# file is terminal, so its claim is released with the move; the Owner
+	# blank already rode the closure write that made it terminal.
 	mv "$file" "$dest" || die "archive: cannot move $(basename "$file") into $ARCHIVE_DIR (check permissions)"
-	rm -f "$file$CLAIM_SUFFIX"
+	release_claim "$file"
 	render_unlocked "$tasks_dir"
 	printf 'archived %s\n' "${dest##*/}"
 }
@@ -1538,23 +1590,30 @@ cmd_close() {
 	[[ "$status" == "$STATUS_COMPLETED" ]] \
 		&& die "close: $(basename "$file") is already Completed (use 'tasks stamp' to re-stamp)"
 
-	local ts duration
+	local ts duration reason
 	ts="$(now)"
 	duration="$(derive_duration "$file")"
 	if ((cancelled == 1)); then
 		# Cancelled closure: the same CLI-stamped semantics as completion
 		# minus the Completed field, so Cancelled files stop carrying
 		# hand-derived closure data. The header contract ties Status Reason
-		# to Blocked/Cancelled, so unlike completion it stays; a claim
-		# still releases (a terminal task owns nothing).
+		# to Blocked/Cancelled, so unlike completion it stays, and a task
+		# that never carried one is refused before any write (set the
+		# reason while Blocked and it survives the closure): writing the
+		# header without it would strand the file in the exact drift the
+		# contract and the board lint reject, blocking every later set. A
+		# claim still releases (a terminal task owns nothing).
 		[[ "$status" == "$STATUS_CANCELLED" ]] \
 			&& die "close: $(basename "$file") is already Cancelled"
+		reason="$(header_field_value "$file" "$STATUS_REASON_KEY")"
+		[[ -n "$reason" ]] \
+			|| die "close: cancelling $(basename "$file") requires a non-empty $STATUS_REASON_KEY (the header contract ties it to $STATUS_CANCELLED); set Status=$STATUS_BLOCKED with one first and it survives the closure"
 		write_header_fields "$file" \
 			"Status"$'\034'"**Status:** $STATUS_CANCELLED" \
 			"Duration"$'\034'"**Duration:** $duration" \
 			"Updated"$'\034'"**Updated:** $ts" \
-			"Owner"$'\034'"**Owner:**"
-		rm -f "$file$CLAIM_SUFFIX"
+			"$CLAIM_RELEASE_WRITE"
+		release_claim "$file"
 		render_unlocked "$tasks_dir"
 		printf 'cancelled %s (Duration %s)\n' "$(basename "$file")" "$duration"
 		return
@@ -1565,8 +1624,8 @@ cmd_close() {
 		"Duration"$'\034'"**Duration:** $duration" \
 		"Updated"$'\034'"**Updated:** $ts" \
 		"$STATUS_REASON_KEY"$'\034' \
-		"Owner"$'\034'"**Owner:**"
-	rm -f "$file$CLAIM_SUFFIX"
+		"$CLAIM_RELEASE_WRITE"
+	release_claim "$file"
 	render_unlocked "$tasks_dir"
 	printf 'closed %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
@@ -1979,9 +2038,9 @@ lint_scan_files() { # tasks_dir files...
 			rel = fpath
 			archbit = (index(rel, ad "/") == 1) ? 1 : 0
 			for (k in have_sec) delete have_sec[k]
-			status = ""; owner = ""
+			status = ""; owner = ""; reason = ""
 			have_status = 0; have_created = 0; have_updated = 0; have_completed = 0
-			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0
+			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0; have_reason = 0
 			checked = 0; unchecked = 0
 			inhdr = 1; insc = 0; fence = 0; fnr = 0
 			while ((getline line < (td fpath)) > 0) {
@@ -2020,6 +2079,10 @@ lint_scan_files() { # tasks_dir files...
 						owner = substr(line, RSTART + RLENGTH)
 						gsub(/[ \t\r]+$/, "", owner)
 						have_owner = 1
+					} else if (!have_reason && match(line, /^\*\*Status Reason:\*\*[ \t]*/)) {
+						reason = substr(line, RSTART + RLENGTH)
+						gsub(/[ \t\r]+$/, "", reason)
+						have_reason = 1
 					}
 				}
 				if (insc) {
@@ -2034,6 +2097,7 @@ lint_scan_files() { # tasks_dir files...
 			close(td fpath)
 			print "S" sep rel sep (have_status ? status : "-") sep archbit sep have_status
 			print "O" sep rel sep owner
+			print "R" sep rel sep reason
 			print "C" sep rel sep checked sep unchecked
 			for (s in reqsec) if (!(s in have_sec)) print "M" sep rel sep s
 			}
@@ -2074,7 +2138,7 @@ cmd_lint() {
 		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
 	fi
 
-	local -A status_of arch_of have_status_of checked_of unchecked_of owner_of findings_of
+	local -A status_of arch_of have_status_of checked_of unchecked_of owner_of reason_of findings_of
 	local rec tag rel
 	for rec in "${scan_recs[@]}"; do
 		local -a parts=()
@@ -2083,6 +2147,7 @@ cmd_lint() {
 		case "$tag" in
 			S) status_of["$rel"]="${parts[2]:-}"; arch_of["$rel"]="${parts[3]:-}"; have_status_of["$rel"]="${parts[4]:-}" ;;
 			O) owner_of["$rel"]="${parts[2]:-}" ;;
+			R) reason_of["$rel"]="${parts[2]:-}" ;;
 			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}" ;;
 			M) findings_of["$rel"]+="M"$'\t'"${parts[2]:-}"$'\n' ;;
 			H) findings_of["$rel"]+="H"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\t'"${parts[4]:-}"$'\n' ;;
@@ -2143,6 +2208,15 @@ cmd_lint() {
 		if [[ "$st" != "-" ]] && ! valid_status "$st"; then
 			msg="header Status not a CLI-recognized value: '$st' (valid: $STATUS_VALUES)"
 			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+		fi
+		# The header contract ties the Status Reason to Blocked/Cancelled, and
+		# close --cancelled refuses to create the drift, so a Cancelled header
+		# without one is a finding: hard on an open task, where the missing
+		# reason also blocks every later set until it is repaired, advisory
+		# once the file is archived (terminal files are advisory-only).
+		if [[ "$st" == "$STATUS_CANCELLED" ]] && [[ -z "${reason_of[$rel]:-}" ]]; then
+			msg="Status $STATUS_CANCELLED requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)"
+			if (( "${arch_of[$rel]}" == 1 )); then advisory_out+=("ADVISORY $rel: $msg"); else hard_out+=("HARD $rel: $msg"); fi
 		fi
 		# Checkbox-vs-Status reconciliation lives in the body (Success
 		# Criteria), so it stays advisory everywhere per the Option-1 split.
