@@ -22,7 +22,9 @@ trap 'rm -rf "$ROOT"' EXIT
 export TASKS_DIR="$ROOT/.tasks"
 # Pin the CLI clock: backdating fixtures and stamp/close assertions read
 # deterministic timestamps, and the set guard admits CLI-owned header
-# fields only under this sanctioned test seam.
+# fields only under this sanctioned test seam. TASKS_DIR above and the
+# clock must stay exported together; the CLI's co-gate refuses a clock
+# without an explicit TASKS_DIR.
 export TASKS_TEST_CLOCK="2026-06-15 12:00"
 DASH="$TASKS_DIR/dashboard.md"
 
@@ -1503,10 +1505,8 @@ if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "dead links stay advisory o
 # not live links and must not fire.
 printf '%s\n' 'canonical form `[ts] digest ([report](../reports/...))` stays literal' >>"$f_lp"
 printf '%s\n' '**Report:** [07-gone.md](../reports/LP-1-20260615-1200-lint-probe-target/07-gone.md) (dead link: renumbered before deposit)' >>"$f_lp"
-lint_before="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
-lint_after="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
-assert_eq "backticked placeholders and annotated links are skipped" "$lint_before" "$lint_after"
-assert_eq "the skipped pair adds no dead-link finding" "1" "$lint_before"
+lint_dead="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
+assert_eq "the skipped pair adds no dead-link finding" "1" "$lint_dead"
 
 # Push-reconcile: a reachable recorded hash is silent, an unreachable one
 # is hard on an open task, and a line documenting known drift is skipped.
@@ -1600,7 +1600,8 @@ assert_contains "set refuses Latest Update outside the seam" "$guard_err" "'Late
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Completed" 2>&1 >/dev/null || true)"
 assert_contains "set redirects Status=Completed to close" "$guard_err" "must go through 'tasks close'"
 guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
-assert_contains "the refusal names the sanctioned seam" "$guard_err" "TASKS_TEST_CLOCK"
+assert_contains "the refusal points at the stamping subcommands" "$guard_err" "log/report/claim/close/stamp"
+assert_not_contains "the refusal no longer names the seam variable" "$guard_err" "TASKS_TEST_CLOCK"
 assert_eq "guard refusals leave the file byte-identical" "$guard_before" "$(cat "$guard_target")"
 # Under the seam the same writes land: the fixture backdating path.
 t set "$guard_target" "Completed=2026-01-01 00:00" "Duration=2h 30m" >/dev/null
@@ -1610,6 +1611,8 @@ assert_eq "an emptied Updated= pair refreshes to the pinned clock" "2026-06-15 1
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$guard_target")"
 guard_err="$(TASKS_TEST_CLOCK=garbage t show "$guard_target" 2>&1 >/dev/null || true)"
 assert_contains "a malformed clock dies at startup" "$guard_err" "TASKS_TEST_CLOCK must be CLI-shaped"
+guard_err="$(env -u TASKS_DIR "$TASKS_BIN" show "$guard_target" 2>&1 >/dev/null || true)"
+assert_contains "the clock dies without an exported TASKS_DIR" "$guard_err" "honored only when TASKS_DIR is also exported"
 rm -f "$guard_target"
 t render >/dev/null
 
@@ -1690,28 +1693,31 @@ echo "== canonical-root guard (fallback root: writes refuse, reads warn) =="
 # ancestors carry no board is what puts the CLI in bare-fallback territory
 # (a host with a board at /tmp or / would fail these probes loudly). Probes
 # run inside command substitutions; every assert runs in the parent because
-# the harness counters are in-process and a subshell assert is lost.
+# the harness counters are in-process and a subshell assert is lost. The
+# subshells also unset the pinned clock: a TASKS_TEST_CLOCK export without
+# TASKS_DIR dies at startup under the clock's co-gate, which would mask
+# the fallback behavior under test.
 guard_root="$(mktemp -d)"
 guard_board="$guard_root/.tasks"
 trap 'rm -rf "$ROOT" "$guard_root"' EXIT
 
-refuse_err="$( cd "$guard_root" && unset TASKS_DIR && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
+refuse_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "new refuses the bare fallback root" "$refuse_err" "refusing to write to the bare ./.tasks fallback"
 assert_contains "fallback refusal carries the pin remediation" "$refuse_err" "pass --dir, export TASKS_DIR"
-set_err="$( cd "$guard_root" && unset TASKS_DIR && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
+set_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
 assert_contains "set refuses the bare fallback root" "$set_err" "refusing to write to the bare ./.tasks fallback"
-log_err="$( cd "$guard_root" && unset TASKS_DIR && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
+log_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "log refuses the bare fallback root" "$log_err" "refusing to write to the bare ./.tasks fallback"
-report_err="$( cd "$guard_root" && unset TASKS_DIR && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
+report_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "report refuses the bare fallback root" "$report_err" "refusing to write to the bare ./.tasks fallback"
-init_err="$( cd "$guard_root" && unset TASKS_DIR && t init </dev/null 2>&1 >/dev/null || true )"
+init_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t init </dev/null 2>&1 >/dev/null || true )"
 assert_contains "init refuses to scaffold the bare fallback root" "$init_err" "refusing to write to the bare ./.tasks fallback"
 [[ -e "$guard_root/.tasks" ]] && bad "refused probes leave no fallback root behind" || ok "refused probes leave no fallback root behind"
 
-render_err="$( cd "$guard_root" && unset TASKS_DIR && t render </dev/null 2>&1 >/dev/null || true )"
+render_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t render </dev/null 2>&1 >/dev/null || true )"
 assert_contains "render warns on the bare fallback root" "$render_err" "warning: no board found walking up from"
 assert_contains "render keeps the missing-board die on the fallback root" "$render_err" "no .tasks directory"
-show_err="$( cd "$guard_root" && unset TASKS_DIR && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
+show_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
 assert_contains "show warns on the bare fallback root" "$show_err" "warning: no board found walking up from"
 assert_contains "show keeps the missing-board die on the fallback root" "$show_err" "no .tasks directory"
 
@@ -1723,10 +1729,10 @@ flag_file="$(t new --id GRD-2 --name "Flag Pin Probe" --dir "$guard_board")"
 env_file="$( TASKS_DIR="$guard_board"; t new --id GRD-3 --name "Env Pin Probe" )"
 [[ -f "$env_file" ]] && ok "write lands under a TASKS_DIR pin" || bad "write lands under a TASKS_DIR pin"
 mkdir "$guard_root/nested"
-walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR && t new --id GRD-4 --name "Walk-up Probe" )"
+walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-4 --name "Walk-up Probe" )"
 [[ -f "$walk_file" ]] && ok "write walks up to the found board" || bad "write walks up to the found board"
 assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guard_board/"
-walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
+walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
 assert_eq "walk-up read succeeds" "0" "$?"
 assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
 

@@ -124,15 +124,20 @@ err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 
 # The CLI clock. Test harnesses may pin it by exporting TASKS_TEST_CLOCK
-# ("YYYY-MM-DD HH:MM"): every derived timestamp (header stamps, report and
-# log entries, the new-task filename stamp) then follows that value, and
-# `tasks set` accepts the CLI-owned header fields so fixtures can backdate
-# deterministically. Production never exports it; the variable exists so
-# the never-hand-edit header contract has a sanctioned test seam, not a
-# production exemption.
-TEST_CLOCK="${TASKS_TEST_CLOCK:-}"
-if [[ -n "$TEST_CLOCK" && ! "$TEST_CLOCK" =~ ^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\ [0-9][0-9]:[0-9][0-9]$ ]]; then
-	die "TASKS_TEST_CLOCK must be CLI-shaped (YYYY-MM-DD HH:MM), got: $TEST_CLOCK"
+# ("YYYY-MM-DD HH:MM") together with TASKS_DIR: every derived timestamp
+# (header stamps, report and log entries, the new-task filename stamp)
+# then follows that value, and `tasks set` accepts the CLI-owned header
+# fields so fixtures can backdate deterministically. The clock is honored
+# only on an explicitly pinned board (test boards always export both
+# variables); a clock without TASKS_DIR dies at startup, so exporting the
+# clock alone can never open the seam on an interactive board.
+TEST_CLOCK=""
+if [[ -n "${TASKS_TEST_CLOCK:-}" ]]; then
+	if [[ ! "$TASKS_TEST_CLOCK" =~ ^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\ [0-9][0-9]:[0-9][0-9]$ ]]; then
+		die "TASKS_TEST_CLOCK must be CLI-shaped (YYYY-MM-DD HH:MM), got: $TASKS_TEST_CLOCK"
+	fi
+	[[ -n "${TASKS_DIR:-}" ]] || die "TASKS_TEST_CLOCK is honored only when TASKS_DIR is also exported (test boards set both)"
+	TEST_CLOCK="$TASKS_TEST_CLOCK"
 fi
 
 now() {
@@ -1078,12 +1083,13 @@ cmd_set() {
 		# CLI-owned header fields take no direct writes: the timeline is
 		# stamped by the CLI's own operations (log, report, claim, close,
 		# stamp), and backdating them through set is exactly the drift the
-		# Option-1 contract exists to stop. Test harnesses pin
-		# TASKS_TEST_CLOCK, which doubles as the sanctioned fixture seam.
+		# Option-1 contract exists to stop. Test boards pin TASKS_TEST_CLOCK
+		# together with TASKS_DIR, which unlocks these fields for fixture
+		# backdating.
 		if [[ -z "$TEST_CLOCK" ]]; then
 			case "$key" in
 				Created|Updated|Completed|Duration|"Latest Update")
-					die "set: '$key' is CLI-owned; the header timeline is stamped by log/report/claim/close/stamp, not set (test harnesses may export TASKS_TEST_CLOCK)" ;;
+					die "set: '$key' is CLI-owned; the header timeline is stamped by log/report/claim/close/stamp, not set" ;;
 			esac
 			if [[ "$key" == "Status" && "$value" == "$STATUS_COMPLETED" ]]; then
 				die "set: Status=$STATUS_COMPLETED must go through 'tasks close' (closure stamps Completed, Duration, and Updated)"
