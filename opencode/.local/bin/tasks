@@ -330,13 +330,26 @@ warn_fallback_tasks_dir() {
 	err "warning: no board found walking up from $PWD; using the bare ./.tasks fallback at $1 (writes refuse it; pass --dir or export TASKS_DIR to pin the board)"
 }
 
-# Resolve a task file argument to a real path: as given, or under current/, or archive/.
+# Resolve a task file argument to a real path: as given, or under current/,
+# or archive/. Every existing-file candidate is contained to the board root:
+# the resolved candidate (readlink -f, so traversal and symlinks cannot
+# smuggle a write past a string prefix) must carry the resolved board root
+# as a path prefix, which keeps explicit --dir boards, relative in-board
+# arguments, and in-board traversal working while refusing any argument
+# that escapes the board.
 resolve_task_file() {
 	local tasks_dir="$1" arg="$2"
-	if [[ -f "$arg" ]]; then printf '%s' "$arg"; return; fi
-	if [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$CURRENT_DIR/$arg"; return; fi
-	if [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$ARCHIVE_DIR/$arg"; return; fi
-	die "task file not found: $arg"
+	local board; board="$(readlink -f "$tasks_dir")"
+	local cand
+	if [[ -f "$arg" ]]; then cand="$arg"
+	elif [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then cand="$tasks_dir/$CURRENT_DIR/$arg"
+	elif [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then cand="$tasks_dir/$ARCHIVE_DIR/$arg"
+	else die "task file not found: $arg"
+	fi
+	local real; real="$(readlink -f "$cand")" || die "task file not found: $arg"
+	[[ "$real" == "$board"/* ]] \
+		|| die "task file escapes the board root: $arg resolves to $real, outside the board at $board"
+	printf '%s' "$cand"
 }
 
 # Print the header region of a task file from stdin: everything before the
@@ -1195,9 +1208,13 @@ cmd_set() {
 			# The dashboard's percent normalization is a render fallback for
 			# legacy files, never a license for set to write one: the header
 			# contract carries Progress as N%, so anything else is refused
-			# here instead of being silently coerced at render time.
+			# here instead of being silently coerced at render time, and the
+			# percentage itself is bounded to 0-100 inclusive (10# guards
+			# against an octal misread of leading zeros).
 			[[ "$value" =~ ^[0-9]+%$ ]] \
 				|| die "set: Progress must be an N% percentage, got: $value (e.g. 45%)"
+			(( 10#${value%\%} <= 100 )) \
+				|| die "set: Progress must be 0-100 inclusive, got: $value (e.g. 45%)"
 		elif [[ "$key" == "$STATUS_REASON_KEY" ]]; then
 			status_reason_value="$value"
 			status_reason_given=1

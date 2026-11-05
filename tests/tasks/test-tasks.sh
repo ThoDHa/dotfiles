@@ -370,6 +370,14 @@ assert_not_contains "a refused Progress writes none of the batch" "$(cat "$f_prg
 assert_eq "rejected Progress values leave the file byte-identical" "$prg_before" "$(cat "$f_prg")"
 t set "$f_prg" Progress=45% >/dev/null
 assert_contains "N%-form Progress still lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "45%"
+prg_err="$(t set "$f_prg" Progress=101% 2>&1 >/dev/null || true)"
+refuse "set rejects Progress above 100" set "$f_prg" Progress=101%
+assert_contains "the range refusal names the 0-100 bound" "$prg_err" "Progress must be 0-100 inclusive"
+refuse "set rejects far-out-of-range Progress" set "$f_prg" Progress=456%
+t set "$f_prg" Progress=100% >/dev/null
+assert_contains "Progress 100% lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "100%"
+t set "$f_prg" Progress=0% >/dev/null
+assert_contains "Progress 0% lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "0%"
 t set "$f_prg" Progress= >/dev/null
 assert_eq "Progress deletion stays allowed" "0" "$(grep -c '^\*\*Progress:\*\*' "$f_prg")"
 rm -f "$f_prg"
@@ -2234,6 +2242,33 @@ assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guar
 walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
 assert_eq "walk-up read succeeds" "0" "$?"
 assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
+
+echo "== resolve: task file arguments are contained to the board root =="
+# resolve_task_file admits bare names, in-board paths, and archive paths,
+# but every existing-file candidate must resolve inside the resolved board
+# root (readlink -f, so traversal and symlinks cannot smuggle a write past
+# a string prefix). Explicit --dir boards and relative in-board paths keep
+# working: containment compares resolved paths, not spellings.
+f_ctn="$(t new --id CTN-1 --name "Containment Probe")"
+refuse "a nonexistent path outside the board is not found" show "$ROOT/outside.md"
+printf 'not a task file\n' >"$ROOT/outside.md"
+ctn_err="$(t show "$ROOT/outside.md" 2>&1 >/dev/null || true)"
+refuse "an existing file outside the board root is refused" show "$ROOT/outside.md"
+assert_contains "the containment refusal names the board root" "$ctn_err" "escapes the board root"
+ctn_err="$(t show "$TASKS_DIR/current/../../outside.md" 2>&1 >/dev/null || true)"
+refuse "traversal escaping the board root is refused" show "$TASKS_DIR/current/../../outside.md"
+assert_contains "the traversal refusal resolves the real path" "$ctn_err" "resolves to"
+ln -s "$ROOT/outside.md" "$TASKS_DIR/current/escape.md"
+refuse "a symlink pointing outside the board is refused" show "$TASKS_DIR/current/escape.md"
+rm -f "$TASKS_DIR/current/escape.md" "$ROOT/outside.md"
+f_ctn2="$(t new --id CTN-2 --name "Traversal Probe")"
+mv "$f_ctn2" "$TASKS_DIR/archive/"
+t show "$TASKS_DIR/current/../archive/$(basename "$f_ctn2")" >/dev/null \
+	&& ok "in-board traversal remains readable" || bad "in-board traversal remains readable"
+( cd "$TASKS_DIR" && t show "current/$(basename "$f_ctn")" ) >/dev/null \
+	&& ok "a relative in-board path remains readable" || bad "a relative in-board path remains readable"
+rm -f "$f_ctn" "$TASKS_DIR/archive/$(basename "$f_ctn2")"
+t render >/dev/null
 
 print_result
 ((fail == 0)) || exit 1
