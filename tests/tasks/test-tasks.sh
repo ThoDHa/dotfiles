@@ -380,6 +380,55 @@ assert_contains "multi-line refusal states the single-line contract" "$nl_err" "
 refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
 assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
 
+echo "== set: Owner is claim-owned =="
+# Ownership never moves through set: the Owner field is written by claim
+# (atomically, alongside its O_EXCL sidecar) and cleared by release. The
+# refusal is unconditional - it does not open under the battery's clock
+# seam, which exists for timeline backdating, not ownership.
+f_own="$(t new --id OWN-1 --name "Owner Guard Target")"
+own_before="$(cat "$f_own")"
+own_err="$(t set "$f_own" Owner=ghost-session 2>&1 >/dev/null || true)"
+refuse "set refuses an Owner write" set "$f_own" Owner=ghost-session
+assert_contains "Owner refusal names the claim path" "$own_err" "'tasks claim' and 'tasks release'"
+own_err="$(t set "$f_own" Owner= 2>&1 >/dev/null || true)"
+refuse "set refuses Owner deletion too" set "$f_own" Owner=
+assert_contains "Owner deletion refusal names the claim path too" "$own_err" "claim-owned"
+assert_eq "Owner refusals leave the file byte-identical" "$own_before" "$(cat "$f_own")"
+if t claim "$f_own" --owner claim-owner >/dev/null 2>&1; then ok "claim stays the ownership write path"; else bad "claim stays the ownership write path"; fi
+assert_contains "claim sets Owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_own")" "claim-owner"
+t release "$f_own" >/dev/null
+rm -f "$f_own"
+t render >/dev/null
+
+echo "== terminal status transitions release a live claim =="
+# Mirroring close: a terminal task owns nothing. A Cancelled transition
+# through set is the one terminal write that would otherwise leave the
+# sidecar behind (Completed goes through close, and the seam-admitted
+# Completed pair is pinned for the same guarantee).
+f_t1="$(t new --id TRL-1 --name "Terminal Release Target")"
+t claim "$f_t1" --owner sess-terminal >/dev/null
+t set "$f_t1" Status=Cancelled "Status Reason=terminal probe" >/dev/null
+[[ ! -f "$f_t1.claim" ]] && ok "set to Cancelled removes the claim sidecar" || bad "set to Cancelled removes the claim sidecar"
+assert_eq "set to Cancelled leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t1")"
+assert_contains "set to Cancelled lands the status" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_t1")" "Cancelled"
+f_t2="$(t new --id TRL-2 --name "Terminal Completed Target")"
+t claim "$f_t2" --owner sess-completed >/dev/null
+t set "$f_t2" Status=Completed >/dev/null
+[[ ! -f "$f_t2.claim" ]] && ok "set to Completed removes the claim sidecar" || bad "set to Completed removes the claim sidecar"
+assert_eq "set to Completed leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t2")"
+f_t3="$(t new --id TRL-3 --name "Stale Claim On Terminal")"
+t set "$f_t3" Status=Cancelled "Status Reason=stale probe" >/dev/null
+printf 'sess-stale\n' >"$f_t3.claim"
+t set "$f_t3" Priority=High >/dev/null
+[[ ! -f "$f_t3.claim" ]] && ok "a set on an already-terminal file releases its stale sidecar" || bad "a set on an already-terminal file releases its stale sidecar"
+f_t4="$(t new --id TRL-4 --name "Open Set Claim Target")"
+t claim "$f_t4" --owner sess-open >/dev/null
+t set "$f_t4" Priority=High >/dev/null
+[[ -f "$f_t4.claim" ]] && ok "an open-status set keeps the live claim" || bad "an open-status set keeps the live claim"
+t release "$f_t4" >/dev/null
+rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4"
+t render >/dev/null
+
 echo "== set: unknown header keys are rejected before any write =="
 f_kv="$(t new --id SET-1 --name "Set Validation Target")"
 kv_hdr() { awk '/^## /{exit} {print}' "$f_kv"; }
@@ -444,16 +493,29 @@ pos_order() {
 	awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_pos"
 }
 POS_CANONICAL_ORDER="$(printf '%s\n' Created Status Priority Progress Owner "Checkpoint Gating" Updated "Latest Update")"
-t set "$f_pos" Owner= >/dev/null
+# Ownership refuses set (claim-owned), so the deletion/re-insert legs of
+# this ordering pin drive the internal writer seam directly, the same
+# sanctioned sourcing pattern the set_header_field section below uses:
+# the subject is write_header_fields slot behavior, not the ownership
+# protocol, and claim/release legs of the pin follow unchanged.
+owner_seam() { # value; set or clear the fixture's Owner through the sourced writer seam
+	local value="$1"
+	(
+		set -euo pipefail
+		source "$TASKS_BIN" help >/dev/null 2>&1
+		set_header_field "$f_pos" "Owner" "$value"
+	)
+}
+owner_seam ""
 assert_not_contains "Owner deletion removes the field" "$(awk '/^## /{exit}{print}' "$f_pos")" "**Owner:**"
-t set "$f_pos" Owner=worker-pos >/dev/null
+owner_seam "worker-pos"
 assert_eq "re-set Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
-t set "$f_pos" Owner= >/dev/null
+owner_seam ""
 t claim "$f_pos" --owner claim-pos >/dev/null
 assert_eq "claimed Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
 t release "$f_pos" >/dev/null
 assert_eq "release keeps Owner in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
-t set "$f_pos" Owner= >/dev/null
+owner_seam ""
 t release "$f_pos" >/dev/null
 assert_eq "blank-path Owner insert lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
 assert_eq "blank-path Owner insert writes the bare field" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_pos")"
@@ -1603,19 +1665,22 @@ assert_not_contains "a drift-disposition hash line is skipped" "$lint_out" "dead
 sed -i '/commit deadbee99 pushed to origin/d' "$f_lp"
 
 # Claim hygiene: Owner without sidecar, sidecar without Owner, and an
-# owner mismatch are hard on an open task; parity passes silently.
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=ghost-session >/dev/null
+# owner mismatch are hard on an open task; parity passes silently. Owner
+# is claim-owned now, so the drift fixtures are written directly into the
+# header (sed), the same direct-fixture approach the rest of this section
+# uses (lint is the subject under test, not the write path).
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** ghost-session/' "$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags Owner without a claim sidecar" "$lint_out" "Owner 'ghost-session' set without a claim sidecar"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner= >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:**/' "$f_lp"
 printf 'orphan-owner\n' >"$f_lp.claim"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags a sidecar whose header Owner is empty" "$lint_out" \
 	"claim sidecar present but header Owner is empty"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=live-owner >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** live-owner/' "$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags a sidecar-owner mismatch" "$lint_out" "does not match header Owner 'live-owner'"
-t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=orphan-owner >/dev/null
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:** orphan-owner/' "$f_lp"
 if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "matching owner and sidecar passes"; else bad "matching owner and sidecar passes"; fi
 
 # Terminal files are advisory-only: a Completed task with unchecked boxes

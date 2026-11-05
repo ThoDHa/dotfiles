@@ -1120,6 +1120,15 @@ cmd_set() {
 		value="${pair#*=}"
 		valid_header_key "$key" \
 			|| die "set: unknown header key: $key (valid fields: $HEADER_FIELDS)"
+		# Ownership never moves through set: the Owner field is written by
+		# claim (atomically, alongside its O_EXCL sidecar) and cleared by
+		# release, so a header Owner without a sidecar is exactly the drift
+		# the board lint flags as hard. This refusal is unconditional - it
+		# does not open under the test clock seam, because the seam exists
+		# for fixture backdating of timeline fields, not for ownership.
+		if [[ "$key" == "Owner" ]]; then
+			die "set: 'Owner' is claim-owned; ownership changes go through 'tasks claim' and 'tasks release'"
+		fi
 		# CLI-owned header fields take no direct writes: the timeline is
 		# stamped by the CLI's own operations (log, report, claim, close,
 		# stamp), and backdating them through set is exactly the drift the
@@ -1215,6 +1224,12 @@ cmd_set() {
 	# unless this call already manages the pair explicitly; deleting an
 	# absent key writes nothing for it, so a task that never carried a
 	# reason is not rewritten for nothing beyond the pairs themselves.
+	# Reaching a terminal status releases a live claim on the same locked
+	# commit, mirroring close: a terminal task owns nothing, so the
+	# sidecar would only survive as the stale-claim drift the lint flags.
+	# This covers a transition landing in this call and equally a set on
+	# a file that is already terminal, where any surviving sidecar is
+	# stale by definition.
 	local -a writes=()
 	local touched_updated=0
 	for ((i = 1; i < ${#args[@]}; i++)); do
@@ -1243,7 +1258,13 @@ cmd_set() {
 		&& ((status_reason_given == 0)) && [[ -n "$current_reason" ]]; then
 		writes+=("$STATUS_REASON_KEY"$'\034')
 	fi
+	if is_terminal_status "$target_status"; then
+		writes+=("Owner"$'\034'"**Owner:**")
+	fi
 	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
+	if is_terminal_status "$target_status"; then
+		rm -f "$file$CLAIM_SUFFIX"
+	fi
 	render_unlocked "$tasks_dir"
 }
 
