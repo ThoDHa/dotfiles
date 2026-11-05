@@ -507,7 +507,7 @@ A task cannot be marked Completed unless:
 
 ## Work Log
 
-This section is the task's Jira-style narrative: a chronological comment stream of all work performed, whether by agents/allies or by the manager. Verbatim agent report content lives in linked files under `reports/` ([Reports Namespace](#reports-namespace)); entries reference it by digest and link per [Agent Report Entries](#agent-report-entries). Tone note: Manager entries remain factual and objective; agent-authored content (digest lines and report files) is recorded verbatim per [Tone and Voice Policy](#tone-and-voice-policy).
+This section is the task's Jira-style narrative: a chronological comment stream of all work performed, whether by agents/allies or by the manager. Verbatim agent report content lives in linked files under `reports/` ([Reports Namespace](#reports-namespace)); entries reference it by digest and link per [Agent Report Entries](#agent-report-entries). Tone note: Manager entries remain factual and objective; agent-authored content (digest lines and report files) is recorded verbatim per [Tone and Voice Policy](#tone-and-voice-policy). **History-reshape convention:** when integration reshapes history (folds, squashes) and a Work Log entry names a commit hash that is now dangling, that entry is annotated with the superseding hash and one of the drift words (superseded, unreachable, accepted-lost) so push-reconcile skips it; the ORCH-2 incident is the evidence.
 
 ### [Timestamp]: [Agent/Ally Name]: [Task ID or "Exploration"]
 
