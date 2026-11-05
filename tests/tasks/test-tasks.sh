@@ -1865,6 +1865,33 @@ if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "archived Cancelled drift k
 mv "$lint_dir/archive/$(basename "$f_lp")" "$f_lp"
 sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lp"
 
+# The Blocked leg of the same coupling: the set path refuses to land on
+# Blocked without a reason (pinned in the set section), so lint owns the
+# hand-edited and legacy drift. Owner is emptied first: an open status
+# carrying this fixture's sidecar-less Owner would add the claim-drift
+# hard finding and muddy the exit-code pins below.
+sed -i 's/^\*\*Owner:\*\*.*/**Owner:**/' "$f_lp"
+sed -i 's/^\*\*Status:.*/**Status:** Blocked/' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags Blocked without a Status Reason as hard" "$lint_out" \
+	"HARD current/$(basename "$f_lp"): Status Blocked requires a Status Reason"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then bad "lint exits 1 on Blocked without a reason"; else ok "lint exits 1 on Blocked without a reason"; fi
+sed -i '/^\*\*Status:.*/a **Status Reason:** waiting on upstream repair' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "the reason clears the Blocked coupling finding" "$lint_out" "Status Blocked requires"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "Blocked with a reason keeps lint green"; else bad "Blocked with a reason keeps lint green"; fi
+sed -i '/^\*\*Status Reason:/d' "$f_lp"
+mv "$f_lp" "$lint_dir/archive/$(basename "$f_lp")"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "archived Blocked without a reason is advisory" "$lint_out" \
+	"ADVISORY archive/$(basename "$f_lp"): Status Blocked requires a Status Reason"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "archived Blocked drift keeps lint green"; else bad "archived Blocked drift keeps lint green"; fi
+mv "$lint_dir/archive/$(basename "$f_lp")" "$f_lp"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a Completed header owes no Status Reason" "$lint_out" "requires a Status Reason"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "terminal-file reason absence keeps lint green"; else bad "terminal-file reason absence keeps lint green"; fi
+
 # Archive hygiene: archiving an open task is advisory.
 printf '%s\n' '# Task: Archived Open' '' '**Created:** 2024-01-01 09:01' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2024-01-01 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '## Execution Log' >"$lint_dir/archive/20240101-0901-archived-open.md"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"

@@ -2466,12 +2466,14 @@ cmd_lint() {
 			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
 		fi
 		# The header contract ties the Status Reason to Blocked/Cancelled, and
-		# close --cancelled refuses to create the drift, so a Cancelled header
-		# without one is a finding: hard on an open task, where the missing
-		# reason also blocks every later set until it is repaired, advisory
-		# once the file is archived (terminal files are advisory-only).
-		if [[ "$st" == "$STATUS_CANCELLED" ]] && [[ -z "${reason_of[$rel]:-}" ]]; then
-			msg="Status $STATUS_CANCELLED requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)"
+		# set and close --cancelled refuse to create the drift, so a Blocked
+		# or Cancelled header without one is a finding: hard on an open task,
+		# where the missing reason also blocks every later set until it is
+		# repaired, advisory once the file is archived (terminal files are
+		# advisory-only).
+		if [[ "$st" == "$STATUS_BLOCKED" || "$st" == "$STATUS_CANCELLED" ]] \
+			&& [[ -z "${reason_of[$rel]:-}" ]]; then
+			msg="Status $st requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)"
 			if (( "${arch_of[$rel]}" == 1 )); then advisory_out+=("ADVISORY $rel: $msg"); else hard_out+=("HARD $rel: $msg"); fi
 		fi
 		# Checkbox-vs-Status reconciliation lives in the body (Success
