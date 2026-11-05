@@ -347,7 +347,12 @@ resolve_task_file() {
 	else die "task file not found: $arg"
 	fi
 	local real; real="$(readlink -f "$cand")" || die "task file not found: $arg"
-	[[ "$real" == "$board"/* ]] \
+	# Literal prefix strip, not a "==" glob: a board root containing glob
+	# metacharacters must not let a sibling path match the pattern and slip
+	# past containment. under == real means the prefix did not match; under
+	# lacking its leading slash means real is the root itself or a sibling.
+	local under="${real#"$board"}"
+	[[ "$under" != "$real" && "$under" == /* ]] \
 		|| die "task file escapes the board root: $arg resolves to $real, outside the board at $board"
 	printf '%s' "$cand"
 }
@@ -1209,11 +1214,13 @@ cmd_set() {
 			# legacy files, never a license for set to write one: the header
 			# contract carries Progress as N%, so anything else is refused
 			# here instead of being silently coerced at render time, and the
-			# percentage itself is bounded to 0-100 inclusive (10# guards
-			# against an octal misread of leading zeros).
+			# percentage itself is bounded to 0-100 inclusive.
 			[[ "$value" =~ ^[0-9]+%$ ]] \
 				|| die "set: Progress must be an N% percentage, got: $value (e.g. 45%)"
-			(( 10#${value%\%} <= 100 )) \
+			# Range as a regex, not arithmetic: bash arithmetic wraps modulo
+			# 2^64, so an astronomically large N could wrap to a passing value;
+			# 0* tolerates leading zeros (007% is 7, 0100% is 100).
+			[[ "$value" =~ ^0*([0-9]{1,2}|100)%$ ]] \
 				|| die "set: Progress must be 0-100 inclusive, got: $value (e.g. 45%)"
 		elif [[ "$key" == "$STATUS_REASON_KEY" ]]; then
 			status_reason_value="$value"
@@ -1637,7 +1644,7 @@ closure_gate_findings() { # <array-name> <tasks_dir> <file>
 	local tasks_dir="$2" file="$3"
 	local unchecked
 	unchecked="$(awk '
-		/^## / { insc = (substr($0, 4) == "Success Criteria") ? 1 : 0; next }
+		/^## / { sec = substr($0, 4); sub(/[ \t\r]+$/, "", sec); insc = (sec == "Success Criteria") ? 1 : 0; next }
 		insc && /^- \[ \] / { n++ }
 		END { if (n > 0) print n }
 	' "$file")"
