@@ -1,6 +1,6 @@
 ---
 name: delegation
-description: Manager Mode and delegation protocol covering activation triggers like you are a manager or delegate this, allies versus agents, parallel safety rules, worktree isolation and teardown, dispatch prompt contracts, resource assessment, unit tier floors, and question batching. Use when the user chooses parallel or worktree execution or asks about delegating work to agents.
+description: Manager Mode and delegation protocol covering activation triggers like you are a manager or delegate this, allies versus agents, parallel safety rules, worktree isolation and teardown, dispatch prompt contracts, resource assessment, unit tier floors, batch closure, and question batching. Use when the user chooses parallel or worktree execution or asks about delegating work to agents.
 ---
 
 > When Manager Mode work is tracked in task files, also load the `task-files` skill.
@@ -121,6 +121,13 @@ A completed-unit reviewer dispatch MUST include the unit's objective and territo
 ### Context Continuity
 
 When a unit of work depends on the output of an earlier unit the same agent produced, implementations SHOULD resume that agent's session with the new objective instead of dispatching a fresh one: the context already lives there, and retelling it through the dispatcher wastes tokens. A fresh dispatch is REQUIRED when the dependency crosses agents or when the earlier session's context is poisoned; in that case the dispatch prompt MUST include the earlier unit's report as background the receiving agent MUST verify for itself, never as predetermined outcomes (when task files are active, the report's path under `.tasks/reports/` may serve in place of an inline copy, per the `task-files` skill).
+
+### Batch Closure
+
+A batch is the set of units one approved plan dispatches under one [Execution Sign-off Gate](#execution-sign-off-gate) go-ahead. When every unit in the batch has completed and been integrated, the manager closes the batch by dispatching the batch's closure surfaces once for the whole batch, never per unit: one combined seam review across the integrated result, and one watchdog audit of the batch's records where the proportionality rule below warrants one. The aggregation never touches unit floors: every unit's verification and review already ran at its [Unit Tiers](#unit-tiers) floor during the batch, and closure adds the batch-level surfaces on top without repeating a per-unit round.
+The combined seam review MUST cover the integrated result across all of the batch's units, since only a review spanning the batch's units sees the seams between them, and no per-unit reviewer sees another unit's territory. Its dispatch carries, for every unit in the batch, the context the [Dispatch Prompt Contract](#dispatch-prompt-contract) requires of a completed-unit reviewer dispatch: the unit's objective and territory, the worker report path when one exists, the child task file path when the task-files protocol is active, and the base commit the units worked from; its findings land in one deposit covering the batch, at the destination the contract's reviewer-dispatch rules name.
+The watchdog audit MUST hold the batch's records against reality before the batch counts as closed: tracking records and recorded decisions checked for status drift, missing dispositions, and unrecorded decisions, with findings recorded and acted on like review findings. When the task-files protocol is not in force, the dispatch carries the tracker state and the decision records, since the auditor cannot reach them otherwise.
+Closure stays proportional to the batch's tier weight, mirroring the tiers' per-unit proportionality: a batch consisting of a single mechanical unit MUST close with the combined seam review alone and no watchdog audit, since the audit targets batch-scale drift between records and reality and a one-unit mechanical batch carries no such surface worth a dedicated audit round; every other batch closes with both surfaces.
 
 ## Safety Requirements
 
