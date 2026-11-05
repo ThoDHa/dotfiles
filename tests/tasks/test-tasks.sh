@@ -370,6 +370,14 @@ assert_not_contains "a refused Progress writes none of the batch" "$(cat "$f_prg
 assert_eq "rejected Progress values leave the file byte-identical" "$prg_before" "$(cat "$f_prg")"
 t set "$f_prg" Progress=45% >/dev/null
 assert_contains "N%-form Progress still lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "45%"
+prg_err="$(t set "$f_prg" Progress=101% 2>&1 >/dev/null || true)"
+refuse "set rejects Progress above 100" set "$f_prg" Progress=101%
+assert_contains "the range refusal names the 0-100 bound" "$prg_err" "Progress must be 0-100 inclusive"
+refuse "set rejects far-out-of-range Progress" set "$f_prg" Progress=456%
+t set "$f_prg" Progress=100% >/dev/null
+assert_contains "Progress 100% lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "100%"
+t set "$f_prg" Progress=0% >/dev/null
+assert_contains "Progress 0% lands" "$(grep -oP '^\*\*Progress:\*\*\s+\K.*' "$f_prg")" "0%"
 t set "$f_prg" Progress= >/dev/null
 assert_eq "Progress deletion stays allowed" "0" "$(grep -c '^\*\*Progress:\*\*' "$f_prg")"
 rm -f "$f_prg"
@@ -409,6 +417,36 @@ refuse "new rejects a multi-line --name" new --id NL-1 --name "$(printf 'two\nli
 assert_contains "multi-line refusal states the single-line contract" "$nl_err" "--name must be a single line"
 refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
 assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
+
+echo "== new: --status is restricted to Triage and Ready outside the test seam =="
+# Creation admits only the two intake states: deeper states are lifecycle
+# positions (set/claim/release/close), a directly created Blocked file
+# would skip the reason coupling, and a directly created terminal file
+# would carry no closure stamps. Probes run with the clock seam unset, in
+# production conditions, via env -u like the CLI-owned-fields guard above;
+# the battery's own fixtures (created under the exported TASKS_TEST_CLOCK)
+# keep the full vocabulary through the seam.
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-1 --name "IP Status Probe" --status "In Progress" 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status In Progress outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+assert_contains "the refusal names the lifecycle route" "$nst_err" "set/claim/release/close"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-2 --name "Blocked Status Probe" --status Blocked 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Blocked outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-3 --name "Cancelled Status Probe" --status Cancelled 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Cancelled outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+nst_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-4 --name "Completed Status Probe" --status Completed 2>&1 >/dev/null || true)"
+assert_contains "new refuses --status Completed outside the seam" "$nst_err" "--status accepts only Triage or Ready"
+assert_eq "the refused creations left no files behind" "0" "$(ls "$TASKS_DIR/current" | grep -c '^NST-[1-4]-')"
+if env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-1 --name "IP Status Probe" --status "In Progress" </dev/null >/dev/null 2>&1; then bad "new --status In Progress exits nonzero outside the seam"; else ok "new --status In Progress exits nonzero outside the seam"; fi
+nst_f="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-5 --name "Ready Status Probe" --status Ready)"
+assert_contains "new accepts --status Ready outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_f")" "Ready"
+nst_t="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-6 --name "Triage Status Probe" --status Triage)"
+assert_contains "new accepts --status Triage outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_t")" "Triage"
+nst_d="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" new --id NST-7 --name "Default Status Probe")"
+assert_contains "the default status stays Triage outside the seam" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_d")" "Triage"
+nst_s="$(t new --id NST-8 --name "Seam Status Probe" --status "In Progress")"
+assert_contains "the seam admits deeper states for fixtures" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$nst_s")" "In Progress"
+rm -f "$nst_f" "$nst_t" "$nst_d" "$nst_s"
+t render >/dev/null
 
 echo "== set: Owner is claim-owned =="
 # Ownership never moves through set: the Owner field is written by claim
@@ -1853,7 +1891,11 @@ t render >/dev/null
 # close derives Duration from the Work Log anchors and stamps Completed
 # from the CLI clock; the header rewrite rides write_header_fields, so
 # field order stays canonical and the dashboard rows stay byte-compatible.
+# Plain-close fixtures carry their Success Criteria checked: the completion
+# gate (section below) refuses unchecked boxes, and these probes exercise
+# the stamping, not the gate.
 f_cl="$(t new --id CLS-9 --name "Closure Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_cl"
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cl" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 11:30" t log "$f_cl" "second anchor" >/dev/null
 close_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cl")"
@@ -1885,12 +1927,14 @@ assert_eq "stamp keeps Duration derived from the anchors" "2h 30m" \
 # A multi-day span renders in the compact d/h form; fewer than two
 # parseable anchors yields N/A.
 f_md="$(t new --id CLS-10 --name "Multi Day Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_md"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_md" "day one" >/dev/null
 TASKS_TEST_CLOCK="2026-06-18 11:00" t log "$f_md" "day four" >/dev/null
 TASKS_TEST_CLOCK="2026-06-18 12:00" t close "$f_md" >/dev/null
 assert_eq "close renders multi-day durations in the compact form" "3d 3h" \
 	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_md")"
 f_na="$(t new --id CLS-11 --name "No Anchor Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_na"
 refuse "stamp refuses a task that is not Completed" stamp "$f_na"
 TASKS_TEST_CLOCK="2026-06-16 12:00" t close "$f_na" >/dev/null
 assert_eq "close without two anchors stamps N/A" "N/A" \
@@ -1900,6 +1944,7 @@ assert_eq "close without two anchors stamps N/A" "N/A" \
 # the header contract carries the reason only under Blocked/Cancelled, and
 # a closed task owns nothing.
 f_blk="$(t new --id CLS-12 --name "Blocked Closure Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_blk"
 t set "$f_blk" Status=Blocked "Status Reason=waiting on deps" >/dev/null
 t claim "$f_blk" --owner sess-closer >/dev/null
 TASKS_TEST_CLOCK="2026-06-16 11:00" t close "$f_blk" >/dev/null
@@ -1909,6 +1954,65 @@ assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
 refuse "close without a taskfile is refused" close
 refuse "stamp without a taskfile is refused" stamp
 
+echo "== close: the completion gate (unchecked boxes, named children, --force override) =="
+# The gate refuses before any write when the Success Criteria carry
+# unchecked boxes or a named child task is still open; a named child is a
+# task-ID-shaped token in the file that resolves to a board file, with the
+# file's own ID, tokens naming no board file, and terminal children
+# ignored. --force closes past a refusing gate and records the override as
+# a Work Log anchor stamped at closure, so the elapsed Duration spans
+# first anchor to closure on the forced path.
+f_gate="$(t new --id CGT-1 --name "Closure Gate Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_gate" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 10:00" t log "$f_gate" "second anchor" >/dev/null
+gate_before="$(cat "$f_gate")"
+gate_err="$(t close "$f_gate" 2>&1 >/dev/null || true)"
+assert_contains "close refuses unchecked Success Criteria" "$gate_err" "fails the closure gate"
+assert_contains "the refusal counts the unchecked boxes" "$gate_err" "unchecked Success Criteria boxes: 1"
+assert_contains "the refusal offers the --force route" "$gate_err" "close anyway with --force"
+assert_eq "the refused closure leaves the file byte-identical" "$gate_before" "$(cat "$f_gate")"
+refuse "close without --force exits nonzero" close "$f_gate"
+
+# A named child blocks even with every box checked; mentioning the
+# parent's own ID and an ID that names no board file must not. Completing
+# the child unlocks the parent.
+f_gate_child="$(t new --id CGT-2 --name "Gate Child Probe")"
+f_gate_parent="$(t new --id CGT-3 --name "Gate Parent Probe")"
+t edit "$f_gate_parent" --section Objective --append <<<"Depends on CGT-2; tracked here as CGT-3; NOPE-9 names no board task." >/dev/null
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_parent"
+gate_err="$(t close "$f_gate_parent" 2>&1 >/dev/null || true)"
+assert_contains "close refuses an unfinished named child" "$gate_err" "unfinished named child task(s): CGT-2"
+refuse "the child gate refuses before any write" close "$f_gate_parent"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_child"
+TASKS_TEST_CLOCK="2026-06-16 08:00" t close "$f_gate_child" >/dev/null
+t close "$f_gate_parent" >/dev/null
+assert_eq "a parent closes once the named child is terminal" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate_parent")"
+
+# The override: --force closes past the refusing gate and records the
+# note as a Work Log anchor at the closure clock, and the Duration
+# re-derives after that append, so the stamped span reads first anchor
+# (09:00) to closure (12:00), not the pre-existing 1h span.
+gate_out="$(TASKS_TEST_CLOCK="2026-06-15 12:00" t close "$f_gate" --force)"
+assert_contains "close --force closes past the gate" "$gate_out" "closed $(basename "$f_gate")"
+gate_log="$(awk '/^## Work Log/{f=1} f' "$f_gate")"
+assert_contains "the override is recorded in the Work Log" "$gate_log" "closure gate overridden (--force)"
+assert_contains "the override note names the finding" "$gate_log" "unchecked Success Criteria boxes: 1"
+assert_eq "close --force still stamps Completed" "Completed" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_gate")"
+assert_eq "the override anchor bounds the elapsed Duration" "3h" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_gate")"
+gate_err="$(t close "$f_gate" --cancelled --force 2>&1 >/dev/null || true)"
+assert_contains "the cancelled path refuses --force" "$gate_err" "--force gates the completion path only"
+
+# --force on a gate that passes is a plain closure: no override note.
+f_gate_ready="$(t new --id CGT-4 --name "Gate Ready Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_gate_ready"
+t close "$f_gate_ready" --force >/dev/null
+assert_not_contains "close --force on a ready gate writes no override note" \
+	"$(awk '/^## Work Log/{f=1} f' "$f_gate_ready")" "closure gate overridden"
+rm -f "$f_gate" "$f_gate_child" "$f_gate_parent" "$f_gate_ready"
+t render >/dev/null
+
 echo "== archive: terminal tasks move to archive/ =="
 # The sanctioned alternative to the hand mv the battery's earlier archive
 # lane tests used: archive refuses open tasks, moves a terminal one under
@@ -1916,6 +2020,7 @@ echo "== archive: terminal tasks move to archive/ =="
 # deposited before and after the move share one reports dir keyed by the
 # preserved basename, so every ../reports/ link keeps resolving.
 f_ar="$(t new --id ARC-1 --name "Archive Move Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_ar"
 ar_err="$(t archive "$f_ar" 2>&1 >/dev/null || true)"
 refuse "archive refuses a non-terminal task" archive "$f_ar"
 assert_contains "archive refusal names the closure path" "$ar_err" "use 'tasks close'"
@@ -1939,6 +2044,7 @@ refuse "archive refuses an already-archived task" archive "$TASKS_DIR/archive/$(
 refuse "archive refuses an unknown task file" archive NOPE-9.md
 refuse "archive without a taskfile is refused" archive
 f_ar2="$(t new --id ARC-2 --name "Archive Claim Drop")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_ar2"
 t close "$f_ar2" >/dev/null
 printf 'sess-ghost\n' >"$f_ar2.claim"
 t archive "$f_ar2" >/dev/null
@@ -2034,6 +2140,7 @@ rm -f "$f_rpr"
 # well-formed siblings untouched; a clean file reports nothing to repair
 # without a write.
 f_sc="$(t new --id RPR-2 --name "Repair Scope Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_sc"
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_sc" "anchor one" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_sc" "anchor two" >/dev/null
 sed -i 's/^\*\*Updated:.*/**Updated:** not a stamp/' "$f_sc"
@@ -2061,6 +2168,7 @@ assert_eq "the nothing-to-repair pass leaves the file byte-identical" "$sc_befor
 rm -f "$f_sc"
 
 f_rpc="$(t new --id RPR-2 --name "Repair Completed Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_rpc"
 TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_rpc" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_rpc" "second anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 09:00" t close "$f_rpc" >/dev/null
@@ -2134,6 +2242,33 @@ assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guar
 walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
 assert_eq "walk-up read succeeds" "0" "$?"
 assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
+
+echo "== resolve: task file arguments are contained to the board root =="
+# resolve_task_file admits bare names, in-board paths, and archive paths,
+# but every existing-file candidate must resolve inside the resolved board
+# root (readlink -f, so traversal and symlinks cannot smuggle a write past
+# a string prefix). Explicit --dir boards and relative in-board paths keep
+# working: containment compares resolved paths, not spellings.
+f_ctn="$(t new --id CTN-1 --name "Containment Probe")"
+refuse "a nonexistent path outside the board is not found" show "$ROOT/outside.md"
+printf 'not a task file\n' >"$ROOT/outside.md"
+ctn_err="$(t show "$ROOT/outside.md" 2>&1 >/dev/null || true)"
+refuse "an existing file outside the board root is refused" show "$ROOT/outside.md"
+assert_contains "the containment refusal names the board root" "$ctn_err" "escapes the board root"
+ctn_err="$(t show "$TASKS_DIR/current/../../outside.md" 2>&1 >/dev/null || true)"
+refuse "traversal escaping the board root is refused" show "$TASKS_DIR/current/../../outside.md"
+assert_contains "the traversal refusal resolves the real path" "$ctn_err" "resolves to"
+ln -s "$ROOT/outside.md" "$TASKS_DIR/current/escape.md"
+refuse "a symlink pointing outside the board is refused" show "$TASKS_DIR/current/escape.md"
+rm -f "$TASKS_DIR/current/escape.md" "$ROOT/outside.md"
+f_ctn2="$(t new --id CTN-2 --name "Traversal Probe")"
+mv "$f_ctn2" "$TASKS_DIR/archive/"
+t show "$TASKS_DIR/current/../archive/$(basename "$f_ctn2")" >/dev/null \
+	&& ok "in-board traversal remains readable" || bad "in-board traversal remains readable"
+( cd "$TASKS_DIR" && t show "current/$(basename "$f_ctn")" ) >/dev/null \
+	&& ok "a relative in-board path remains readable" || bad "a relative in-board path remains readable"
+rm -f "$f_ctn" "$TASKS_DIR/archive/$(basename "$f_ctn2")"
+t render >/dev/null
 
 print_result
 ((fail == 0)) || exit 1

@@ -215,9 +215,11 @@ Commands:
   init [--dir DIR]                     Scaffold a .tasks/ directory and empty board.
   render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
-                                       opts: --status S --priority P --dir DIR;
-                                       --force admits a deliberate task ID reuse
-                                       (IDs are unique across current/ and archive/)
+                                       opts: --status S (Triage or Ready; a test board
+                                       pinning the clock seam may set deeper states)
+                                       --priority P --dir DIR; --force admits a
+                                       deliberate task ID reuse (IDs are unique across
+                                       current/ and archive/)
   set [--dir DIR] <taskfile> K=V...    Update header field(s), refresh Updated, render.
                                        CLI-owned timeline fields (Created, Updated,
                                        Completed, Duration, Latest Update) refuse
@@ -248,15 +250,19 @@ Commands:
                                        from current/ into archive/, dropping any
                                        claim sidecar; render.
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
-                                       (CLI clock), Duration (Work Log anchors), Updated;
-                                       drops Status Reason and any claim; render.
+                                       (CLI clock), elapsed Duration (first-to-last Work
+                                       Log anchors), Updated; drops Status Reason and
+                                       any claim; render. The closure gate refuses when
+                                       Success Criteria carry unchecked boxes or a
+                                       named child task is unfinished; --force closes
+                                       anyway and records the override in the Work Log.
                                        --cancelled transitions to Cancelled instead: Status,
                                        Duration, Updated (no Completed stamp); keeps the
                                        Status Reason already on file (refused without one),
                                        drops any claim; render.
-  stamp [--dir DIR] <taskfile>         Re-stamp Completed and Duration on an already
-                                       Completed task from the CLI clock and Work Log
-                                       anchors; render.
+  stamp [--dir DIR] <taskfile>         Re-stamp Completed and the elapsed Duration (first
+                                       to last Work Log anchor) on an already Completed
+                                       task from the CLI clock; render.
                                        --repair inspects each stamped timeline field
                                        (Updated, Duration, Completed, Latest Update)
                                        against its canonical shape and re-stamps only
@@ -324,13 +330,31 @@ warn_fallback_tasks_dir() {
 	err "warning: no board found walking up from $PWD; using the bare ./.tasks fallback at $1 (writes refuse it; pass --dir or export TASKS_DIR to pin the board)"
 }
 
-# Resolve a task file argument to a real path: as given, or under current/, or archive/.
+# Resolve a task file argument to a real path: as given, or under current/,
+# or archive/. Every existing-file candidate is contained to the board root:
+# the resolved candidate (readlink -f, so traversal and symlinks cannot
+# smuggle a write past a string prefix) must carry the resolved board root
+# as a path prefix, which keeps explicit --dir boards, relative in-board
+# arguments, and in-board traversal working while refusing any argument
+# that escapes the board.
 resolve_task_file() {
 	local tasks_dir="$1" arg="$2"
-	if [[ -f "$arg" ]]; then printf '%s' "$arg"; return; fi
-	if [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$CURRENT_DIR/$arg"; return; fi
-	if [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then printf '%s' "$tasks_dir/$ARCHIVE_DIR/$arg"; return; fi
-	die "task file not found: $arg"
+	local board; board="$(readlink -f "$tasks_dir")"
+	local cand
+	if [[ -f "$arg" ]]; then cand="$arg"
+	elif [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then cand="$tasks_dir/$CURRENT_DIR/$arg"
+	elif [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then cand="$tasks_dir/$ARCHIVE_DIR/$arg"
+	else die "task file not found: $arg"
+	fi
+	local real; real="$(readlink -f "$cand")" || die "task file not found: $arg"
+	# Literal prefix strip, not a "==" glob: a board root containing glob
+	# metacharacters must not let a sibling path match the pattern and slip
+	# past containment. under == real means the prefix did not match; under
+	# lacking its leading slash means real is the root itself or a sibling.
+	local under="${real#"$board"}"
+	[[ "$under" != "$real" && "$under" == /* ]] \
+		|| die "task file escapes the board root: $arg resolves to $real, outside the board at $board"
+	printf '%s' "$cand"
 }
 
 # Print the header region of a task file from stdin: everything before the
@@ -1036,6 +1060,18 @@ cmd_new() {
 		|| die "new: --name must be a single line"
 	valid_task_id "$id" || die "new: invalid task ID: $id (expected PREFIX-N, hierarchically PREFIX-N-N)"
 	valid_status "$status" || die "new: unknown status: $status (valid: $STATUS_VALUES)"
+	# Creation admits only the two intake states: deeper states are
+	# lifecycle positions reachable through set/claim/release/close, and a
+	# directly created Blocked file would skip the reason coupling while a
+	# directly created terminal file would carry no closure stamps. Test
+	# boards pinning the clock seam (TASKS_TEST_CLOCK with TASKS_DIR) admit
+	# the full vocabulary for fixtures, mirroring the set guard.
+	if [[ -z "$TEST_CLOCK" ]]; then
+		case "$status" in
+			"$STATUS_TRIAGE"|"$STATUS_READY") ;;
+			*) die "new: --status accepts only $STATUS_TRIAGE or $STATUS_READY (got: $status; deeper states are lifecycle positions reachable through set/claim/release/close)" ;;
+		esac
+	fi
 	valid_priority "$priority" || die "new: unknown priority: $priority (valid: $PRIORITY_VALUES)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
@@ -1177,9 +1213,15 @@ cmd_set() {
 			# The dashboard's percent normalization is a render fallback for
 			# legacy files, never a license for set to write one: the header
 			# contract carries Progress as N%, so anything else is refused
-			# here instead of being silently coerced at render time.
+			# here instead of being silently coerced at render time, and the
+			# percentage itself is bounded to 0-100 inclusive.
 			[[ "$value" =~ ^[0-9]+%$ ]] \
 				|| die "set: Progress must be an N% percentage, got: $value (e.g. 45%)"
+			# Range as a regex, not arithmetic: bash arithmetic wraps modulo
+			# 2^64, so an astronomically large N could wrap to a passing value;
+			# 0* tolerates leading zeros (007% is 7, 0100% is 100).
+			[[ "$value" =~ ^0*([0-9]{1,2}|100)%$ ]] \
+				|| die "set: Progress must be 0-100 inclusive, got: $value (e.g. 45%)"
 		elif [[ "$key" == "$STATUS_REASON_KEY" ]]; then
 			status_reason_value="$value"
 			status_reason_given=1
@@ -1419,9 +1461,11 @@ work_log_span() {
 	' "$1"
 }
 
-# Duration between the Work Log anchors in minutes, N/A when the anchors
-# cannot produce a nonnegative span (fewer than two parseable entries,
-# unparseable timestamps, or a log whose entries run backwards).
+# Elapsed time from the first to the last Work Log anchor, in minutes;
+# N/A when the anchors cannot produce a nonnegative span (fewer than two
+# parseable entries, unparseable timestamps, or a log whose entries run
+# backwards). The span is wall-clock: Blocked periods and idle waits ride
+# inside it, only the anchors bound it.
 derive_duration() {
 	local span first last a b
 	span="$(work_log_span "$1")" || span=""
@@ -1434,9 +1478,9 @@ derive_duration() {
 }
 
 # Re-stamp a Completed task: Completed and Updated follow the CLI clock and
-# Duration re-derives from the Work Log anchors. The repair path for legacy
-# hand-stamps and re-closure bumps; closing a task that is not Completed
-# belongs to `tasks close`.
+# the elapsed Duration re-derives from the Work Log anchors. The repair path
+# for legacy hand-stamps and re-closure bumps; closing a task that is not
+# Completed belongs to `tasks close`.
 cmd_stamp() {
 	local dir="" repair=0 args=()
 	while (($#)); do
@@ -1513,7 +1557,7 @@ cmd_stamp() {
 		"Duration"$'\034'"**Duration:** $duration" \
 		"Updated"$'\034'"**Updated:** $ts"
 	render_unlocked "$tasks_dir"
-	printf 'stamped %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+	printf 'stamped %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
 # Archive a terminal task: move the file from current/ into archive/ under
@@ -1560,25 +1604,93 @@ cmd_archive() {
 	printf 'archived %s\n' "${dest##*/}"
 }
 
+# The leading Task ID of a task-file basename, mirroring the assembler's
+# taskid() extraction: the longest segment-terminated prefix whose
+# remainder is exactly ".md" or the stamp form "-YYYYMMDD-HHMM" plus an
+# optional slug. Prints nothing when no boundary qualifies.
+task_id_of_basename() {
+	local fb="$1" p rest cand remainder len
+	for ((p = ${#fb} - 1; p > 1; p--)); do
+		[[ "${fb:p:1}" == "-" ]] || continue
+		rest="${fb:p}"
+		[[ "$rest" =~ ^-[0-9]+ ]] || continue
+		len=${#BASH_REMATCH[0]}
+		cand="${fb:0:p+len}"
+		remainder="${fb:p+len}"
+		[[ "$cand" =~ ^[A-Za-z]+(-[0-9]+)+$ ]] || continue
+		if [[ "$remainder" == ".md" ]] \
+			|| [[ "$remainder" =~ ^-[0-9]{8}-[0-9]{4}(-.*)?\.md$ ]]; then
+			printf '%s\n' "$cand"
+			return
+		fi
+	done
+	return 0
+}
+
+# Closure gate findings for a task about to be completed: the count of
+# unchecked Success Criteria boxes (the same section-scoped, fence-blind
+# count the board lint records, so gate and lint can never disagree about
+# what "unchecked" means) and every named child task that is still open. A
+# child is named when a task-ID-shaped token anywhere in the file resolves
+# to a board file whose leading Task ID equals the token; the file's own ID
+# and tokens naming no board file are ignored, and a child blocks unless
+# its status is terminal (Completed/Cancelled). Appends one finding per
+# element to the named array; an empty array means the closure may proceed.
+closure_gate_findings() { # <array-name> <tasks_dir> <file>
+	# The nameref must not share its target's name: a `local -n findings`
+	# pointed at the caller's array of the same name is a circular self
+	# reference, and bash resolves it to an empty local instead of an error.
+	local -n gate_findings="$1"
+	local tasks_dir="$2" file="$3"
+	local unchecked
+	unchecked="$(awk '
+		/^## / { sec = substr($0, 4); sub(/[ \t\r]+$/, "", sec); insc = (sec == "Success Criteria") ? 1 : 0; next }
+		insc && /^- \[ \] / { n++ }
+		END { if (n > 0) print n }
+	' "$file")"
+	[[ -n "$unchecked" ]] && gate_findings+=("unchecked Success Criteria boxes: $unchecked")
+	local own_id cand f child_id child_status child_rel
+	own_id="$(task_id_of_basename "${file##*/}")"
+	local -a children=()
+	while IFS= read -r cand; do
+		[[ -n "$cand" && "$cand" != "$own_id" ]] || continue
+		for f in "$tasks_dir/$CURRENT_DIR/$cand"*.md "$tasks_dir/$ARCHIVE_DIR/$cand"*.md; do
+			[[ -e "$f" ]] || continue
+			child_id="$(task_id_of_basename "${f##*/}")"
+			[[ "$child_id" == "$cand" ]] || continue
+			child_status="$(header_status "$f")"
+			is_terminal_status "$child_status" && continue
+			child_rel="${f#"$tasks_dir"/}"
+			children+=("$cand ($child_rel, Status: ${child_status:-missing})")
+		done
+	done < <(grep -oE '[A-Za-z]+(-[0-9]+)+' "$file" | sort -u)
+	((${#children[@]} > 0)) && gate_findings+=("unfinished named child task(s): ${children[*]}")
+	return 0
+}
+
 # Close a task: transition to Completed with the header timeline stamped
 # from the CLI clock, as the one sanctioned write path for closure. Sets
-# Status, Completed, Duration (Work Log anchors, N/A when they cannot
-# produce a span), and Updated in one locked header rewrite; drops the
+# Status, Completed, the elapsed Duration (first-to-last Work Log anchor,
+# N/A when they cannot produce a span), and Updated in one locked header
+# rewrite; drops the
 # Status Reason (the header contract carries it only under
 # Blocked/Cancelled) and releases any claim sidecar with its Owner field,
 # then renders. The assembler and dashboard formats are the locked write
 # path's own, so closure rows render byte-compatibly.
 cmd_close() {
-	local dir="" cancelled=0 args=()
+	local dir="" cancelled=0 force=0 args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "close: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
 			--cancelled) cancelled=1; shift ;;
+			--force) force=1; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled]"
+	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled] [--force]"
+	((cancelled == 1 && force == 1)) \
+		&& die "close: --force gates the completion path only; --cancelled closure already requires a deliberate Status Reason"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
@@ -1592,6 +1704,28 @@ cmd_close() {
 
 	local ts duration reason
 	ts="$(now)"
+	if ((cancelled == 0)); then
+		local -a findings=()
+		closure_gate_findings findings "$tasks_dir" "$file"
+		if ((${#findings[@]} > 0)); then
+			if ((force == 0)); then
+				local finding msg
+				msg="close: $(basename "$file") fails the closure gate:"
+				for finding in "${findings[@]}"; do msg+=$'\n'"  - $finding"; done
+				msg+=$'\n'"close anyway with --force; the override is recorded in the Work Log"
+				die "$msg"
+			fi
+			local summary entry
+			summary="$(IFS=';'; printf '%s' "${findings[*]}")"
+			# The override note is a Work Log anchor stamped by the same clock
+			# the closure stamps, so deriving Duration after the append makes
+			# the stamped span read first anchor to closure, matching the
+			# elapsed definition the file itself now carries.
+			printf -v entry '### %s: close: closure gate overridden (--force): %s\n\n' "$ts" "$summary"
+			append_work_log_entry "$file" "$entry" "" "" \
+				|| die "close: failed to record the override in $(basename "$file")"
+		fi
+	fi
 	duration="$(derive_duration "$file")"
 	if ((cancelled == 1)); then
 		# Cancelled closure: the same CLI-stamped semantics as completion
@@ -1615,7 +1749,7 @@ cmd_close() {
 			"$CLAIM_RELEASE_WRITE"
 		release_claim "$file"
 		render_unlocked "$tasks_dir"
-		printf 'cancelled %s (Duration %s)\n' "$(basename "$file")" "$duration"
+		printf 'cancelled %s (elapsed Duration %s)\n' "$(basename "$file")" "$duration"
 		return
 	fi
 	write_header_fields "$file" \
@@ -1627,7 +1761,7 @@ cmd_close() {
 		"$CLAIM_RELEASE_WRITE"
 	release_claim "$file"
 	render_unlocked "$tasks_dir"
-	printf 'closed %s (Completed %s, Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
+	printf 'closed %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
 
 # Next report sequence number for a task's reports directory: one past the
