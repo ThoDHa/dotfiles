@@ -10,7 +10,7 @@
 
 **Completion Requirement:** When any task completes with modifications to files (a todo, task-file task, or standalone user request), implementations MUST load the `simplify-review` skill and run its loop to convergence with final verification passing before reporting the task complete. The loop is mandatory regardless of change size; its depth scales with the change's risk under the skill's own rules (iteration cap, diff-only scope, research-only skip), so a trivial edit does not receive a multi-iteration review and a security-sensitive one does.
 
-**Scratch Cleanup:** Before reporting the task complete, implementations MUST remove the scratch they created for it and MUST NOT remove content they did not create.
+**Scratch Cleanup:** Before reporting the task complete, implementations MUST remove the scratch they created for it and MUST NOT remove content they did not create. The fleet's deposit scratch follows that ownership: report deposits under `/tmp/llm/reports` and raw-capture or scratch directories under `/tmp/llm` are scratch the task or batch that created them owns, and the batch's close, not just each task's completion, includes purging that batch's `/tmp/llm` deposits once the durable evidence is curated in-board (task reports deposited under `.tasks/reports/` per the `task-files` skill). Scratch left behind by another session's legacy work is content the current session did not create: removing it MUST NOT happen without the user's explicit direction.
 
 ### Related Specifications
 
