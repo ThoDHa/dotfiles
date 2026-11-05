@@ -20,6 +20,12 @@ refuse() { # label; rest is the command to attempt
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 export TASKS_DIR="$ROOT/.tasks"
+# Pin the CLI clock: backdating fixtures and stamp/close assertions read
+# deterministic timestamps, and the set guard admits CLI-owned header
+# fields only under this sanctioned test seam. TASKS_DIR above and the
+# clock must stay exported together; the CLI's co-gate refuses a clock
+# without an explicit TASKS_DIR.
+export TASKS_TEST_CLOCK="2026-06-15 12:00"
 DASH="$TASKS_DIR/dashboard.md"
 
 t() { "$TASKS_BIN" "$@"; }
@@ -28,6 +34,12 @@ edit_stderr_of() { # rest is the edit invocation; echoes its stderr
 	# edit consumes stdin even when refusing, so detach it
 	t edit "$@" </dev/null 2>&1 >/dev/null || true
 }
+
+# The battery pins the CLI clock through TASKS_TEST_CLOCK (the sanctioned
+# seam the set-guard section exercises), so assertions on CLI-refreshed
+# timestamps compare against the pinned clock's date. The fallback keeps
+# the same assertion meaningful when the battery runs unpinned.
+clock_today() { printf '%s\n' "${TASKS_TEST_CLOCK%% *}"; }
 
 echo "== init =="
 t init >/dev/null
@@ -343,7 +355,7 @@ assert_eq "deleting an absent field leaves one Updated line" "1" \
 t set "$f_kv" Updated="2020-01-01 00:00" >/dev/null
 t set "$f_kv" Updated= >/dev/null
 kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
-[[ "$kv_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$kv_updated" == "$(clock_today)"* ]] \
 	&& ok "an emptied Updated= pair refreshes instead of deleting" \
 	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
 
@@ -683,7 +695,7 @@ assert_contains "entry links the deposit via ../reports/" "$(cat "$f_rp")" \
 	"**Report:** [01-recon.md](../reports/$rpbase/01-recon.md)"
 assert_contains "entry carries the digest" "$(cat "$f_rp")" "**Digest:** Recon findings recorded"
 rp_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
-[[ "$rp_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$rp_updated" == "$(clock_today)"* ]] \
 	&& ok "report bumps Updated to today" || bad "report bumps Updated to today (got [$rp_updated])"
 latest_line="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_rp")"
 assert_contains "Latest Update carries the digest" "$latest_line" "Recon findings recorded"
@@ -808,7 +820,7 @@ t log "$f_lg" "Dispatches held pending decision" >/dev/null
 lg_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Dispatches held pending decision$' "$f_lg" || true)"
 [[ -n "$lg_entry" ]] && ok "log appends the timestamped manager heading" || bad "log appends the timestamped manager heading"
 lg_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
-[[ "$lg_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$lg_updated" == "$(clock_today)"* ]] \
 	&& ok "log bumps Updated to today" || bad "log bumps Updated to today (got [$lg_updated])"
 assert_eq "successful log leaves exactly one Updated line on a headed file" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$f_lg")"
@@ -931,7 +943,7 @@ t log "$hless_predated" "Entry on a predated headingless file" >/dev/null
 assert_eq "headingless append replaces an existing Updated field in place" "1" \
 	"$(grep -c '^\*\*Updated:\*\*' "$hless_predated")"
 hless_predated_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$hless_predated")"
-[[ "$hless_predated_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$hless_predated_updated" == "$(clock_today)"* ]] \
 	&& ok "headingless append bumps the predated Updated value" \
 	|| bad "headingless append bumps the predated Updated value (got [$hless_predated_updated])"
 rm -f "$hless_predated"
@@ -1071,7 +1083,7 @@ assert_contains "append keeps the pre-existing nested content" "$nested_ap" "**D
 printf '####### seven hashes is not a heading\n' | t edit "$nested" --section "Objective" >/dev/null
 assert_contains "seven-hash lines stay acceptable in edit bodies" "$(cat "$nested")" "####### seven hashes is not a heading"
 nested_updated_after="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
-[[ "$nested_updated_after" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$nested_updated_after" == "$(clock_today)"* ]] \
 	&& ok "nested-heading edits bump Updated" || bad "nested-heading edits bump Updated (got [$nested_updated_after])"
 
 echo "== edit: same-or-higher-level headings stay refused =="
@@ -1124,7 +1136,7 @@ cr_wl_line="$(grep -n '^## Work Log$' "$f_cr" | cut -d: -f1)"
 	|| bad "created Technical Approach sits after Success Criteria and before Work Log"
 assert_contains "created section carries the supplied body" "$(cat "$f_cr")" "Risks: none beyond ordinary regression risk"
 cr_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cr")"
-[[ "$cr_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$cr_updated" == "$(clock_today)"* ]] \
 	&& ok "section creation bumps Updated" || bad "section creation bumps Updated (got [$cr_updated])"
 assert_contains "dashboard reflects the creation bump" "$(grep -F 'Section Creation Target' "$DASH")" "$cr_updated"
 # Append onto a just-created section appends, not replaces
@@ -1183,7 +1195,7 @@ echo "== edit: Updated refresh and dashboard render =="
 t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
 printf 'Render check body\n' | t edit "$f_ed" --section Objective >/dev/null
 ed_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
-[[ "$ed_updated" == "$(date '+%Y-%m-%d')"* ]] \
+[[ "$ed_updated" == "$(clock_today)"* ]] \
 	&& ok "edit bumps Updated to today" || bad "edit bumps Updated to today (got [$ed_updated])"
 assert_contains "dashboard reflects the edit bump" "$(grep -F 'Edit Section Target' "$DASH")" "$ed_updated"
 
@@ -1441,7 +1453,230 @@ t render --dir "$orddir" >/dev/null
 ord_after="$(cat "$ordboard")"
 assert_eq "ordered render is byte-identical on repeat" "$ord_before" "$ord_after"
 
-echo "== usage: canonical option order =="
+echo "== lint: read-only board protocol lint =="
+# The lint fixture board lives inside its own tiny git repo so the
+# push-reconcile pass has a real history to consult; --dir pins the board,
+# so the battery's TASKS_DIR never interferes. Fixture files are written
+# directly (lint is the subject under test, not the write path).
+lint_repo="$ROOT/lintrepo"
+lint_dir="$lint_repo/.tasks"
+mkdir -p "$lint_repo"
+git -C "$lint_repo" init -q .
+git -C "$lint_repo" config user.email lint-probe@invalid
+git -C "$lint_repo" config user.name "Lint Probe"
+echo seed >"$lint_repo/seed.txt"
+git -C "$lint_repo" add seed.txt
+git -C "$lint_repo" commit -qm "seed"
+lint_reach="$(git -C "$lint_repo" rev-parse HEAD)"
+t init --dir "$lint_dir" >/dev/null
+f_lp="$(t new --id LP-1 --name "Lint Probe Target" --dir "$lint_dir")"
+
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "lint passes a clean board"; else bad "lint passes a clean board"; fi
+lint_sum="$(t lint --dir "$lint_dir" | tail -1)"
+assert_contains "clean lint reports zero hard" "$lint_sum" "0 hard"
+
+# Header shape on an open task is a hard failure (the Option-1 split).
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** [2026-10-23 10:1X] hand-stamped probe/' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a hand-stamped header field as hard" "$lint_out" \
+	"HARD current/LP-1-"
+assert_contains "lint names the non-CLI-shaped field" "$lint_out" "header Latest Update not CLI-shaped"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then bad "lint exits 1 on hard findings"; else ok "lint exits 1 on hard findings"; fi
+
+# Missing required template section on an open task is a hard failure.
+awk '/^## Execution Log$/{skip=1} !skip' "$f_lp" >"$f_lp.tmp" && mv "$f_lp.tmp" "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a missing required section" "$lint_out" "missing required section 'Execution Log'"
+
+# Repair the structural findings (CLI-shaped timestamp restored, section
+# re-added) so the following assertions read a board whose only remaining
+# drift is the body-space kind.
+sed -i 's/^\*\*Latest Update:.*/**Latest Update:** [2026-06-15 12:00] repaired probe/' "$f_lp"
+printf '\n## Execution Log\n\n- restored\n' >>"$f_lp"
+
+# Body-space drift stays advisory even on an open task (Option-1: prose is
+# free-form), and dead-link detection resolves ../reports/ from the file's
+# own directory.
+printf '%s\n' 'see [report](../reports/LP-1-20260615-1200-lint-probe-target/01-gone.md) here' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a dead report link" "$lint_out" "dead report link"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "dead links stay advisory on open tasks"; else bad "dead links stay advisory on open tasks"; fi
+# Backticked format placeholders and explicitly annotated dead links are
+# not live links and must not fire.
+printf '%s\n' 'canonical form `[ts] digest ([report](../reports/...))` stays literal' >>"$f_lp"
+printf '%s\n' '**Report:** [07-gone.md](../reports/LP-1-20260615-1200-lint-probe-target/07-gone.md) (dead link: renumbered before deposit)' >>"$f_lp"
+lint_dead="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
+assert_eq "the skipped pair adds no dead-link finding" "1" "$lint_dead"
+
+# Push-reconcile: a reachable recorded hash is silent, an unreachable one
+# is hard on an open task, and a line documenting known drift is skipped.
+t log --dir "$lint_dir" "$(basename "$f_lp")" "landed commit $lint_reach on the branch" >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a reachable recorded commit is silent" "$lint_out" "unreachable from any branch"
+printf '%s\n' 'commit deadbee99 pushed to origin' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags an unreachable recorded commit as hard" "$lint_out" \
+	"recorded commit deadbee99"
+printf '%s\n' 'commit deadbe00 recorded landed+pushed but unreachable everywhere; superseded by re-land' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a drift-disposition hash line is skipped" "$lint_out" "deadbe00"
+sed -i '/commit deadbee99 pushed to origin/d' "$f_lp"
+
+# Claim hygiene: Owner without sidecar, sidecar without Owner, and an
+# owner mismatch are hard on an open task; parity passes silently.
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=ghost-session >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags Owner without a claim sidecar" "$lint_out" "Owner 'ghost-session' set without a claim sidecar"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner= >/dev/null
+printf 'orphan-owner\n' >"$f_lp.claim"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a sidecar whose header Owner is empty" "$lint_out" \
+	"claim sidecar present but header Owner is empty"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=live-owner >/dev/null
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags a sidecar-owner mismatch" "$lint_out" "does not match header Owner 'live-owner'"
+t set --dir "$lint_dir" "$(basename "$f_lp")" Owner=orphan-owner >/dev/null
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "matching owner and sidecar passes"; else bad "matching owner and sidecar passes"; fi
+
+# Terminal files are advisory-only: a Completed task with unchecked boxes
+# and a stale sidecar never fails the exit code.
+printf 'someone\n' >"$f_lp.claim"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_lp"
+sed -i '/^\*\*Updated:/a **Completed:** 2026-06-15 12:00' "$f_lp"
+sed -i '/^\*\*Completed:/a **Duration:** N\/A' "$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint reports unchecked boxes on Completed as advisory" "$lint_out" \
+	"unchecked Success Criteria boxes"
+assert_contains "lint reports a stale sidecar on Completed as advisory" "$lint_out" \
+	"stale claim sidecar"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "terminal-file drift keeps lint green"; else bad "terminal-file drift keeps lint green"; fi
+
+# An orphan sidecar (no task file behind it) is board corruption: hard.
+printf 'ghost\n' >"$lint_dir/current/20240101-0900-ghost-task.md.claim"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint flags an orphan claim sidecar as hard" "$lint_out" "claim sidecar with no task file"
+rm -f "$lint_dir/current/20240101-0900-ghost-task.md.claim"
+
+# Archive hygiene: archiving an open task is advisory.
+printf '%s\n' '# Task: Archived Open' '' '**Created:** 2024-01-01 09:01' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2024-01-01 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '## Execution Log' >"$lint_dir/archive/20240101-0901-archived-open.md"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "lint reports an archived open task as advisory" "$lint_out" "archived while Triage"
+if t lint --dir "$lint_dir" >/dev/null 2>&1; then ok "archive drift keeps lint green"; else bad "archive drift keeps lint green"; fi
+rm -f "$lint_dir/archive/20240101-0901-archived-open.md"
+
+# Advisory cap: the default output truncates and names the remainder;
+# --verbose lists every finding.
+for i in $(seq 1 30); do
+	printf '%s\n' "see [report](../reports/LP-1-20260615-1200-lint-probe-target/$i-filler.md)" >>"$f_lp"
+done
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "default lint caps the advisory listing" "$lint_out" "more advisory findings (run tasks lint --verbose to list all)"
+verbose_count="$(t lint --dir "$lint_dir" --verbose | grep -c '^ADVISORY')"
+(( verbose_count >= 32 )) && ok "--verbose lists every advisory finding" || bad "--verbose lists every advisory finding (got $verbose_count)"
+# Lint never writes: the fixture dashboard is byte-identical after a run.
+board_before="$(cat "$lint_dir/dashboard.md")"
+t lint --dir "$lint_dir" >/dev/null 2>&1 || true
+assert_eq "lint leaves the dashboard untouched" "$board_before" "$(cat "$lint_dir/dashboard.md")"
+
+echo "== set: CLI-owned header fields are refused outside the test seam =="
+# The Option-1 contract: header timeline fields (Created, Updated,
+# Completed, Duration, Latest Update) are stamped by the CLI's own
+# operations, never written through set. The battery runs with
+# TASKS_TEST_CLOCK exported, so these probes unset it locally; every
+# assertion runs in the parent because the harness counters are
+# in-process.
+guard_target="$(t new --id GRD-5 --name "Guard Probe Target")"
+guard_before="$(cat "$guard_target")"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Completed outside the seam" "$guard_err" "'Completed' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" Duration=1h 2>&1 >/dev/null || true)"
+assert_contains "set refuses Duration outside the seam" "$guard_err" "'Duration' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Updated=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Updated outside the seam" "$guard_err" "'Updated' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Created=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Created outside the seam" "$guard_err" "'Created' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Latest Update=forged" 2>&1 >/dev/null || true)"
+assert_contains "set refuses Latest Update outside the seam" "$guard_err" "'Latest Update' is CLI-owned"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Status=Completed" 2>&1 >/dev/null || true)"
+assert_contains "set redirects Status=Completed to close" "$guard_err" "must go through 'tasks close'"
+guard_err="$(env -u TASKS_TEST_CLOCK "$TASKS_BIN" set "$guard_target" "Completed=2026-01-01 00:00" 2>&1 >/dev/null || true)"
+assert_contains "the refusal points at the stamping subcommands" "$guard_err" "log/report/claim/close/stamp"
+assert_not_contains "the refusal no longer names the seam variable" "$guard_err" "TASKS_TEST_CLOCK"
+assert_eq "guard refusals leave the file byte-identical" "$guard_before" "$(cat "$guard_target")"
+# Under the seam the same writes land: the fixture backdating path.
+t set "$guard_target" "Completed=2026-01-01 00:00" "Duration=2h 30m" >/dev/null
+assert_contains "seam admits Completed for fixtures" "$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$guard_target")" "2026-01-01 00:00"
+t set "$guard_target" Updated= >/dev/null
+assert_eq "an emptied Updated= pair refreshes to the pinned clock" "2026-06-15 12:00" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$guard_target")"
+guard_err="$(TASKS_TEST_CLOCK=garbage t show "$guard_target" 2>&1 >/dev/null || true)"
+assert_contains "a malformed clock dies at startup" "$guard_err" "TASKS_TEST_CLOCK must be CLI-shaped"
+guard_err="$(env -u TASKS_DIR "$TASKS_BIN" show "$guard_target" 2>&1 >/dev/null || true)"
+assert_contains "the clock dies without an exported TASKS_DIR" "$guard_err" "honored only when TASKS_DIR is also exported"
+rm -f "$guard_target"
+t render >/dev/null
+
+ echo "== close and stamp: closure stamping through the locked write path =="
+# close derives Duration from the Work Log anchors and stamps Completed
+# from the CLI clock; the header rewrite rides write_header_fields, so
+# field order stays canonical and the dashboard rows stay byte-compatible.
+f_cl="$(t new --id CLS-9 --name "Closure Probe")"
+TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cl" "first anchor" >/dev/null
+TASKS_TEST_CLOCK="2026-06-15 11:30" t log "$f_cl" "second anchor" >/dev/null
+close_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cl")"
+assert_contains "close reports the stamped completion" "$close_out" "Completed 2026-06-16 10:00"
+assert_contains "close reports the derived duration" "$close_out" "Duration 2h 30m"
+assert_eq "close stamps Status Completed" "Completed" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close stamps Completed from the CLI clock" "2026-06-16 10:00" \
+	"$(grep -oP '^\*\*Completed:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close derives Duration from the Work Log anchors" "2h 30m" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cl")"
+assert_eq "close refreshes Updated" "2026-06-16 10:00" \
+	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_cl")"
+cls_order="$(awk '/^## /{exit} {if (match($0, /^\*\*[^*:]+:\*\*/)) print substr($0, RSTART+2, RLENGTH-5)}' "$f_cl")"
+assert_eq "close keeps the canonical header order" \
+	"$(printf '%s\n' Created Status Priority Progress Owner Updated Completed Duration "Latest Update")" \
+	"$cls_order"
+board="$(cat "$DASH")"
+cls_row="$(grep -F 'Closure Probe' <<<"$board")"
+assert_contains "the Completed lane carries the stamped timestamp" "$cls_row" "2026-06-16 10:00"
+assert_contains "the Completed lane carries the derived duration" "$cls_row" "2h 30m"
+refuse "close refuses an already-Completed task" close "$f_cl"
+
+# stamp re-stamps an already-Completed task and re-derives Duration.
+stamp_out="$(TASKS_TEST_CLOCK="2026-06-20 08:00" t stamp "$f_cl")"
+assert_contains "stamp re-stamps Completed" "$stamp_out" "Completed 2026-06-20 08:00"
+assert_eq "stamp keeps Duration derived from the anchors" "2h 30m" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_cl")"
+
+# A multi-day span renders in the compact d/h form; fewer than two
+# parseable anchors yields N/A.
+f_md="$(t new --id CLS-10 --name "Multi Day Probe")"
+TASKS_TEST_CLOCK="2026-06-15 08:00" t log "$f_md" "day one" >/dev/null
+TASKS_TEST_CLOCK="2026-06-18 11:00" t log "$f_md" "day four" >/dev/null
+TASKS_TEST_CLOCK="2026-06-18 12:00" t close "$f_md" >/dev/null
+assert_eq "close renders multi-day durations in the compact form" "3d 3h" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_md")"
+f_na="$(t new --id CLS-11 --name "No Anchor Probe")"
+refuse "stamp refuses a task that is not Completed" stamp "$f_na"
+TASKS_TEST_CLOCK="2026-06-16 12:00" t close "$f_na" >/dev/null
+assert_eq "close without two anchors stamps N/A" "N/A" \
+	"$(grep -oP '^\*\*Duration:\*\*\s+\K.*' "$f_na")"
+
+# Closing from Blocked drops the Status Reason and releases the claim:
+# the header contract carries the reason only under Blocked/Cancelled, and
+# a closed task owns nothing.
+f_blk="$(t new --id CLS-12 --name "Blocked Closure Probe")"
+t set "$f_blk" Status=Blocked "Status Reason=waiting on deps" >/dev/null
+t claim "$f_blk" --owner sess-closer >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 11:00" t close "$f_blk" >/dev/null
+assert_not_contains "close drops the Status Reason" "$(awk '/^## /{exit}{print}' "$f_blk")" "**Status Reason:**"
+[[ ! -f "$f_blk.claim" ]] && ok "close removes the claim sidecar" || bad "close removes the claim sidecar"
+assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
+refuse "close without a taskfile is refused" close
+refuse "stamp without a taskfile is refused" stamp
+
+ echo "== usage: canonical option order =="
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
 	"--slug SLUG [--from WORKER] --digest TEXT"
@@ -1458,28 +1693,31 @@ echo "== canonical-root guard (fallback root: writes refuse, reads warn) =="
 # ancestors carry no board is what puts the CLI in bare-fallback territory
 # (a host with a board at /tmp or / would fail these probes loudly). Probes
 # run inside command substitutions; every assert runs in the parent because
-# the harness counters are in-process and a subshell assert is lost.
+# the harness counters are in-process and a subshell assert is lost. The
+# subshells also unset the pinned clock: a TASKS_TEST_CLOCK export without
+# TASKS_DIR dies at startup under the clock's co-gate, which would mask
+# the fallback behavior under test.
 guard_root="$(mktemp -d)"
 guard_board="$guard_root/.tasks"
 trap 'rm -rf "$ROOT" "$guard_root"' EXIT
 
-refuse_err="$( cd "$guard_root" && unset TASKS_DIR && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
+refuse_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "new refuses the bare fallback root" "$refuse_err" "refusing to write to the bare ./.tasks fallback"
 assert_contains "fallback refusal carries the pin remediation" "$refuse_err" "pass --dir, export TASKS_DIR"
-set_err="$( cd "$guard_root" && unset TASKS_DIR && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
+set_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
 assert_contains "set refuses the bare fallback root" "$set_err" "refusing to write to the bare ./.tasks fallback"
-log_err="$( cd "$guard_root" && unset TASKS_DIR && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
+log_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "log refuses the bare fallback root" "$log_err" "refusing to write to the bare ./.tasks fallback"
-report_err="$( cd "$guard_root" && unset TASKS_DIR && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
+report_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "report refuses the bare fallback root" "$report_err" "refusing to write to the bare ./.tasks fallback"
-init_err="$( cd "$guard_root" && unset TASKS_DIR && t init </dev/null 2>&1 >/dev/null || true )"
+init_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t init </dev/null 2>&1 >/dev/null || true )"
 assert_contains "init refuses to scaffold the bare fallback root" "$init_err" "refusing to write to the bare ./.tasks fallback"
 [[ -e "$guard_root/.tasks" ]] && bad "refused probes leave no fallback root behind" || ok "refused probes leave no fallback root behind"
 
-render_err="$( cd "$guard_root" && unset TASKS_DIR && t render </dev/null 2>&1 >/dev/null || true )"
+render_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t render </dev/null 2>&1 >/dev/null || true )"
 assert_contains "render warns on the bare fallback root" "$render_err" "warning: no board found walking up from"
 assert_contains "render keeps the missing-board die on the fallback root" "$render_err" "no .tasks directory"
-show_err="$( cd "$guard_root" && unset TASKS_DIR && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
+show_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
 assert_contains "show warns on the bare fallback root" "$show_err" "warning: no board found walking up from"
 assert_contains "show keeps the missing-board die on the fallback root" "$show_err" "no .tasks directory"
 
@@ -1491,10 +1729,10 @@ flag_file="$(t new --id GRD-2 --name "Flag Pin Probe" --dir "$guard_board")"
 env_file="$( TASKS_DIR="$guard_board"; t new --id GRD-3 --name "Env Pin Probe" )"
 [[ -f "$env_file" ]] && ok "write lands under a TASKS_DIR pin" || bad "write lands under a TASKS_DIR pin"
 mkdir "$guard_root/nested"
-walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR && t new --id GRD-4 --name "Walk-up Probe" )"
+walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-4 --name "Walk-up Probe" )"
 [[ -f "$walk_file" ]] && ok "write walks up to the found board" || bad "write walks up to the found board"
 assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guard_board/"
-walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
+walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
 assert_eq "walk-up read succeeds" "0" "$?"
 assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
 

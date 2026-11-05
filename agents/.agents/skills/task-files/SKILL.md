@@ -271,6 +271,8 @@ Sessions MUST route every dashboard change through `tasks` rather than editing `
 
 ## Task File Structure
 
+Header timeline fields are CLI-derived or absent; prose sections are free-form.
+
 ### Required Sections
 
 Each task file MUST contain: Objective, Success Criteria, Technical Approach (with Decision Log), Risk Assessment, Testing Strategy, TDD Workflow, Task Breakdown, Work Log, Execution Log, subject to the Documentation Scale rules below for small tasks.
