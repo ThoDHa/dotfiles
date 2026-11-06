@@ -324,14 +324,16 @@ endif
 # payload runs inside base_dev: the repo mounts read-only, the network is
 # off, and writes are bounded to the designated scratch, so recipe code
 # cannot mutate the repo or the host and cannot reach remote endpoints.
-# The suite's exit code survives the trailing cleanup, which removes the
-# run's root-owned scratch files in-container; the host user could not
-# delete them. The verifier's permission-layer allowlist stays as
+# The suite's exit code survives both cleanups: the in-container trailing
+# rm removes the run's root-owned scratch files, which the host user could
+# not delete, and the host-side wrapper then rmdirs the run's scratch dir,
+# which succeeds only when that cleanup emptied it, so remnants stay
+# behind. The verifier's permission-layer allowlist stays as
 # defense-in-depth.
 verify:
 	@mkdir -p $(FLEET_VERIFY_SCRATCH)
 	@echo "Running the container verification suite (repo read-only, network off)..."
-	docker run --rm --network none -v $(CURDIR):/root/dotfiles:ro $(DOCKER_WORKTREE_GIT_MOUNT) -v $(FLEET_VERIFY_SCRATCH):/scratch -e TMPDIR=/scratch -w /root/dotfiles $(CONTAINER):latest sh -c 'make verify-inner; rc=$$?; rm -rf /scratch/* /scratch/.[!.]* /scratch/..?* 2>/dev/null; exit $$rc'
+	docker run --rm --network none -v $(CURDIR):/root/dotfiles:ro $(DOCKER_WORKTREE_GIT_MOUNT) -v $(FLEET_VERIFY_SCRATCH):/scratch -e TMPDIR=/scratch -w /root/dotfiles $(CONTAINER):latest sh -c 'make verify-inner; rc=$$?; rm -rf /scratch/* /scratch/.[!.]* /scratch/..?* 2>/dev/null; exit $$rc'; status=$$?; rmdir $(FLEET_VERIFY_SCRATCH) 2>/dev/null; exit $$status
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
