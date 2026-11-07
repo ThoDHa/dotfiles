@@ -1,0 +1,9 @@
+2026-11-06T09:00:00-05:00 run start (pid 4242): unbounded, until PI-CONTINUE: COMPLETE, pi=pi
+2026-11-06T09:00:01-05:00 session 1: invoking pi
+2026-11-06T09:04:30-05:00 session 1: quota-hit 1 of budget 3; parking 600s until session 2
+2026-11-06T09:05:00-05:00 park interrupted
+2026-11-06T09:05:00-05:00 stopped by user (pid 4242)
+2026-11-06T09:10:00-05:00 run start (pid 5000): unbounded, until PI-CONTINUE: COMPLETE, pi=pi
+2026-11-06T09:10:01-05:00 session 1: invoking pi
+2026-11-06T09:14:31-05:00 session 1: quota-hit 1 of budget 3; parking 600s until session 2
+2026-11-06T09:24:32-05:00 session 2: invoking pi

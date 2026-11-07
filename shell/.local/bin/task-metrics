@@ -1,0 +1,515 @@
+#!/usr/bin/env python3
+"""task-metrics: extract coding-agent runtime telemetry into the metrics ledger.
+
+Modes:
+  pi   Extract invocation records from a pi session store (session JSONL,
+       subagent toolResult details, pi-continue engine.log) into the
+       versioned contract in tests/task-metrics/ledger-schema.md. The
+       opencode mode and the rollup mode land with ORCH-4-3-3 and
+       ORCH-4-3-4.
+
+Extraction is read-only against the live store: records append to
+--output (default stdout) as JSONL in extraction order. Malformed
+session lines warn on stderr and are skipped, never silently dropped;
+the stderr summary names the count. Exit ladder: 0 records extracted,
+2 usage or IO error.
+
+pi mode sources:
+  - session root: --session-dir, else $PI_CODING_AGENT_SESSION_DIR,
+    else ~/.pi/agent/sessions; *.jsonl files are read recursively in
+    filename order (pi names them <UTC-timestamp>_<session-id>.jsonl).
+  - per assistant message entry: tokens and cost from usage (error and
+    aborted rows persist the all-zero usage block with no reasoning
+    field, extracted as zeroed tokens, null reasoning, cost source
+    none), stop_reason verbatim, duration_ms from the row's native
+    durationMs, retries from the error stop reason and from a repeat
+    invocation directly following an error row, nested subagent legs
+    from the subagent toolResult joined by its toolCallId to the
+    assistant toolCall block that spawned it (pi chains a parallel
+    fan-out's toolResults positionally, so parentId is only a fallback
+    for toolResults whose toolCallId is absent or unresolved); a
+    result group resolving under neither key warns and is counted in
+    the summary, never silently dropped.
+  - restarts from pi-continue engine.log park/restart cycles: the first
+    record at or after the restart invocation carries the prior
+    session's id and the park line verbatim; an interrupted park (park
+    interrupted, wait interrupted, stopped by user) and a fresh run
+    start clear the pending park so a stale park never completes
+    against a later run's invocation.
+  - attribution: cwd-match when the session cwd sits in a unit
+    worktree (.worktrees/<slug>, slug normalized to the task id),
+    else task-file-reference from the first task-id token in the
+    session's prose up to and including the record, else unattributed.
+    --batch-id stamps every record's batch_id, populated even on
+    unattributed records (the canonical populated-batch form).
+
+Standard library only, matching validate-ledger.py.
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import sys
+from datetime import datetime
+
+SCHEMA_VERSION = "1.0"
+ZEROED_STOP_REASONS = ("error", "aborted")
+RETRY_STOP_REASON = "error"
+SUBAGENT_TOOL_NAME = "subagent"
+WORKTREE_MARKER = "/.worktrees/"
+WORKTREE_SLUG_RE = re.compile(r"([a-z]+)(\d+(?:-\d+)*)\Z")
+TASK_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+(?:-\d+)+)\b")
+PI_SESSION_ROOT = "~/.pi/agent/sessions"
+PI_CONTINUE_STATE_DIR = "~/.local/share/pi/pi-continue"
+
+
+def warn(message):
+	print(f"task-metrics: warning: {message}", file=sys.stderr)
+
+
+def die(message):
+	print(f"task-metrics: error: {message}", file=sys.stderr)
+	return 2
+
+
+def is_count(value):
+	return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def is_amount(value):
+	return isinstance(value, (int, float)) and not isinstance(value, bool) \
+		and math.isfinite(value)
+
+
+def entry_epoch(timestamp):
+	"""Parse an entry timestamp (RFC3339 UTC Z) to an epoch, None when unusable."""
+	try:
+		return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+	except (AttributeError, ValueError, TypeError):
+		return None
+
+
+def text_of(content):
+	"""Concatenate the text blocks of a message content list (or a bare string)."""
+	if isinstance(content, str):
+		return content
+	if not isinstance(content, list):
+		return ""
+	return " ".join(block.get("text", "") for block in content
+		if isinstance(block, dict) and block.get("type") == "text")
+
+
+def normalize_worktree_unit(cwd):
+	"""Map a session cwd inside a unit worktree to its task id, None otherwise.
+
+	The manager names unit worktrees after their task id lowercased with
+	the prefix run together (orch4-3-2); the inverse normalization
+	restores ORCH-4-3-2. Unrecognized slugs stay verbatim.
+	"""
+	if not isinstance(cwd, str) or WORKTREE_MARKER not in cwd:
+		return None
+	slug = cwd.split(WORKTREE_MARKER, 1)[1].split("/", 1)[0]
+	match = WORKTREE_SLUG_RE.match(slug)
+	if match:
+		return f"{match.group(1).upper()}-{match.group(2)}"
+	return slug or None
+
+
+def derive_attribution(cwd, prose, batch_id):
+	"""Derive the attribution object for one record from cwd, prose, and batch."""
+	unit = normalize_worktree_unit(cwd)
+	if unit is not None:
+		return {"method": "cwd-match", "confidence": "exact",
+			"unit_id": unit, "batch_id": batch_id}
+	match = TASK_ID_RE.search(prose)
+	if match:
+		return {"method": "task-file-reference", "confidence": "exact",
+			"unit_id": match.group(1), "batch_id": batch_id}
+	return {"method": "none", "confidence": "unattributed",
+		"unit_id": None, "batch_id": batch_id}
+
+
+def derive_retry(stop_reason, previous_stop_reason):
+	"""Derive the retry object: an error stop reason is direct evidence,
+	an assistant row directly following an error row is a repeat invocation."""
+	if stop_reason == RETRY_STOP_REASON:
+		return {"count": 1, "evidence": "stop-reason"}
+	if previous_stop_reason == RETRY_STOP_REASON:
+		return {"count": 1, "evidence": "invocation-repeat"}
+	return {"count": 0, "evidence": None}
+
+
+def map_tokens(usage, path):
+	"""Map a pi usage block to the ledger token object; malformed counts
+	coerce to 0 or null with a warning so the ledger stays valid."""
+	fields = {}
+	for name, key in (("input", "input"), ("output", "output"),
+			("cache_read", "cacheRead"), ("cache_write", "cacheWrite")):
+		value = usage.get(key)
+		if is_count(value):
+			fields[name] = value
+		else:
+			if value is not None:
+				warn(f"{path}: usage.{key} is not a valid count ({value!r}), coerced to 0")
+			fields[name] = 0
+	reasoning = usage.get("reasoning")
+	if is_count(reasoning):
+		fields["reasoning"] = reasoning
+	else:
+		if reasoning is not None:
+			warn(f"{path}: usage.reasoning is not a valid count ({reasoning!r}), coerced to null")
+		fields["reasoning"] = None
+	return fields
+
+
+def map_cost(usage, zeroed_row, path):
+	"""Map a pi usage block to the ledger cost object.
+
+	Zeroed error/aborted rows carry cost source none with a null amount
+	(the contract's canonical pi form for the all-zero usage block); a
+	completed usage block reports its cost total verbatim, zero included.
+	"""
+	if zeroed_row:
+		return {"amount": None, "source": "none"}
+	cost = usage.get("cost")
+	total = cost.get("total") if isinstance(cost, dict) else None
+	if is_amount(total):
+		return {"amount": total, "source": "reported"}
+	if total is not None:
+		warn(f"{path}: usage.cost.total is not a valid amount ({total!r}), carried as unreported")
+	return {"amount": None, "source": "none"}
+
+
+def child_records(results, source):
+	"""Map subagent toolResult details.results[] entries to nested child
+	records; entries without a usable agent name warn and are dropped."""
+	children = []
+	for index, result in enumerate(results):
+		if not isinstance(result, dict):
+			warn(f"{source} child {index} is not an object, dropped")
+			continue
+		agent = result.get("agent")
+		if not isinstance(agent, str) or not agent:
+			warn(f"{source} child {index} carries no agent name, dropped")
+			continue
+		usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+		cost = usage.get("cost")
+		exit_code = result.get("exitCode")
+		exit_code = exit_code if isinstance(exit_code, int) \
+			and not isinstance(exit_code, bool) else None
+		children.append({
+			"agent": agent,
+			"agent_role": agent,
+			"model": result.get("model") if isinstance(result.get("model"), str)
+				and result.get("model") else None,
+			"exit_code": exit_code,
+			"stop_reason": result.get("stopReason") if isinstance(result.get("stopReason"), str)
+				and result.get("stopReason") else None,
+			"tokens": {name: usage.get(key) if is_count(usage.get(key)) else 0
+				for name, key in (("input", "input"), ("output", "output"),
+					("cache_read", "cacheRead"), ("cache_write", "cacheWrite"))},
+			"cost": {"amount": cost, "source": "reported"} if is_amount(cost)
+				else {"amount": None, "source": "none"},
+			"turns": usage.get("turns") if is_count(usage.get("turns")) else None,
+			"source": "pi-subagent-details",
+		})
+	return children
+
+
+def session_identity(path, header):
+	"""The session id from the header entry, falling back to the filename
+	(minus pi's <timestamp>_ prefix and .jsonl suffix)."""
+	if isinstance(header, dict):
+		sid = header.get("id")
+		if isinstance(sid, str) and sid:
+			return sid
+	name = os.path.basename(path)
+	stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+	return stem.split("_", 1)[-1] if stem else name
+
+
+def read_session(path):
+	"""Read one session file into (header, entries, skipped_line_count).
+	Malformed lines warn and are skipped; a wholly unreadable file warns
+	and returns no entries."""
+	try:
+		with open(path, encoding="utf-8") as handle:
+			lines = handle.read().splitlines()
+	except (OSError, UnicodeDecodeError) as exc:
+		warn(f"{path} is unreadable ({exc}), skipped")
+		return None, [], 0
+	header = None
+	entries = []
+	skipped = 0
+	for number, raw in enumerate(lines, start=1):
+		if not raw.strip():
+			continue
+		try:
+			rec = json.loads(raw)
+		except json.JSONDecodeError as exc:
+			warn(f"{path} line {number} is not valid JSON ({exc.msg}), skipped")
+			skipped += 1
+			continue
+		if not isinstance(rec, dict):
+			warn(f"{path} line {number} is not a JSON object, skipped")
+			skipped += 1
+			continue
+		if rec.get("type") == "session" and header is None:
+			header = rec
+			continue
+		if rec.get("type") == "message":
+			entries.append(rec)
+	return header, entries, skipped
+
+
+def extract_session(path, batch_id):
+	"""Extract one session file into invocation records. Returns
+	(records, session_span, skipped_line_count, unattached_group_count)
+	where session_span is (session_id, first_record_epoch,
+	last_record_epoch) or None and unattached_group_count is the number
+	of subagent result groups no record claims."""
+	header, entries, skipped = read_session(path)
+	if not entries:
+		return [], None, skipped, 0
+	session_id = session_identity(path, header)
+	cwd = header.get("cwd") if isinstance(header, dict) else None
+	toolcall_owner = {}
+	children_by_key = {}
+	children_sources = {}
+	for entry in entries:
+		message = entry.get("message")
+		if not isinstance(message, dict):
+			continue
+		role = message.get("role")
+		if role == "assistant":
+			content = message.get("content")
+			if isinstance(content, list):
+				for block in content:
+					if isinstance(block, dict) and block.get("type") == "toolCall" \
+							and isinstance(block.get("id"), str) and block["id"]:
+						toolcall_owner[block["id"]] = entry.get("id")
+			continue
+		if role != "toolResult":
+			continue
+		details = message.get("details")
+		results = details.get("results") if isinstance(details, dict) else None
+		if not isinstance(results, list):
+			continue
+		source = f"{path} entry {entry.get('id')}"
+		call_id = message.get("toolCallId")
+		owner = toolcall_owner.get(call_id) \
+			if isinstance(call_id, str) and call_id else None
+		key = owner or entry.get("parentId")
+		children_by_key.setdefault(key, []).extend(child_records(results, source))
+		children_sources.setdefault(key, []).append(source)
+	records = []
+	prose = ""
+	previous_stop = None
+	first_epoch = last_epoch = None
+	for entry in entries:
+		message = entry.get("message")
+		if not isinstance(message, dict):
+			continue
+		role = message.get("role")
+		if role in ("user", "assistant"):
+			prose = f"{prose} {text_of(message.get('content'))}"
+		if role != "assistant":
+			continue
+		entry_id = entry.get("id")
+		stop_reason = message.get("stopReason")
+		if not isinstance(entry_id, str) or not entry_id \
+				or not isinstance(stop_reason, str) or not stop_reason:
+			warn(f"{path} entry {entry_id!r} lacks an id or stopReason, skipped")
+			continue
+		if not isinstance(message.get("model"), str) or not message["model"] \
+				or not isinstance(message.get("provider"), str) or not message["provider"]:
+			warn(f"{path} entry {entry_id} lacks model or provider, skipped")
+			continue
+		epoch = entry_epoch(entry.get("timestamp"))
+		if epoch is None:
+			warn(f"{path} entry {entry_id} carries no usable timestamp, skipped")
+			continue
+		zeroed = stop_reason in ZEROED_STOP_REASONS
+		usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+		record = {
+			"schema_version": SCHEMA_VERSION,
+			"record_type": "invocation",
+			"timestamp": entry["timestamp"],
+			"harness": "pi",
+			"session_id": session_id,
+			"message_id": entry_id,
+			"agent_role": None,
+			"model": message["model"],
+			"provider": message["provider"],
+			"tokens": map_tokens({} if zeroed else usage, f"{path} entry {entry_id}"),
+			"cost": map_cost(usage, zeroed, f"{path} entry {entry_id}"),
+			"duration_ms": message.get("durationMs") if is_count(message.get("durationMs")) else None,
+			"stop_reason": stop_reason,
+			"retry": derive_retry(stop_reason, previous_stop),
+			"restart": {"of_session_id": None, "engine_log": None},
+			"nested": {"child_count": 0, "children": children_by_key.get(entry_id, [])},
+			"attribution": derive_attribution(cwd, prose, batch_id),
+		}
+		record["nested"]["child_count"] = len(record["nested"]["children"])
+		records.append(record)
+		previous_stop = stop_reason
+		if first_epoch is None:
+			first_epoch = epoch
+		last_epoch = epoch
+	emitted = {record["message_id"] for record in records}
+	unattached = 0
+	for key, sources in children_sources.items():
+		if key in emitted:
+			continue
+		unattached += len(sources)
+		for source in sources:
+			warn(f"{source} subagent result group resolves under neither "
+				f"its toolCallId nor its parentId, dropped")
+	if first_epoch is None:
+		return [], None, skipped, unattached
+	return records, (session_id, first_epoch, last_epoch), skipped, unattached
+
+
+def engine_restart_events(path):
+	"""Parse pi-continue engine.log into park/restart cycles: a line
+	naming a park followed by the next line invoking pi. Line timestamps
+	carry local offsets; entries are compared in absolute time. An
+	interrupted park (park interrupted, wait interrupted, stopped by
+	user) and a fresh run start clear the pending park, so an explicitly
+	interrupted park never completes against a later run's invocation."""
+	if not os.path.exists(path):
+		return []
+	try:
+		with open(path, encoding="utf-8") as handle:
+			lines = handle.read().splitlines()
+	except (OSError, UnicodeDecodeError) as exc:
+		warn(f"{path} is unreadable ({exc}), no restart joins")
+		return []
+	events = []
+	pending = None
+	for line in lines:
+		stripped = line.strip()
+		if not stripped:
+			continue
+		parts = stripped.split(None, 1)
+		epoch = None
+		try:
+			epoch = datetime.fromisoformat(parts[0]).timestamp()
+		except ValueError:
+			continue
+		text = parts[1] if len(parts) > 1 else ""
+		if "parking" in text:
+			pending = {"park_epoch": epoch, "park_line": stripped}
+		elif "invoking pi" in text and pending is not None:
+			pending["invoke_epoch"] = epoch
+			events.append(pending)
+			pending = None
+		elif pending is not None and ("interrupted" in text
+				or "stopped by user" in text or "run start" in text
+				or "one-shot start" in text):
+			pending = None
+	return events
+
+
+def attach_restarts(records, spans, events):
+	"""Annotate the first not-yet-annotated record at or after each
+	restart invocation with the prior session's id (the session newest at
+	the park moment) and the park line verbatim."""
+	spans_by_epoch = sorted(
+		(span for span in spans if span is not None),
+		key=lambda span: span[2])
+	for event in events:
+		if event.get("invoke_epoch") is None:
+			continue
+		prior = None
+		for span in spans_by_epoch:
+			if span[2] <= event["park_epoch"]:
+				prior = span[0]
+		for record in records:
+			epoch = entry_epoch(record["timestamp"])
+			if epoch is None or epoch < event["invoke_epoch"]:
+				continue
+			if record["restart"]["engine_log"] is not None:
+				continue
+			record["restart"] = {"of_session_id": prior,
+				"engine_log": event["park_line"]}
+			break
+
+
+def cmd_pi(args):
+	"""Run the pi extraction; returns the process exit code."""
+	session_root = args.session_dir or os.environ.get("PI_CODING_AGENT_SESSION_DIR") \
+		or os.path.expanduser(PI_SESSION_ROOT)
+	engine_log = args.engine_log or os.path.join(
+		os.path.expanduser(os.environ.get("PI_CONTINUE_STATE_DIR") or PI_CONTINUE_STATE_DIR),
+		"engine.log")
+	if not os.path.isdir(session_root):
+		return die(f"session directory {session_root} does not exist")
+	if args.engine_log and not os.path.isfile(args.engine_log):
+		return die(f"engine log {args.engine_log} does not exist")
+	if not args.engine_log and not os.path.isfile(engine_log):
+		warn(f"default engine log {engine_log} does not exist, no restart joins")
+	paths = []
+	for directory, subdirs, files in os.walk(session_root):
+		subdirs.sort()
+		for name in sorted(files):
+			if name.endswith(".jsonl"):
+				paths.append(os.path.join(directory, name))
+	events = engine_restart_events(engine_log)
+	records = []
+	spans = []
+	skipped_total = 0
+	unattached_total = 0
+	for path in paths:
+		session_records, span, skipped, unattached = extract_session(path, args.batch_id)
+		records.extend(session_records)
+		spans.append(span)
+		skipped_total += skipped
+		unattached_total += unattached
+	attach_restarts(records, spans, events)
+	try:
+		if args.output:
+			with open(args.output, "a", encoding="utf-8") as handle:
+				for record in records:
+					handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+		else:
+			for record in records:
+				print(json.dumps(record, separators=(",", ":")))
+	except OSError as exc:
+		return die(f"cannot write ledger {args.output or 'stdout'}: {exc}")
+	print(f"task-metrics: pi: {len(paths)} session file(s), {len(records)} record(s), "
+		f"{skipped_total} malformed line(s) skipped, {unattached_total} unattached "
+		f"subagent group(s), {len(events)} restart cycle(s) joined", file=sys.stderr)
+	return 0
+
+
+def parse_args(argv):
+	parser = argparse.ArgumentParser(
+		prog="task-metrics",
+		description="Extract coding-agent runtime telemetry into the metrics ledger.")
+	modes = parser.add_subparsers(dest="mode", required=True, metavar="mode")
+	pi = modes.add_parser("pi",
+		help="extract invocation records from a pi session store")
+	pi.add_argument("--session-dir", default=None,
+		help="pi session root (default: $PI_CODING_AGENT_SESSION_DIR, "
+			f"else {PI_SESSION_ROOT})")
+	pi.add_argument("--engine-log", default=None,
+		help="pi-continue engine.log (default under $PI_CONTINUE_STATE_DIR, "
+			f"else {PI_CONTINUE_STATE_DIR}/engine.log)")
+	pi.add_argument("--batch-id", default=None,
+		help="stamp every record's attribution.batch_id with this batch")
+	pi.add_argument("--output", default=None,
+		help="append records to this JSONL file (default: stdout)")
+	pi.set_defaults(func=cmd_pi)
+	return parser.parse_args(argv[1:])
+
+
+def main(argv):
+	args = parse_args(argv)
+	return args.func(args)
+
+
+if __name__ == "__main__":
+	sys.exit(main(sys.argv))

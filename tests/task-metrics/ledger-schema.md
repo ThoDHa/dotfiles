@@ -26,7 +26,7 @@ One record per model invocation (pi assistant message, opencode assistant messag
 | `harness` | `pi` or `opencode`, required | derived by the extracting mode | derived by the extracting mode |
 | `session_id` | non-empty string, required | session file identity | `message.session_id` (oc 1) |
 | `message_id` | non-empty string, required | session entry id | `message.id` (oc 1) |
-| `agent_role` | string or null | subagent toolResult `details.results[].agent` where derivable (pi 2) | session context where derivable; null otherwise |
+| `agent_role` | string or null | subagent toolResult `details.results[].agent` where derivable (pi 2) | `message.data.agent`, an explicit field where present; null otherwise (oc 1) |
 | `model` | non-empty string, required | assistant `model` (pi 1) | `message.modelID` (oc 1) |
 | `provider` | non-empty string, required | assistant `provider` (pi 1) | `message.providerID` (oc 1) |
 | `tokens` | object, required (see below) | `usage` {input, output, cacheRead, cacheWrite, reasoning} (pi 1) | `message.tokens` {input, output, cache{read, write}, reasoning} (oc 1) |
@@ -48,7 +48,7 @@ The restart object carries `of_session_id` (string or null) and `engine_log` (st
 
 The nested object carries `child_count` (integer >= 0, equal to the children array length) and `children` (array of child records, possibly empty).
 
-The attribution object carries `method` (`cwd-match`, `task-file-reference`, `dispatch-window`, or `none`), `confidence` (`exact`, `window`, `unattributed`), `unit_id` (string or null), and `batch_id` (string or null). An unattributed record must use method `none`, and only an unattributed record may use it; attributed records carry the unit or batch they attach to. Unattributed invocations stay visible in batch totals rather than being dropped (the attribution-accuracy risk's mitigation in the parent plan).
+The attribution object carries `method` (`cwd-match`, `task-file-reference`, `dispatch-window`, or `none`), `confidence` (`exact`, `window`, `unattributed`), `unit_id` (string or null), and `batch_id` (string or null). An unattributed record must use method `none`, and only an unattributed record may use it; attributed records carry the unit or batch they attach to. The canonical batch_id form is the populated-batch reading: `batch_id` names the batch whose extraction pass produced the record and is populated even on unattributed records, whose `unit_id` stays null; it is null only when the extraction ran outside any batch (decided at the ORCH-4-3-2 opening round per the reviewer's leaning). The validator accepts both forms so a tightening stays a major-bump decision, not a silent one. Unattributed invocations stay visible in batch totals rather than being dropped (the attribution-accuracy risk's mitigation in the parent plan).
 
 ### Stop-Reason Vocabulary
 

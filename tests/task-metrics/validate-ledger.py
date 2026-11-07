@@ -22,6 +22,7 @@ schema this program pins.
 """
 
 import json
+import math
 import re
 import sys
 from datetime import datetime
@@ -85,7 +86,7 @@ class IntAny(Int):
 
 
 class Num:
-	"""A JSON number (int or float, booleans excluded)."""
+	"""A JSON number (int or float, booleans excluded, NaN and Infinity rejected)."""
 
 	def __init__(self, nullable=False, nonneg=True):
 		self.nullable = nullable
@@ -96,6 +97,9 @@ class Num:
 			return
 		if isinstance(value, bool) or not isinstance(value, (int, float)):
 			errors.append((path, f"expected a number, got {describe(value)}"))
+			return
+		if not math.isfinite(value):
+			errors.append((path, f"expected a finite number, got {value}"))
 			return
 		if self.nonneg and value < 0:
 			errors.append((path, f"expected >= 0, got {value}"))
@@ -417,8 +421,6 @@ def check_invariants(rec, errors):
 			"requests": rec["invocation_count"],
 		}
 		for flag in flags:
-			if flag not in declared_key:
-				continue
 			if declared.get(declared_key[flag]) is None:
 				errors.append(("budget.over_budget",
 					f"dimension {flag} flagged over budget but its declared value is null"))
@@ -494,6 +496,9 @@ def main(argv):
 				lines = ledger.read().splitlines()
 	except OSError as exc:
 		print(f"ERROR: cannot read {argv[1]}: {exc}", file=sys.stderr)
+		return 2
+	except UnicodeDecodeError as exc:
+		print(f"ERROR: {argv[1]} is not valid UTF-8: {exc}", file=sys.stderr)
 		return 2
 
 	errors, type_counts = validate_ledger(lines)

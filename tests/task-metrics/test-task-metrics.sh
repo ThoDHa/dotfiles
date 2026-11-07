@@ -9,7 +9,10 @@
 # fixture field coverage (positive and degenerate forms per harness),
 # the per-harness stop-reason vocabulary (fixtures carry only spellings
 # observed in the live harness stores), fixture cost source/amount
-# coherence, unit-rollup arithmetic consistency with the pi fixture,
+# coherence, non-finite number rejection, the UTF-8 exit ladder,
+# loud-failure propagation of the tamper and embedded-python helpers,
+# the populated unattributed batch form, unit-rollup arithmetic
+# consistency with the pi fixture,
 # schema-document consistency (doc version, record types, enum members,
 # observed stop-reason spellings, budget semantics, yield-tally fields,
 # AC-12 probe families), and the make wiring pin (chained into test and
@@ -58,7 +61,7 @@ assert_valid() { # label fixture; the validator must accept this ledger outright
 }
 
 tamper() { # out_file src_file record_type python_expr; rewrites the first record of that type in a temp copy
-	local out="$1" src="$2" record_type="$3" expr="$4"
+	local out="$1" src="$2" record_type="$3" expr="$4" rc=0
 	python3 - "$out" "$src" "$record_type" "$expr" <<'PYEOF'
 import json, sys
 out, src, record_type, expr = sys.argv[1:5]
@@ -70,6 +73,11 @@ exec(expr)
 lines[index] = json.dumps(rec)
 open(out, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 PYEOF
+	rc=$?
+	if ((rc != 0)); then
+		bad "tamper helper failed rewriting $record_type (rc $rc); the next check would read a stale file"
+		return 1
+	fi
 }
 
 coverage() { # fixture pins_file; prints missing pins, one per line, or a failure sentinel
@@ -127,11 +135,34 @@ assert_no_output() { # label output; empty output means every pinned form was fo
 	if [[ -z "$out" ]]; then ok "$label"; else bad "$label (gaps: $(echo "$out" | tr '\n' ' '))"; fi
 }
 
+crash_sentinel() { # rc output; a crashed embedded-python run becomes a loud gap, never a false-pass empty string
+	if (($1 != 0)); then printf 'EMBEDDED PYTHON CRASHED (rc %d)' "$1"; else printf '%s' "$2"; fi
+}
+
+echo "== helper failure propagation self-test =="
+rc=0
+(
+	fail=0
+	bad() { fail=$((fail + 1)); }
+	tamper "$ROOT/selftest.jsonl" "$FIXTURES/pi-ledger.jsonl" nosuchrecordtype "pass"
+	((fail == 1)) || exit 1
+) || rc=$?
+assert_eq "tamper helper fails loudly on an absent record type" "0" "$rc"
+rc=0
+(
+	[[ "$(crash_sentinel 3 "partial")" == "EMBEDDED PYTHON CRASHED (rc 3)" ]] || exit 1
+	[[ "$(crash_sentinel 0 "gaps")" == "gaps" ]] || exit 1
+) || rc=$?
+assert_eq "crash sentinel turns a nonzero embedded-python rc into a loud gap" "0" "$rc"
+
 echo "== validator CLI contract =="
 python3 "$VALIDATOR" >/dev/null 2>&1; no_args_rc=$?
 python3 "$VALIDATOR" "$ROOT/does-not-exist.jsonl" >/dev/null 2>&1; missing_rc=$?
 assert_eq "no arguments exits 2" "2" "$no_args_rc"
 assert_eq "unreadable ledger exits 2" "2" "$missing_rc"
+printf '\xff\xfe not a ledger\n' > "$ROOT/invalid-utf8.jsonl"
+python3 "$VALIDATOR" "$ROOT/invalid-utf8.jsonl" >/dev/null 2>&1; utf8_rc=$?
+assert_eq "invalid UTF-8 ledger exits 2" "2" "$utf8_rc"
 
 echo "== fixture validation: pi =="
 validate_ok "pi fixture validates" "$FIXTURES/pi-ledger.jsonl" "invocation: 6"
@@ -189,6 +220,12 @@ validate_err "reported cost without an amount" "$t" "cost.amount"
 
 tamper "$t" "$FIXTURES/oc-ledger.jsonl" invocation 'rec["cost"]["amount"] = 5.0'
 validate_err "positive amount under source none" "$t" "cost.amount"
+
+tamper "$t" "$FIXTURES/pi-ledger.jsonl" invocation 'rec["cost"]["amount"] = float("nan")'
+validate_err "NaN amount under reported cost" "$t" "finite"
+
+tamper "$t" "$FIXTURES/pi-ledger.jsonl" invocation 'rec["cost"]["amount"] = float("inf")'
+validate_err "infinite amount under reported cost" "$t" "finite"
 
 tamper "$t" "$FIXTURES/pi-ledger.jsonl" invocation 'rec["duration_ms"] = -5'
 validate_err "negative duration" "$t" "duration_ms"
@@ -281,11 +318,12 @@ nested.children positive
 attribution.method positive
 attribution.confidence value
 attribution.unit_id positive
-attribution.batch_id null
+attribution.batch_id positive
 PINS
 pi_gaps="$(coverage "$FIXTURES/pi-ledger.jsonl" "$ROOT/pi-pins")"
 assert_no_output "pi fixtures cover every pinned field form" "$pi_gaps"
 
+pi_degenerate_rc=0
 pi_degenerate="$(python3 - "$FIXTURES/pi-ledger.jsonl" <<'PYEOF'
 import json, sys
 records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
@@ -306,10 +344,16 @@ checks = {
 	"restart linkage present": any(r["restart"]["of_session_id"] is not None for r in records),
 	"nested child with null exit_code": any(
 		c["exit_code"] is None for r in records for c in r["nested"]["children"]),
+	"unattributed record carries the populated batch": any(
+		r["attribution"]["confidence"] == "unattributed"
+		and r["attribution"]["batch_id"] is not None
+		and r["attribution"]["unit_id"] is None
+		for r in records),
 }
 print("\n".join(name for name, hit in checks.items() if not hit))
 PYEOF
-)"
+)" || pi_degenerate_rc=$?
+pi_degenerate="$(crash_sentinel "$pi_degenerate_rc" "$pi_degenerate")"
 assert_no_output "pi fixtures carry the pinned degenerate forms" "$pi_degenerate"
 
 echo "== fixture field coverage: opencode =="
@@ -336,6 +380,7 @@ PINS
 oc_gaps="$(coverage "$FIXTURES/oc-ledger.jsonl" "$ROOT/oc-pins")"
 assert_no_output "opencode fixtures cover every pinned field form" "$oc_gaps"
 
+oc_degenerate_rc=0
 oc_degenerate="$(python3 - "$FIXTURES/oc-ledger.jsonl" <<'PYEOF'
 import json, sys
 records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
@@ -354,10 +399,12 @@ checks = {
 }
 print("\n".join(name for name, hit in checks.items() if not hit))
 PYEOF
-)"
+)" || oc_degenerate_rc=$?
+oc_degenerate="$(crash_sentinel "$oc_degenerate_rc" "$oc_degenerate")"
 assert_no_output "opencode fixtures carry the pinned degenerate forms" "$oc_degenerate"
 
 echo "== per-harness stop-reason vocabulary =="
+vocab_gaps_rc=0
 vocab_gaps="$(python3 - "$FIXTURES/pi-ledger.jsonl" "$FIXTURES/oc-ledger.jsonl" <<'PYEOF'
 import json, sys
 
@@ -380,10 +427,12 @@ for path, observed, label in ((sys.argv[1], PI_OBSERVED, "pi"),
 			f"on the live harness: {sorted(foreign)} (observed vocabulary: {sorted(observed)})")
 print("\n".join(problems))
 PYEOF
-)"
+)" || vocab_gaps_rc=$?
+vocab_gaps="$(crash_sentinel "$vocab_gaps_rc" "$vocab_gaps")"
 assert_no_output "fixtures carry only their harness's observed stop reasons" "$vocab_gaps"
 
 echo "== unit rollup arithmetic consistency =="
+rollup_gaps_rc=0
 rollup_gaps="$(python3 - "$FIXTURES/pi-ledger.jsonl" "$FIXTURES/rollups-ledger.jsonl" <<'PYEOF'
 import json, math, sys
 
@@ -431,7 +480,8 @@ if unit["attribution_confidence_histogram"] != confidence:
 		f"{unit['attribution_confidence_histogram']} != fixture counts {confidence}")
 print("\n".join(problems))
 PYEOF
-)"
+)" || rollup_gaps_rc=$?
+rollup_gaps="$(crash_sentinel "$rollup_gaps_rc" "$rollup_gaps")"
 assert_no_output "unit rollup arithmetic matches the pi fixture" "$rollup_gaps"
 
 echo "== schema document consistency =="
@@ -450,6 +500,8 @@ for dimension in tokens cost wall_clock requests; do
 	assert_contains "schema doc names budget dimension $dimension" "$doc" "\`$dimension\`"
 done
 assert_contains "schema doc pins the over-budget flag form" "$doc" 'over-budget('
+assert_contains "schema doc pins the populated unattributed batch form" "$doc" "populated-batch reading"
+assert_contains "schema doc names opencode's explicit agent field" "$doc" "\`message.data.agent\`"
 for spelling in stop toolUse error aborted tool-calls length unknown; do
 	assert_contains "schema doc names observed stop reason $spelling" "$doc" "\`$spelling\`"
 done

@@ -1,6 +1,11 @@
 # Log files
 *.log
 
+# Hermetic fixture store for the pi extractor (synthetic test input,
+# not a runtime log)
+!tests/task-metrics/fixtures/pi-store/engine.log
+!tests/task-metrics/fixtures/pi-store/engine-interrupted.log
+
 # OS files
 .DS_Store
 Thumbs.db
