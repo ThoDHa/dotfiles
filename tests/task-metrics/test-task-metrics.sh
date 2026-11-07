@@ -524,6 +524,481 @@ assert_contains "probe spec carries comparability rules" "$probe" "Comparability
 assert_contains "probe spec names the snapshot record carrier" "$probe" "ac12_snapshot"
 assert_contains "probe spec names the ORCH-4-9 ordering rule" "$probe" "ORCH-4-9"
 
+echo "== oc extractor: hermetic fixture extraction =="
+EXTRACTOR="$REPO_ROOT/shell/.local/bin/task-metrics"
+FIXDB="$ROOT/oc-fixture.db"
+FIXLOG="$ROOT/oc-engine.log"
+EXTRACTED="$ROOT/oc-extracted.jsonl"
+
+python3 - "$FIXDB" "$FIXLOG" <<'PYEOF'
+import json, sqlite3, sys
+from datetime import datetime
+
+DB, LOG = sys.argv[1], sys.argv[2]
+
+def ms(text):
+	return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+
+con = sqlite3.connect(DB)
+con.execute("CREATE TABLE session (id text PRIMARY KEY, project_id text NOT NULL, "
+	"parent_id text, slug text NOT NULL, directory text NOT NULL, version text NOT NULL, "
+	"agent text, time_created integer NOT NULL, time_updated integer NOT NULL)")
+con.execute("CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, "
+	"parent_id text, slug text NOT NULL, directory text NOT NULL, version text NOT NULL, "
+	"agent text, time_created integer NOT NULL, time_updated integer NOT NULL)")
+con.execute("CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, "
+	"time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)")
+con.execute("CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, "
+	"session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, "
+	"data text NOT NULL)")
+
+def sess(sid, parent, agent, table="session_v2"):
+	con.execute(f"INSERT INTO {table} VALUES (?,?,?,?,?,?,?,?,?)",
+		(sid, "proj", parent, "slug-" + sid, "/tmp", "1.0", agent,
+			ms("2026-11-06T10:00:00Z"), ms("2026-11-06T15:00:00Z")))
+
+def msg(mid, sid, created, updated, data):
+	con.execute("INSERT INTO message VALUES (?,?,?,?,?)",
+		(mid, sid, ms(created), ms(updated), json.dumps(data)))
+
+def part(pid, mid, sid, created, reason):
+	moment = ms(created)
+	con.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (pid, mid, sid, moment, moment + 100,
+		json.dumps({"type": "step-finish", "reason": reason, "cost": 0,
+			"tokens": {"total": 1, "input": 1, "output": 1, "reasoning": 1,
+				"cache": {"write": 0, "read": 1}}})))
+
+def tok(i, o, r, cr, cw):
+	return {"total": i + o, "input": i, "output": o, "reasoning": r,
+		"cache": {"write": cw, "read": cr}}
+
+def assistant(mid, sid, created, updated, cwd, cost, tokens, model, provider, agent=None):
+	data = {"role": "assistant", "path": {"cwd": cwd}, "cost": cost, "tokens": tokens,
+		"modelID": model, "providerID": provider, "time": {"created": ms(created)}}
+	if agent is not None:
+		data["agent"] = agent
+	msg(mid, sid, created, updated, data)
+
+sess("sess-A", None, "build")
+sess("sess-B", None, None)
+sess("sess-CA", "sess-A", "explore")
+sess("sess-CB", "sess-A", None)
+sess("sess-GC", "sess-CA", None)
+sess("sess-orphan", "sess-gone", "general")
+sess("sess-L", None, "build", "session")
+sess("sess-LC", "sess-L", None, "session")
+
+assistant("msg-l1", "sess-L", "2026-11-06T10:00:30Z", "2026-11-06T10:00:51.250Z",
+	"/repo", 0, tok(6400, 2100, 90, 40200, 0), "glm-5.3", "zai-coding-plan", "build")
+assistant("msg-lc1", "sess-LC", "2026-11-06T10:00:50Z", "2026-11-06T10:00:58.900Z",
+	"/repo", 0, tok(2200, 400, 25, 0, 0), "glm-5.3", "zai-coding-plan", "general")
+assistant("msg-1", "sess-A", "2026-11-06T10:01:00Z", "2026-11-06T10:01:39.880Z",
+	"/repo", 0, tok(28400, 7300, 2100, 130000, 0), "glm-5.3", "zai-coding-plan", "build")
+assistant("msg-2", "sess-A", "2026-11-06T10:02:00Z", "2026-11-06T10:02:15.220Z",
+	"/repo", 0, tok(2400, 0, None, 121000, 0), "glm-5.3", "zai-coding-plan", "build")
+assistant("msg-3", "sess-A", "2026-11-06T10:03:00Z", "2026-11-06T10:03:08.010Z",
+	"/repo", 0, tok(900, 100, 30, 0, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-g1", "sess-GC", "2026-11-06T10:03:30Z", "2026-11-06T10:03:55.750Z",
+	"/repo", 0, tok(500, 150, 10, 0, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-4", "sess-A", "2026-11-06T10:04:00Z", "2026-11-06T10:04:19.305Z",
+	"/repo", None, tok(3300, 1450, 520, 118000, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-5", "sess-A", "2026-11-06T14:04:30Z", "2026-11-06T14:05:18.450Z",
+	"/repo", 0, tok(0, 0, 0, 0, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-b1", "sess-B", "2026-11-06T14:05:30Z", "2026-11-06T14:06:11.500Z",
+	"/other", 0, tok(1900, 640, 0, 0, 0), "Qwen2.5-Coder-7B-Instruct", "thoai-local")
+assistant("msg-b2", "sess-B", "2026-11-06T14:07:00Z", "2026-11-06T14:07:52.100Z",
+	"/other", 0, tok(51000, 6900, 4800, 205000, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-o1", "sess-orphan", "2026-11-06T14:08:00Z", "2026-11-06T14:08:44.000Z",
+	"/elsewhere", 0, tok(700, 200, 15, 0, 0), "glm-5.3", "zai-coding-plan")
+assistant("msg-ca1", "sess-CA", "2026-11-06T14:04:00Z", "2026-11-06T14:04:33.300Z",
+	"/repo", 0, tok(8800, 1400, 250, 0, 0), "glm-5.3", "zai-coding-plan", "explore")
+
+part("p-l1", "msg-l1", "sess-L", "2026-11-06T10:00:51.000Z", "stop")
+part("p-lc1", "msg-lc1", "sess-LC", "2026-11-06T10:00:58.000Z", "stop")
+part("p-1-early", "msg-1", "sess-A", "2026-11-06T10:01:20.000Z", "stop")
+part("p-1", "msg-1", "sess-A", "2026-11-06T10:01:39.000Z", "tool-calls")
+part("p-2", "msg-2", "sess-A", "2026-11-06T10:02:15.000Z", "stop")
+part("p-4", "msg-4", "sess-A", "2026-11-06T10:04:19.000Z", "length")
+part("p-5", "msg-5", "sess-A", "2026-11-06T14:05:18.000Z", "stop")
+part("p-b1", "msg-b1", "sess-B", "2026-11-06T14:06:11.000Z", "stop")
+part("p-ca1", "msg-ca1", "sess-CA", "2026-11-06T14:04:33.000Z", "stop")
+con.commit()
+con.close()
+
+PARK_LINE = ("2026-11-06T10:05:00-04:00 session 1: productive quota hit 1; "
+	"unbounded ride continues; parking 600s until session 2")
+with open(LOG, "w", encoding="utf-8") as log:
+	log.write("2026-11-06T10:04:30-04:00 run start (pid 4711): unbounded, "
+		"until OC-CONTINUE: COMPLETE, oc=opencode --model zai-coding-plan/glm-5.3\n")
+	log.write(PARK_LINE + "\n")
+	log.write("2026-11-06T10:06:00-04:00 session 2: invoking opencode run\n")
+	log.write("2026-11-06T10:09:00-04:00 session 2: productive quota hit 2; "
+		"unbounded ride continues; parking 600s until session 3\n")
+PYEOF
+
+extract_rc=0
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--cwd /repo --unit ORCH-4-3-3 --batch ORCH-4-3 \
+	--out "$EXTRACTED" 2>"$ROOT/oc-extract-stderr" || extract_rc=$?
+assert_eq "oc extractor exits 0 on the fixture database" "0" "$extract_rc"
+validate_ok "oc extractor output validates against the ledger contract" "$EXTRACTED" "invocation: 10"
+
+extracted_version="$(python3 -c \
+	'import json, sys; print(json.loads(open(sys.argv[1], encoding="utf-8").readline())["schema_version"])' \
+	"$EXTRACTED")"
+assert_eq "oc extractor emits the validator's schema version" "$validator_version" "$extracted_version"
+assert_contains "oc extractor summarizes its counts" "$(cat "$ROOT/oc-extract-stderr")" \
+	"10 invocation records, 3 nested children, 0 anomalies"
+
+oc_problems="$(python3 - "$EXTRACTED" <<'PYEOF'
+import json, sys
+
+records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+by_id = {record["message_id"]: record for record in records}
+problems = []
+
+def pin(label, actual, expected):
+	if actual != expected:
+		problems.append(f"{label}: expected {expected!r}, got {actual!r}")
+
+PARK_LINE = ("2026-11-06T10:05:00-04:00 session 1: productive quota hit 1; "
+	"unbounded ride continues; parking 600s until session 2")
+
+pin("emission order", [r["message_id"] for r in records],
+	["msg-l1", "msg-1", "msg-2", "msg-3", "msg-g1", "msg-4", "msg-5", "msg-b1", "msg-b2", "msg-o1"])
+for record in records:
+	pin(f"{record['message_id']} harness", record["harness"], "opencode")
+	pin(f"{record['message_id']} schema_version", record["schema_version"], "1.0")
+	pin(f"{record['message_id']} record_type", record["record_type"], "invocation")
+
+r = by_id["msg-1"]
+pin("msg-1 timestamp", r["timestamp"], "2026-11-06T10:01:00Z")
+pin("msg-1 session", r["session_id"], "sess-A")
+pin("msg-1 agent_role", r["agent_role"], "build")
+pin("msg-1 model", r["model"], "glm-5.3")
+pin("msg-1 provider", r["provider"], "zai-coding-plan")
+pin("msg-1 tokens", r["tokens"], {"input": 28400, "output": 7300,
+	"cache_read": 130000, "cache_write": 0, "reasoning": 2100})
+pin("msg-1 cost", r["cost"], {"amount": 0, "source": "none"})
+pin("msg-1 duration_ms", r["duration_ms"], 39880)
+pin("msg-1 stop_reason (last step-finish part wins)", r["stop_reason"], "tool-calls")
+pin("msg-1 retry", r["retry"], {"count": 0, "evidence": None})
+pin("msg-1 restart", r["restart"], {"of_session_id": None, "engine_log": None})
+pin("msg-1 attribution", r["attribution"], {"method": "cwd-match",
+	"confidence": "exact", "unit_id": "ORCH-4-3-3", "batch_id": "ORCH-4-3"})
+pin("msg-1 child_count", r["nested"]["child_count"], 2)
+
+ca = r["nested"]["children"][0]
+pin("child CA agent (child session identity)", ca["agent"], "sess-CA")
+pin("child CA agent_role (session agent column)", ca["agent_role"], "explore")
+pin("child CA model", ca["model"], "glm-5.3")
+pin("child CA exit_code", ca["exit_code"], None)
+pin("child CA stop_reason", ca["stop_reason"], "stop")
+pin("child CA tokens (sums)", ca["tokens"], {"input": 8800, "output": 1400,
+	"cache_read": 0, "cache_write": 0})
+pin("child CA cost", ca["cost"], {"amount": 0, "source": "none"})
+pin("child CA turns", ca["turns"], None)
+pin("child CA source", ca["source"], "oc-parent-id")
+
+cb = r["nested"]["children"][1]
+pin("child CB agent", cb["agent"], "sess-CB")
+pin("child CB agent_role", cb["agent_role"], None)
+pin("child CB model (no assistant messages)", cb["model"], None)
+pin("child CB stop_reason (no step-finish)", cb["stop_reason"], None)
+pin("child CB tokens (empty sums)", cb["tokens"], {"input": 0, "output": 0,
+	"cache_read": 0, "cache_write": 0})
+pin("child CB cost (no cost persisted)", cb["cost"], {"amount": None, "source": "none"})
+
+pin("msg-2 output (zero-output message)", by_id["msg-2"]["tokens"]["output"], 0)
+pin("msg-2 reasoning (absent stays null)", by_id["msg-2"]["tokens"]["reasoning"], None)
+pin("msg-2 stop_reason", by_id["msg-2"]["stop_reason"], "stop")
+pin("msg-3 stop_reason (no step-finish part)", by_id["msg-3"]["stop_reason"], "unknown")
+pin("msg-3 retry (unknown end repeated)", by_id["msg-3"]["retry"],
+	{"count": 1, "evidence": "invocation-repeat"})
+pin("msg-4 cost (absent carried as null)", by_id["msg-4"]["cost"],
+	{"amount": None, "source": "none"})
+pin("msg-4 stop_reason", by_id["msg-4"]["stop_reason"], "length")
+pin("msg-5 zero usage", (by_id["msg-5"]["tokens"]["input"],
+	by_id["msg-5"]["tokens"]["output"]), (0, 0))
+pin("msg-5 retry (last message is an end)", by_id["msg-5"]["retry"],
+	{"count": 0, "evidence": None})
+pin("msg-b1 restart (park window join)", by_id["msg-b1"]["restart"],
+	{"of_session_id": "sess-A", "engine_log": PARK_LINE})
+pin("msg-b1 provider", by_id["msg-b1"]["provider"], "thoai-local")
+pin("msg-b1 agent_role (absent stays null)", by_id["msg-b1"]["agent_role"], None)
+pin("msg-b1 attribution (non-matching cwd)", by_id["msg-b1"]["attribution"],
+	{"method": "none", "confidence": "unattributed", "unit_id": None,
+		"batch_id": "ORCH-4-3"})
+pin("msg-b2 stop_reason", by_id["msg-b2"]["stop_reason"], "unknown")
+pin("msg-b2 retry (unknown end without a repeat)", by_id["msg-b2"]["retry"],
+	{"count": 0, "evidence": None})
+pin("msg-o1 session (orphan child extracted standalone)", by_id["msg-o1"]["session_id"], "sess-orphan")
+pin("msg-o1 attribution", by_id["msg-o1"]["attribution"],
+	{"method": "none", "confidence": "unattributed", "unit_id": None,
+		"batch_id": "ORCH-4-3"})
+g1 = by_id["msg-g1"]
+pin("msg-g1 session (grandchild flattens to its own records)", g1["session_id"], "sess-GC")
+pin("msg-g1 stop_reason (no step-finish part)", g1["stop_reason"], "unknown")
+pin("msg-g1 retry (only message in its session)", g1["retry"], {"count": 0, "evidence": None})
+pin("msg-g1 attribution", g1["attribution"], {"method": "cwd-match",
+	"confidence": "exact", "unit_id": "ORCH-4-3-3", "batch_id": "ORCH-4-3"})
+pin("msg-g1 tokens", g1["tokens"], {"input": 500, "output": 150,
+	"cache_read": 0, "cache_write": 0, "reasoning": 10})
+pin("CA child entry excludes grandchild tokens (no double count)",
+	(ca["tokens"]["input"], ca["tokens"]["output"]), (8800, 1400))
+
+l1 = by_id["msg-l1"]
+pin("msg-l1 session (legacy session table row)", l1["session_id"], "sess-L")
+pin("msg-l1 stop_reason", l1["stop_reason"], "stop")
+pin("msg-l1 attribution", l1["attribution"], {"method": "cwd-match",
+	"confidence": "exact", "unit_id": "ORCH-4-3-3", "batch_id": "ORCH-4-3"})
+pin("msg-l1 child_count (legacy child folded)", l1["nested"]["child_count"], 1)
+lc = l1["nested"]["children"][0]
+pin("child LC agent", lc["agent"], "sess-LC")
+pin("child LC agent_role (falls back to the message agent)", lc["agent_role"], "general")
+pin("child LC tokens", lc["tokens"], {"input": 2200, "output": 400,
+	"cache_read": 0, "cache_write": 0})
+
+print("\n".join(problems))
+PYEOF
+)"
+assert_no_output "oc extractor records carry the pinned derivation values" "$oc_problems"
+
+oc_readonly_before="$(md5sum "$FIXDB" | cut -d' ' -f1)"
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --out "$ROOT/oc-readonly.jsonl" >/dev/null 2>&1
+oc_readonly_after="$(md5sum "$FIXDB" | cut -d' ' -f1)"
+assert_eq "oc extraction leaves the database byte-identical" "$oc_readonly_before" "$oc_readonly_after"
+validate_ok "default-attribution output validates" "$ROOT/oc-readonly.jsonl" "invocation: 10"
+oc_unattributed="$(python3 - "$ROOT/oc-readonly.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+wrong = [r["message_id"] for r in records
+	if r["attribution"] != {"method": "none", "confidence": "unattributed",
+		"unit_id": None, "batch_id": None}]
+print("attributed without --cwd/--unit: " + ", ".join(wrong) if wrong else "")
+PYEOF
+)"
+assert_no_output "records without --cwd stay unattributed" "$oc_unattributed"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-B \
+	--out "$ROOT/oc-session-b.jsonl" >/dev/null 2>&1
+validate_ok "session filter output validates" "$ROOT/oc-session-b.jsonl" "invocation: 2"
+session_b_restart="$(python3 -c \
+	'import json, sys; records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8")]; \
+	b1 = next(r for r in records if r["message_id"] == "msg-b1"); \
+	print(b1["restart"]["of_session_id"], bool(b1["restart"]["engine_log"]))' \
+	"$ROOT/oc-session-b.jsonl")"
+assert_eq "restart engine_log stands alone outside the prior session's scope" \
+	"None True" "$session_b_restart"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-L \
+	--out "$ROOT/oc-session-l.jsonl" >/dev/null 2>&1
+validate_ok "legacy-table session requested directly extracts its subtree" \
+	"$ROOT/oc-session-l.jsonl" "invocation: 1"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-CA \
+	--out "$ROOT/oc-session-ca.jsonl" >/dev/null 2>&1
+validate_ok "child session requested directly extracts standalone" "$ROOT/oc-session-ca.jsonl" \
+	"invocation: 1"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--since 2026-11-06T10:04:00Z --out "$ROOT/oc-since.jsonl" >/dev/null 2>&1
+validate_ok "--since window output validates" "$ROOT/oc-since.jsonl" "invocation: 5"
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--until 2026-11-06T14:07:00Z --out "$ROOT/oc-until.jsonl" >/dev/null 2>&1
+validate_ok "--until window output validates" "$ROOT/oc-until.jsonl" "invocation: 8"
+
+# Regression: a message created before the --until boundary whose
+# step-finish part lands past it must carry the part's real stop reason
+# and derive no retry from the windowing gap.
+STRADDLE_DB="$ROOT/oc-straddle.db"
+python3 - "$STRADDLE_DB" <<'PYEOF'
+import json, sqlite3, sys
+from datetime import datetime
+
+def ms(text):
+	return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+
+con = sqlite3.connect(sys.argv[1])
+con.execute("CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, "
+	"parent_id text, slug text NOT NULL, directory text NOT NULL, version text NOT NULL, "
+	"agent text, time_created integer NOT NULL, time_updated integer NOT NULL)")
+con.execute("CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, "
+	"time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)")
+con.execute("CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, "
+	"session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, "
+	"data text NOT NULL)")
+con.execute("INSERT INTO session_v2 VALUES ('sess-W', 'proj', NULL, 'slug-sess-W', '/repo', "
+	"'1.0', 'build', ?, ?)", (ms("2026-11-06T14:06:00Z"), ms("2026-11-06T14:08:00Z")))
+for mid, created, updated in (("msg-w1", "2026-11-06T14:06:30Z", "2026-11-06T14:07:25Z"),
+		("msg-w2", "2026-11-06T14:06:55Z", "2026-11-06T14:07:40Z")):
+	con.execute("INSERT INTO message VALUES (?,?,?,?,?)", (mid, "sess-W",
+		ms(created), ms(updated), json.dumps({
+			"role": "assistant", "path": {"cwd": "/repo"}, "cost": 0,
+			"tokens": {"input": 1000, "output": 100, "reasoning": 10,
+				"cache": {"write": 0, "read": 50}},
+			"modelID": "glm-5.3", "providerID": "zai-coding-plan",
+			"time": {"created": ms(created)}})))
+for pid, mid, created, reason in (("p-w1", "msg-w1", "2026-11-06T14:07:05Z", "stop"),
+		("p-w2", "msg-w2", "2026-11-06T14:06:56Z", "tool-calls")):
+	con.execute("INSERT INTO part VALUES (?,?,?,?,?,?)", (pid, mid, "sess-W",
+		ms(created), ms(created) + 100, json.dumps({"type": "step-finish",
+			"reason": reason, "cost": 0, "tokens": {"total": 1, "input": 1,
+				"output": 1, "reasoning": 1, "cache": {"write": 0, "read": 1}}})))
+con.commit()
+con.close()
+PYEOF
+straddle_rc=0
+python3 "$EXTRACTOR" oc --db "$STRADDLE_DB" --engine-log "$FIXLOG" \
+	--until 2026-11-06T14:07:00Z --out "$ROOT/oc-straddle.jsonl" \
+	2>"$ROOT/oc-straddle-stderr" || straddle_rc=$?
+assert_eq "a window whose boundary splits a message from its part exits 0" "0" "$straddle_rc"
+validate_ok "boundary-straddle output validates" "$ROOT/oc-straddle.jsonl" "invocation: 2"
+straddle_problems="$(python3 - "$ROOT/oc-straddle.jsonl" <<'PYEOF'
+import json, sys
+
+records = {r["message_id"]: r for r in
+	(json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip())}
+problems = []
+
+def pin(label, actual, expected):
+	if actual != expected:
+		problems.append(f"{label}: expected {expected!r}, got {actual!r}")
+
+pin("msg-w1 keeps the part carried past the boundary", records["msg-w1"]["stop_reason"], "stop")
+pin("msg-w1 derives no retry from the straddle", records["msg-w1"]["retry"],
+	{"count": 0, "evidence": None})
+pin("msg-w2 keeps its in-window stop reason", records["msg-w2"]["stop_reason"], "tool-calls")
+pin("msg-w2 as the last message derives no retry", records["msg-w2"]["retry"],
+	{"count": 0, "evidence": None})
+print("\n".join(problems))
+PYEOF
+)"
+assert_no_output "boundary-straddle records carry real stop reasons and no fabricated retry" "$straddle_problems"
+
+# Idempotent append: a re-run over an overlapping scope skips the
+# invocations the target already holds instead of poisoning the ledger
+# with duplicates the validator rejects.
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-B \
+	--out "$ROOT/oc-append.jsonl" >/dev/null 2>&1
+validate_ok "the first append writes the session to a fresh target" "$ROOT/oc-append.jsonl" "invocation: 2"
+rerun_rc=0
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-B \
+	--out "$ROOT/oc-append.jsonl" 2>"$ROOT/oc-append-stderr" || rerun_rc=$?
+assert_eq "re-appending an overlapping scope exits 0" "0" "$rerun_rc"
+validate_ok "a re-run over an appended scope leaves the ledger valid" "$ROOT/oc-append.jsonl" "invocation: 2"
+assert_contains "the re-run names the skipped duplicates" "$(cat "$ROOT/oc-append-stderr")" \
+	"2 invocation records already in"
+assert_eq "the re-run appends no duplicate records" "2" "$(wc -l < "$ROOT/oc-append.jsonl")"
+overlap_rc=0
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--out "$ROOT/oc-append.jsonl" 2>"$ROOT/oc-overlap-stderr" || overlap_rc=$?
+assert_eq "appending the full scope over a partial ledger exits 0" "0" "$overlap_rc"
+validate_ok "the partial-overlap append keeps the ledger valid" "$ROOT/oc-append.jsonl" "invocation: 10"
+overlap_duplicates="$(python3 - "$ROOT/oc-append.jsonl" <<'PYEOF'
+import json, sys
+
+records = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+keys = [(r["harness"], r["session_id"], r["message_id"]) for r in records]
+print(len(keys) - len(set(keys)))
+PYEOF
+)"
+assert_eq "the overlapping append writes only the missing invocations" "0" "$overlap_duplicates"
+cp "$ROOT/oc-append.jsonl" "$ROOT/oc-unreadable-line.jsonl"
+printf 'not json {bad\n' >> "$ROOT/oc-unreadable-line.jsonl"
+unreadable_rc=0
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-B \
+	--out "$ROOT/oc-unreadable-line.jsonl" 2>"$ROOT/oc-unreadable-stderr" || unreadable_rc=$?
+assert_eq "appending to a ledger with an unreadable line exits 0" "0" "$unreadable_rc"
+assert_contains "an unreadable ledger line warns it cannot be checked" \
+	"$(cat "$ROOT/oc-unreadable-stderr")" "line 11 is not valid JSON"
+
+missing_log_rc=0
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$ROOT/absent-engine.log" \
+	--out "$ROOT/oc-missing-log.jsonl" 2>"$ROOT/oc-missing-log-stderr" || missing_log_rc=$?
+assert_eq "a missing engine log degrades to null restarts, not an error" "0" "$missing_log_rc"
+assert_contains "a missing engine log warns on stderr" "$(cat "$ROOT/oc-missing-log-stderr")" \
+	"engine log unreadable"
+validate_ok "missing-engine-log output validates" "$ROOT/oc-missing-log.jsonl" "invocation: 10"
+oc_no_restart="$(python3 - "$ROOT/oc-missing-log.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+wrong = [r["message_id"] for r in records
+	if r["restart"] != {"of_session_id": None, "engine_log": None}]
+print("restarts marked without an engine log: " + ", ".join(wrong) if wrong else "")
+PYEOF
+)"
+assert_no_output "missing engine log leaves every restart null" "$oc_no_restart"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--since 2027-01-01T00:00:00Z >"$ROOT/oc-empty.jsonl" 2>/dev/null
+empty_rc=$?
+assert_eq "an empty extraction window exits 1 without writing a ledger" "1" "$empty_rc"
+assert_eq "an empty extraction writes nothing" "" "$(cat "$ROOT/oc-empty.jsonl")"
+
+python3 - "$ROOT/oc-corrupt.db" <<'PYEOF'
+import json, sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, "
+	"parent_id text, slug text NOT NULL, directory text NOT NULL, version text NOT NULL, "
+	"agent text, time_created integer NOT NULL, time_updated integer NOT NULL)")
+con.execute("CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL, "
+	"time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)")
+con.execute("CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, "
+	"session_id text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, "
+	"data text NOT NULL)")
+con.execute("INSERT INTO session_v2 VALUES ('sess-X', 'proj', NULL, 'slug', '/tmp', '1.0', NULL, 1, 2)")
+con.execute("INSERT INTO message VALUES ('msg-good', 'sess-X', 1, 2, ?)", (json.dumps({
+	"role": "assistant", "modelID": "glm-5.3", "providerID": "zai-coding-plan",
+	"cost": 0, "tokens": {"input": 1, "output": 1, "reasoning": 0,
+		"cache": {"read": 0, "write": 0}}}),))
+con.execute("INSERT INTO message VALUES ('msg-corrupt', 'sess-X', 3, 4, 'not json {bad')")
+con.execute("INSERT INTO message VALUES ('msg-lost', 'sess-nowhere', 5, 6, ?)", (json.dumps({
+	"role": "assistant", "modelID": "glm-5.3", "providerID": "zai-coding-plan",
+	"cost": 0, "tokens": {"input": 2, "output": 2, "reasoning": 0,
+		"cache": {"read": 0, "write": 0}}}),))
+con.commit()
+PYEOF
+corrupt_rc=0
+python3 "$EXTRACTOR" oc --db "$ROOT/oc-corrupt.db" --engine-log "$ROOT/absent-engine.log" \
+	--out "$ROOT/oc-corrupt.jsonl" 2>"$ROOT/oc-corrupt-stderr" || corrupt_rc=$?
+assert_eq "a corrupt message row degrades to a warning, not a failure" "0" "$corrupt_rc"
+validate_ok "corrupt-row output validates (good record plus the session-less record)" \
+	"$ROOT/oc-corrupt.jsonl" "invocation: 2"
+assert_contains "the corrupt row is counted in the summary" "$(cat "$ROOT/oc-corrupt-stderr")" "1 anomalies"
+lost_session="$(python3 -c \
+	'import json, sys; records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8")]; \
+	lost = next(r for r in records if r["message_id"] == "msg-lost"); \
+	print(lost["session_id"], lost["nested"]["child_count"])' \
+	"$ROOT/oc-corrupt.jsonl")"
+assert_eq "a message with no session row in either table extracts standalone" \
+	"sess-nowhere 0" "$lost_session"
+
+python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" --session sess-nope \
+	>/dev/null 2>"$ROOT/oc-unknown-session-stderr"
+unknown_session_rc=$?
+assert_eq "an unknown --session exits 2" "2" "$unknown_session_rc"
+assert_contains "an unknown --session names the session" "$(cat "$ROOT/oc-unknown-session-stderr")" "sess-nope"
+
+python3 "$EXTRACTOR" oc --db "$ROOT/absent.db" >/dev/null 2>&1; missing_db_rc=$?
+assert_eq "a missing database exits 2" "2" "$missing_db_rc"
+python3 "$EXTRACTOR" oc --db "$FIXDB" --cwd /repo >/dev/null 2>&1; lone_cwd_rc=$?
+assert_eq "--cwd without --unit exits 2" "2" "$lone_cwd_rc"
+python3 "$EXTRACTOR" oc --db "$FIXDB" --since yesterday >/dev/null 2>&1; bad_moment_rc=$?
+assert_eq "a non-moment --since exits 2" "2" "$bad_moment_rc"
+python3 "$EXTRACTOR" oc --db "$FIXDB" --frobnicate >/dev/null 2>&1; bad_flag_rc=$?
+assert_eq "an unknown option exits 2" "2" "$bad_flag_rc"
+python3 "$EXTRACTOR" >/dev/null 2>&1; no_args_rc=$?
+assert_eq "no arguments exits 2 with usage" "2" "$no_args_rc"
+python3 "$EXTRACTOR" frobnicate >/dev/null 2>&1; bad_mode_rc=$?
+assert_eq "an unknown mode exits 2" "2" "$bad_mode_rc"
+
+python3 "$EXTRACTOR" pi --help >/dev/null 2>&1; pi_help_rc=$?
+assert_eq "the pi mode answers --help after integration" "0" "$pi_help_rc"
+python3 "$EXTRACTOR" rollup >/dev/null 2>"$ROOT/oc-rollup-stderr"; rollup_rc=$?
+assert_eq "the rollup mode stays reserved" "2" "$rollup_rc"
+assert_contains "the rollup mode names its delivery slice" "$(cat "$ROOT/oc-rollup-stderr")" "ORCH-4-3-4"
+
 echo "== make wiring =="
 grep -Eq '^test:.*(^| )test-task-metrics( |$)' "$MAKEFILE" \
 	&& ok "make test chains test-task-metrics" \

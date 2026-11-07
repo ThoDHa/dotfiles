@@ -1,20 +1,90 @@
 #!/usr/bin/env python3
 """task-metrics: extract coding-agent runtime telemetry into the metrics ledger.
 
-Modes:
-  pi   Extract invocation records from a pi session store (session JSONL,
-       subagent toolResult details, pi-continue engine.log) into the
-       versioned contract in tests/task-metrics/ledger-schema.md. The
-       opencode mode and the rollup mode land with ORCH-4-3-3 and
-       ORCH-4-3-4.
+Combined extractor tool (ORCH-4-3-2 pi, ORCH-4-3-3 oc; integration in
+ORCH-4-3-4), deliberately outside the tasks CLI single file (the DC2
+concentration lesson). Modes:
+
+  task-metrics oc [options]
+      Extract opencode.db assistant messages into invocation ledger
+      records against schema 1.0 (tests/task-metrics/ledger-schema.md);
+      invocations already present in the --out target are skipped, so
+      re-running an overlapping scope never appends a duplicate record.
+  task-metrics pi [options]
+      Extract invocation records from a pi session store (session JSONL,
+      subagent toolResult details, pi-continue engine.log) into the same
+      ledger contract.
+  task-metrics rollup [options]
+      Reserved: aggregation, soft-budget flags, and digest emission land
+      with ORCH-4-3-4.
 
 Extraction is read-only against the live store: records append to
---output (default stdout) as JSONL in extraction order. Malformed
-session lines warn on stderr and are skipped, never silently dropped;
-the stderr summary names the count. Exit ladder: 0 records extracted,
-2 usage or IO error.
+--output/--out (default stdout) as JSONL in extraction order. Malformed
+store rows warn on stderr and are skipped, never silently dropped; the
+stderr summary names the counts. Exit ladder per mode: 0 records
+written, 1 extraction produced nothing (an empty ledger is
+contract-invalid), 2 usage or IO error.
+
+oc mode derivation contract:
+
+- One invocation record per assistant message of an in-scope parent
+  session, in (time_created, id) order. Child-session messages never
+  emit their own records; they aggregate per child session into the
+  parent session's first invocation record's nested.children (one child
+  entry per child session, whose agent field carries the child session's
+  id), so rollup sums count each child leg exactly once. Session context
+  loads from both durable tables, legacy `session` and `session_v2`
+  (session_v2 wins on an id collision), because live messages reference
+  ids in either; a session whose parent_id names a session that does not
+  exist is extracted as a standalone parent instead of being dropped,
+  and a message whose session row exists in neither table extracts the
+  same way. Chains deeper than one level flatten the same way: a session
+  whose parent itself folds into a parent record emits its own records,
+  so nothing in scope is ever silently left out and no tokens double
+  count.
+- timestamp is message.time_created (epoch ms) rendered RFC3339 UTC;
+  duration_ms is time_updated minus time_created, null when the delta
+  is negative rather than a fabricated value.
+- stop_reason is the last step-finish part's reason by part time; a
+  message with no step-finish part, or a last part with no usable
+  reason, carries "unknown", the harness's own spelling for an unknown
+  end. A message without a usable modelID or providerID cannot produce
+  a contract-valid record and is skipped with a warning rather than
+  emitted invalid. --since/--until scope messages only: a message's
+  step-finish parts ride with their message, so a part timestamped past
+  a boundary still supplies its message's stop reason.
+- tokens come from message.data.tokens: camelCase cache.read and
+  cache.write map to cache_read and cache_write, absent counts become 0,
+  absent or non-integer reasoning becomes null.
+- cost carries the harness's value verbatim with source marking: a
+  nonzero nonnegative numeric cost is source reported; a zero is the
+  adapter's reported zero carried verbatim under source none
+  (opencode's zai-coding-plan adapter reports 0 on every message); an
+  absent or unusable cost is null under source none. Nothing is ever
+  fabricated into a price.
+- retry marks one invocation-repeat on a message whose stop_reason is
+  "unknown" and that a later assistant message in the same session
+  follows; an unknown stop with no later invocation is an end, not a
+  retry, and stays count 0. Retries are derived signals, never invented
+  from silence.
+- restart joins oc-continue engine.log park cycles by time window: each
+  "parking ... until session" line opens a window at its timestamp that
+  closes at the next "invoking opencode run" line, or at the next park
+  line, whichever comes first; only invoke-closed windows mark. The
+  first invocation inside a window carries restart with engine_log set
+  to the verbatim park line and of_session_id set to the session of the
+  last in-scope invocation at or before the park, null when none exists
+  (either field may stand alone per the contract).
+- attribution: with --cwd and --unit, a matching message cwd is method
+  cwd-match, confidence exact, unit_id set; every other record is method
+  none, confidence unattributed, unit_id null. batch_id rides on every
+  record when --batch is given, unattributed records included (the
+  populated-batch reading sanctioned at the ORCH-4-3-1 gate).
+  task-file-reference and dispatch-window attribution belong to later
+  slices.
 
 pi mode sources:
+
   - session root: --session-dir, else $PI_CODING_AGENT_SESSION_DIR,
     else ~/.pi/agent/sessions; *.jsonl files are read recursively in
     filename order (pi names them <UTC-timestamp>_<session-id>.jsonl).
@@ -43,7 +113,13 @@ pi mode sources:
     --batch-id stamps every record's batch_id, populated even on
     unattributed records (the canonical populated-batch form).
 
-Standard library only, matching validate-ledger.py.
+Message role and part type are filtered while parsing each row's data
+JSON in Python rather than with SQLite JSON1 functions, so sqlite builds
+without JSON1 serve the tool; SQL filters stay on plain columns.
+
+Standard library only, python3 rather than jq because the bootstrap
+container installs python3 but not jq; sqlite is read through the
+stdlib module for the same reason, matching validate-ledger.py.
 """
 
 import argparse
@@ -51,10 +127,20 @@ import json
 import math
 import os
 import re
+import sqlite3
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 
 SCHEMA_VERSION = "1.0"
+
+DEFAULT_DB = "~/.local/share/opencode/opencode.db"
+DEFAULT_ENGINE_LOG = "~/.local/share/opencode/oc-continue/engine.log"
+
+OC_STOP_UNKNOWN = "unknown"
+PARK_LINE_PATTERN = re.compile(r"parking \d+s until session")
+INVOKE_MARKER = "invoking opencode run"
+
 ZEROED_STOP_REASONS = ("error", "aborted")
 RETRY_STOP_REASON = "error"
 SUBAGENT_TOOL_NAME = "subagent"
@@ -63,6 +149,19 @@ WORKTREE_SLUG_RE = re.compile(r"([a-z]+)(\d+(?:-\d+)*)\Z")
 TASK_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+(?:-\d+)+)\b")
 PI_SESSION_ROOT = "~/.pi/agent/sessions"
 PI_CONTINUE_STATE_DIR = "~/.local/share/pi/pi-continue"
+
+MODES = ("oc", "pi", "rollup")
+
+USAGE_TEXT = """usage: task-metrics <mode> [options]
+
+Modes:
+  oc       Extract opencode.db into invocation ledger records (schema 1.0)
+  pi       Extract a pi session store into invocation ledger records (schema 1.0)
+  rollup   Reserved for aggregation, budget flags, digests (ORCH-4-3-4)
+
+Run `task-metrics <mode> --help` for a mode's options and the
+derivation contract the extraction follows.
+"""
 
 
 def warn(message):
@@ -485,30 +584,688 @@ def cmd_pi(args):
 	return 0
 
 
-def parse_args(argv):
+class UsageError(Exception):
+	"""A caller mistake: bad flag values, unknown mode, missing input."""
+
+
+class HelpRequested(Exception):
+	"""The caller asked for the usage text."""
+
+def parse_oc_args(argv):
+	options = {
+		"db": DEFAULT_DB,
+		"engine_log": DEFAULT_ENGINE_LOG,
+		"session": None,
+		"since": None,
+		"until": None,
+		"cwd": None,
+		"unit": None,
+		"batch": None,
+		"out": None,
+	}
+	value_flags = {
+		"--db": "db",
+		"--engine-log": "engine_log",
+		"--session": "session",
+		"--since": "since",
+		"--until": "until",
+		"--cwd": "cwd",
+		"--unit": "unit",
+		"--batch": "batch",
+		"--out": "out",
+	}
+	index = 0
+	while index < len(argv):
+		flag = argv[index]
+		if flag in ("--help", "-h"):
+			raise HelpRequested()
+		if flag in value_flags:
+			if index + 1 >= len(argv):
+				raise UsageError(f"{flag} requires a value")
+			options[value_flags[flag]] = argv[index + 1]
+			index += 1
+		else:
+			raise UsageError(f"unknown option {flag!r}")
+		index += 1
+	if (options["cwd"] is None) != (options["unit"] is None):
+		raise UsageError("--cwd and --unit are a pair: give both or neither")
+	if options["since"] is not None:
+		options["since_ms"] = parse_moment(options["since"], "--since")
+	if options["until"] is not None:
+		options["until_ms"] = parse_moment(options["until"], "--until")
+	return options
+
+
+def parse_moment(text, flag):
+	"""Parse a --since/--until value into epoch milliseconds.
+
+	MOMENT is integer epoch milliseconds, or RFC3339 with a Z suffix or a
+	numeric offset; a naive timestamp is read as UTC.
+	"""
+	if re.fullmatch(r"\d+", text):
+		return int(text)
+	normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+	try:
+		parsed = datetime.fromisoformat(normalized)
+	except ValueError:
+		raise UsageError(f"{flag} expects epoch milliseconds or RFC3339, got {text!r}")
+	if parsed.tzinfo is None:
+		parsed = parsed.replace(tzinfo=timezone.utc)
+	return int(parsed.timestamp() * 1000)
+
+
+def parse_log_moment(text):
+	"""Parse an RFC3339 timestamp to epoch milliseconds, None when unusable."""
+	normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+	try:
+		parsed = datetime.fromisoformat(normalized)
+	except ValueError:
+		return None
+	if parsed.tzinfo is None:
+		parsed = parsed.replace(tzinfo=timezone.utc)
+	return int(parsed.timestamp() * 1000)
+
+
+def rfc3339_utc(epoch_ms):
+	seconds, milliseconds = divmod(epoch_ms, 1000)
+	moment = datetime.fromtimestamp(seconds, tz=timezone.utc)
+	base = moment.strftime("%Y-%m-%dT%H:%M:%S")
+	return f"{base}.{milliseconds:03d}Z" if milliseconds else f"{base}Z"
+
+
+def open_readonly(db_path):
+	uri = Path(db_path).expanduser().resolve().as_uri() + "?mode=ro"
+	return sqlite3.connect(uri, uri=True)
+
+
+def load_sessions(connection, session_filter):
+	"""Load session context from both durable session tables.
+
+	Messages reference session ids that live in either the legacy `session`
+	table or `session_v2` (the live store carries both), so both are read
+	and session_v2 wins on an id collision; a store without one of the
+	tables still extracts. The contract's nesting trace (session_v2
+	parent_id chains, recon oc 2's "and session") covers both surfaces.
+	"""
+	sessions = {}
+	for table in ("session", "session_v2"):
+		try:
+			rows = connection.execute(
+				f"SELECT id, parent_id, agent FROM {table}").fetchall()
+		except sqlite3.OperationalError:
+			continue
+		for row in rows:
+			sessions[row[0]] = {"parent_id": row[1], "agent": row[2]}
+	if session_filter is not None and session_filter not in sessions:
+		raise UsageError(f"unknown session {session_filter!r}: no session row")
+	return sessions
+
+
+def partition_scope(sessions, session_filter):
+	"""Split the session table into parents (records) and children (folded into nested.children).
+
+	With a --session filter only the requested session's subtree is in
+	scope: the session itself and its deeper standalone descendants are
+	parents, its direct children fold, and nothing outside the subtree is
+	read. Without a filter, every top-level session is a parent, and so is
+	a child session whose parent row does not exist (dropping it would
+	hide its invocations). Chains deeper than one level flatten: a session
+	whose parent itself folds into a parent record becomes a standalone
+	parent, because the contract's nested shape is one level deep and
+	silently dropping a grandchild's invocations would hide them; the
+	flatten rule keeps every in-scope invocation emitted exactly once.
+	"""
+	if session_filter is not None:
+		return subtree_scope(sessions, session_filter)
+	parents = {session_id for session_id, row in sessions.items()
+		if row["parent_id"] is None or row["parent_id"] not in sessions}
+	children = set()
+	pending = set(sessions) - parents
+	while True:
+		progress = False
+		for session_id in sorted(pending):
+			parent_id = sessions[session_id]["parent_id"]
+			if parent_id in parents:
+				children.add(session_id)
+				pending.discard(session_id)
+				progress = True
+			elif parent_id not in children:
+				parents.add(session_id)
+				pending.discard(session_id)
+				progress = True
+		if not progress:
+			break
+	parents |= pending
+	return parents, children
+
+
+def subtree_scope(sessions, session_filter):
+	"""Walk a --session subtree by alternating levels: children fold, their children stand alone as parents whose own children fold again."""
+	parents = {session_filter}
+	children = set()
+	folding = {session_filter}
+	while folding:
+		new_children = {session_id for session_id, row in sessions.items()
+			if row["parent_id"] in folding
+				and session_id not in parents | children}
+		children |= new_children
+		folding = {session_id for session_id, row in sessions.items()
+			if row["parent_id"] in new_children
+				and session_id not in parents | children}
+		parents |= folding
+	return parents, children
+
+
+def filter_clause(session_ids, options, qualifier=""):
+	clauses, parameters = [], []
+	if session_ids is not None:
+		marks = ",".join("?" for _ in session_ids)
+		clauses.append(f"{qualifier}session_id IN ({marks})")
+		parameters.extend(session_ids)
+	if "since_ms" in options:
+		clauses.append(f"{qualifier}time_created >= ?")
+		parameters.append(options["since_ms"])
+	if "until_ms" in options:
+		clauses.append(f"{qualifier}time_created < ?")
+		parameters.append(options["until_ms"])
+	return clauses, parameters
+
+
+def load_message_rows(connection, session_ids, options):
+	clauses, parameters = filter_clause(session_ids, options)
+	query = ("SELECT session_id, id, time_created, time_updated, data FROM message WHERE "
+		+ " AND ".join(["1=1"] + clauses)
+		+ " ORDER BY time_created, id")
+	return connection.execute(query, parameters).fetchall()
+
+
+def load_part_rows(connection, session_ids, options):
+	"""Load the parts of the in-scope messages, regardless of part time.
+
+	--since/--until and the session filter apply to the owning message's
+	time_created, never the part's own: a step-finish part timestamped
+	past a window boundary (or ahead of its message under --since) still
+	reaches the record that owns it instead of truncating the message's
+	stop reason to unknown and fabricating a retry from the gap.
+	"""
+	clauses, parameters = filter_clause(session_ids, options, "m.")
+	query = ("SELECT p.message_id, p.session_id, p.id, p.time_created, p.data "
+		"FROM part p JOIN message m ON p.message_id = m.id WHERE "
+		+ " AND ".join(["1=1"] + clauses)
+		+ " ORDER BY p.time_created, p.id")
+	return connection.execute(query, parameters).fetchall()
+
+
+def nonnegative_int(value):
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		return 0
+	return value
+
+
+def token_object(source_tokens):
+	cache = source_tokens.get("cache") if isinstance(source_tokens, dict) else None
+	cache = cache if isinstance(cache, dict) else {}
+	reasoning = source_tokens.get("reasoning")
+	reasoning_ok = (not isinstance(reasoning, bool) and isinstance(reasoning, int)
+		and reasoning >= 0)
+	return {
+		"input": nonnegative_int(source_tokens.get("input")),
+		"output": nonnegative_int(source_tokens.get("output")),
+		"cache_read": nonnegative_int(cache.get("read")),
+		"cache_write": nonnegative_int(cache.get("write")),
+		"reasoning": reasoning if reasoning_ok else None,
+	}
+
+
+def cost_object(raw_cost, label):
+	"""Mark a persisted cost verbatim: nonzero nonnegative numbers are reported, zeros ride under source none.
+
+	The ledger contract's invariant is two-directional: source reported
+	requires a numeric amount, and source none requires null or the
+	harness's reported zero, so a negative or non-numeric persisted value
+	cannot be carried as reported without emitting a contract-invalid
+	record; those degrade to null under source none with a warning.
+	"""
+	numeric = (not isinstance(raw_cost, bool) and isinstance(raw_cost, (int, float)))
+	if numeric and raw_cost > 0:
+		return {"amount": raw_cost, "source": "reported"}
+	if numeric and raw_cost == 0:
+		return {"amount": 0, "source": "none"}
+	if raw_cost is not None:
+		warn(f"{label}: unusable cost value {raw_cost!r}, carried as null under source none")
+	return {"amount": None, "source": "none"}
+
+
+def normalized_stop_reason(reason):
+	if isinstance(reason, str) and reason:
+		return reason
+	return OC_STOP_UNKNOWN
+
+
+def attribution_object(data, options):
+	path = data.get("path")
+	cwd = path.get("cwd") if isinstance(path, dict) else None
+	if options["cwd"] is not None and cwd == options["cwd"]:
+		return {
+			"method": "cwd-match",
+			"confidence": "exact",
+			"unit_id": options["unit"],
+			"batch_id": options["batch"],
+		}
+	return {
+		"method": "none",
+		"confidence": "unattributed",
+		"unit_id": None,
+		"batch_id": options["batch"],
+	}
+
+
+def build_invocation_record(row, data, stop_reason, children, later_in_session,
+		restart, options):
+	session_id, message_id, time_created, time_updated = row
+	source_tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
+	duration = time_updated - time_created
+	if duration < 0:
+		warn(f"message {message_id}: negative duration {duration}, carried as null")
+		duration = None
+	if stop_reason == OC_STOP_UNKNOWN and later_in_session:
+		retry = {"count": 1, "evidence": "invocation-repeat"}
+	else:
+		retry = {"count": 0, "evidence": None}
+	return {
+		"schema_version": SCHEMA_VERSION,
+		"record_type": "invocation",
+		"timestamp": rfc3339_utc(time_created),
+		"harness": "opencode",
+		"session_id": session_id,
+		"message_id": message_id,
+		"agent_role": data.get("agent") if isinstance(data.get("agent"), str) else None,
+		"model": data["modelID"],
+		"provider": data["providerID"],
+		"tokens": token_object(source_tokens),
+		"cost": cost_object(data.get("cost"), f"message {message_id}"),
+		"duration_ms": duration,
+		"stop_reason": stop_reason,
+		"retry": retry,
+		"restart": restart,
+		"nested": {
+			"child_count": len(children),
+			"children": children,
+		},
+		"attribution": attribution_object(data, options),
+	}
+
+
+def build_child_entry(child_id, sessions, child_messages, child_parts):
+	"""Aggregate one child session into a nested.children entry.
+
+	tokens and cost sum across the child's assistant messages; model and
+	stop_reason come from the child's last assistant message and last
+	step-finish part; exit_code and turns have no durable opencode surface
+	and stay null.
+	"""
+	message_rows = child_messages.get(child_id, [])
+	token_sums = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+	amount_sum = 0.0
+	amount_seen = False
+	nonzero_seen = False
+	model = None
+	for row in message_rows:
+		data = row["data"]
+		tokens = token_object(data.get("tokens") if isinstance(data.get("tokens"), dict) else {})
+		for field in token_sums:
+			token_sums[field] += tokens[field]
+		raw_cost = data.get("cost")
+		if not isinstance(raw_cost, bool) and isinstance(raw_cost, (int, float)):
+			amount_seen = True
+			if raw_cost > 0:
+				amount_sum += raw_cost
+				nonzero_seen = True
+			elif raw_cost < 0:
+				warn(f"child session {child_id} message {row['id']}: "
+					f"unusable cost value {raw_cost!r}, excluded from the child sum")
+		elif raw_cost is not None:
+			warn(f"child session {child_id} message {row['id']}: "
+				f"unusable cost value {raw_cost!r}, excluded from the child sum")
+		if isinstance(data.get("modelID"), str):
+			model = data["modelID"]
+	if nonzero_seen:
+		cost = {"amount": amount_sum, "source": "reported"}
+	elif amount_seen:
+		cost = {"amount": 0, "source": "none"}
+	else:
+		cost = {"amount": None, "source": "none"}
+	part_entries = child_parts.get(child_id, [])
+	stop_reason = normalized_stop_reason(part_entries[-1]["reason"]) if part_entries else None
+	session_row = sessions[child_id]
+	agent_role = session_row["agent"] if isinstance(session_row["agent"], str) else None
+	if agent_role is None:
+		for row in message_rows:
+			if isinstance(row["data"].get("agent"), str):
+				agent_role = row["data"]["agent"]
+				break
+	return {
+		"agent": child_id,
+		"agent_role": agent_role,
+		"model": model,
+		"exit_code": None,
+		"stop_reason": stop_reason,
+		"tokens": token_sums,
+		"cost": cost,
+		"turns": None,
+		"source": "oc-parent-id",
+	}
+
+
+def parse_engine_log(path):
+	"""Read park/restart windows from an oc-continue engine.log.
+
+	Returns a list of (open_ms, close_ms, verbatim_park_line) windows. Each
+	park line opens a window at its timestamp; the window closes at the
+	next invoking line, or at the next park line, whichever comes first,
+	and only invoke-closed windows are returned (a park the ride never
+	followed, for example one interrupted at park time, marks nothing).
+	"""
+	try:
+		raw = Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+	except OSError as exc:
+		warn(f"engine log unreadable, restart fields stay null: {exc}")
+		return []
+	events = []
+	for line in raw.splitlines():
+		if not line.strip():
+			continue
+		head = line.split(maxsplit=1)
+		if len(head) != 2:
+			continue
+		moment_ms = parse_log_moment(head[0])
+		if moment_ms is None:
+			continue
+		text = head[1]
+		if PARK_LINE_PATTERN.search(text):
+			events.append((moment_ms, "park", line))
+		elif INVOKE_MARKER in text:
+			events.append((moment_ms, "invoke", line))
+	windows = []
+	for index, (moment_ms, kind, line) in enumerate(events):
+		if kind != "park":
+			continue
+		for later_ms, later_kind, _ in events[index + 1:]:
+			if later_ms <= moment_ms:
+				continue
+			if later_kind == "invoke":
+				windows.append((moment_ms, later_ms, line))
+			break
+	return windows
+
+
+def assign_restarts(records, windows):
+	"""Mark the first invocation inside each window; of_session_id names the session of the last earlier record."""
+	restarts = [None] * len(records)
+	for open_ms, close_ms, park_line in windows:
+		first = None
+		for index, record in enumerate(records):
+			if open_ms < record["time_created"] <= close_ms:
+				first = index
+				break
+		if first is None:
+			continue
+		of_session_id = records[first - 1]["session_id"] if first > 0 else None
+		restarts[first] = {"of_session_id": of_session_id, "engine_log": park_line}
+	return restarts
+
+
+def ledger_invocations(path):
+	"""Collect the (session_id, message_id) pairs already in an append target.
+
+	The ledger contract is append-only and the validator rejects
+	duplicate (harness, session_id, message_id) invocations, so a re-run
+	over an overlapping scope must skip what the file already holds
+	instead of appending it a second time. Lines that do not parse warn
+	and contribute no pairs; a file that cannot be read at all returns
+	None so the append fails later at write time under the existing
+	handling.
+	"""
+	pairs = set()
+	try:
+		with open(path, encoding="utf-8") as ledger:
+			for lineno, line in enumerate(ledger, 1):
+				if not line.strip():
+					continue
+				try:
+					record = json.loads(line)
+				except json.JSONDecodeError:
+					warn(f"{path}: line {lineno} is not valid JSON, "
+						"its invocations cannot be checked for duplicates")
+					continue
+				if (isinstance(record, dict)
+						and record.get("record_type") == "invocation"
+						and isinstance(record.get("session_id"), str)
+						and isinstance(record.get("message_id"), str)):
+					pairs.add((record["session_id"], record["message_id"]))
+	except OSError:
+		return None
+	return pairs
+
+
+def extract_oc(options):
+	db_path = Path(options["db"]).expanduser()
+	if not db_path.is_file():
+		raise UsageError(f"database not found: {options['db']}")
+	connection = open_readonly(db_path)
+	try:
+		sessions = load_sessions(connection, options["session"])
+		parents, children = partition_scope(sessions, options["session"])
+		scope = parents | children
+		scope_ids = None if len(scope) == len(sessions) else sorted(scope)
+		message_rows = load_message_rows(connection, scope_ids, options)
+		part_rows = load_part_rows(connection, scope_ids, options)
+	finally:
+		connection.close()
+
+	anomalies = 0
+	stop_reasons = {}
+	session_keys = {}
+	part_by_message = {}
+	part_by_session = {}
+	for row in part_rows:
+		message_id, session_id, part_id, time_created, raw = row
+		try:
+			data = json.loads(raw)
+		except json.JSONDecodeError:
+			anomalies += 1
+			warn(f"part {part_id}: data is not valid JSON, skipped")
+			continue
+		if not isinstance(data, dict) or data.get("type") != "step-finish":
+			continue
+		reason = data.get("reason") if isinstance(data.get("reason"), str) else None
+		entry = {"time_created": time_created, "id": part_id, "reason": reason}
+		part_by_message[message_id] = entry
+		part_by_session.setdefault(session_id, []).append(entry)
+
+	messages = []
+	for row in message_rows:
+		session_id, message_id, time_created, time_updated, raw = row
+		try:
+			data = json.loads(raw)
+		except json.JSONDecodeError:
+			anomalies += 1
+			warn(f"message {message_id}: data is not valid JSON, skipped")
+			continue
+		if not isinstance(data, dict) or data.get("role") != "assistant":
+			continue
+		if not isinstance(data.get("modelID"), str) or not data["modelID"]:
+			anomalies += 1
+			warn(f"message {message_id}: no usable modelID, record cannot be "
+				"emitted contract-valid, skipped")
+			continue
+		if not isinstance(data.get("providerID"), str) or not data["providerID"]:
+			anomalies += 1
+			warn(f"message {message_id}: no usable providerID, record cannot be "
+				"emitted contract-valid, skipped")
+			continue
+		messages.append({"session_id": session_id, "id": message_id,
+			"time_created": time_created, "time_updated": time_updated, "data": data})
+		stop_part = part_by_message.get(message_id)
+		stop_reasons[message_id] = (
+			normalized_stop_reason(stop_part["reason"]) if stop_part else OC_STOP_UNKNOWN)
+		session_keys.setdefault(session_id, []).append((time_created, message_id))
+
+	child_messages = {child_id: [] for child_id in children}
+	parent_messages = {parent_id: [] for parent_id in parents}
+	for entry in messages:
+		if entry["session_id"] in parents:
+			parent_messages[entry["session_id"]].append(entry)
+		elif entry["session_id"] in child_messages:
+			child_messages[entry["session_id"]].append(entry)
+		else:
+			# A message whose session row exists in neither table still
+			# extracts, as a standalone parent with no derivable children;
+			# dropping it would hide an invocation the store persisted.
+			parent_messages.setdefault(entry["session_id"], []).append(entry)
+
+	records = []
+	for session_id, entries in parent_messages.items():
+		if not entries:
+			if any(sessions.get(child_id, {}).get("parent_id") == session_id
+					for child_id in children):
+				warn(f"session {session_id}: no assistant messages in scope, "
+					"its child sessions stay unfolded")
+			continue
+		children_entries = [
+			build_child_entry(child_id, sessions, child_messages, part_by_session)
+			for child_id in sorted(child_messages)
+			if sessions[child_id]["parent_id"] == session_id
+		]
+		for position, entry in enumerate(entries):
+			last_key = session_keys[session_id][-1]
+			records.append({
+				"session_id": entry["session_id"],
+				"id": entry["id"],
+				"time_created": entry["time_created"],
+				"time_updated": entry["time_updated"],
+				"data": entry["data"],
+				"stop_reason": stop_reasons[entry["id"]],
+				"children": children_entries if position == 0 else [],
+				"later_in_session": (entry["time_created"], entry["id"]) < last_key,
+			})
+
+	records.sort(key=lambda record: (record["time_created"], record["id"]))
+	restarts = assign_restarts(records, parse_engine_log(options["engine_log"]))
+
+	ledger_records = []
+	for index, record in enumerate(records):
+		restart = restarts[index]
+		ledger_records.append(build_invocation_record(
+			(record["session_id"], record["id"], record["time_created"],
+				record["time_updated"]),
+			record["data"],
+			record["stop_reason"],
+			record["children"],
+			record["later_in_session"],
+			restart if restart is not None else {"of_session_id": None, "engine_log": None},
+			options,
+		))
+
+	if not ledger_records:
+		warn("no invocation records extracted for the given scope")
+		return 1
+
+	appended = ledger_records
+	skipped = 0
+	if options["out"] is not None:
+		present = ledger_invocations(Path(options["out"]).expanduser())
+		if present is not None:
+			appended = [record for record in ledger_records
+				if (record["session_id"], record["message_id"]) not in present]
+			skipped = len(ledger_records) - len(appended)
+			if skipped:
+				warn(f"{skipped} invocation records already in {options['out']}, "
+					"not appended again")
+
+	if not appended:
+		print(f"task-metrics oc: 0 invocation records appended, "
+			f"{skipped} already in {options['out']}, {anomalies} anomalies",
+			file=sys.stderr)
+		return 0
+
+	lines = "".join(json.dumps(record, separators=(",", ":")) + "\n"
+		for record in appended)
+	if options["out"] is None:
+		sys.stdout.write(lines)
+	else:
+		try:
+			with open(Path(options["out"]).expanduser(), "a", encoding="utf-8") as ledger:
+				ledger.write(lines)
+		except OSError as exc:
+			warn(f"cannot write {options['out']}: {exc}")
+			return 2
+	child_total = sum(record["nested"]["child_count"] for record in appended)
+	skipped_note = f", {skipped} already in {options['out']}" if skipped else ""
+	print(f"task-metrics oc: {len(appended)} invocation records, "
+		f"{child_total} nested children, {anomalies} anomalies{skipped_note}",
+		file=sys.stderr)
+	return 0
+
+
+def run_oc(argv):
+	try:
+		options = parse_oc_args(argv)
+	except HelpRequested:
+		print(__doc__, file=sys.stdout)
+		return 0
+	except UsageError as exc:
+		print(f"task-metrics oc: {exc}", file=sys.stderr)
+		return 2
+	try:
+		return extract_oc(options)
+	except UsageError as exc:
+		print(f"task-metrics oc: {exc}", file=sys.stderr)
+		return 2
+	except sqlite3.Error as exc:
+		print(f"task-metrics oc: database error: {exc}", file=sys.stderr)
+		return 2
+
+
+def run_pi(argv):
+	"""Parse pi mode arguments and run the extraction; returns the exit code."""
 	parser = argparse.ArgumentParser(
-		prog="task-metrics",
-		description="Extract coding-agent runtime telemetry into the metrics ledger.")
-	modes = parser.add_subparsers(dest="mode", required=True, metavar="mode")
-	pi = modes.add_parser("pi",
-		help="extract invocation records from a pi session store")
-	pi.add_argument("--session-dir", default=None,
+		prog="task-metrics pi",
+		description="Extract invocation records from a pi session store "
+			"into the metrics ledger (schema 1.0).")
+	parser.add_argument("--session-dir", default=None,
 		help="pi session root (default: $PI_CODING_AGENT_SESSION_DIR, "
 			f"else {PI_SESSION_ROOT})")
-	pi.add_argument("--engine-log", default=None,
+	parser.add_argument("--engine-log", default=None,
 		help="pi-continue engine.log (default under $PI_CONTINUE_STATE_DIR, "
 			f"else {PI_CONTINUE_STATE_DIR}/engine.log)")
-	pi.add_argument("--batch-id", default=None,
+	parser.add_argument("--batch-id", default=None,
 		help="stamp every record's attribution.batch_id with this batch")
-	pi.add_argument("--output", default=None,
+	parser.add_argument("--output", default=None,
 		help="append records to this JSONL file (default: stdout)")
-	pi.set_defaults(func=cmd_pi)
-	return parser.parse_args(argv[1:])
+	args = parser.parse_args(argv)
+	return cmd_pi(args)
 
 
 def main(argv):
-	args = parse_args(argv)
-	return args.func(args)
+	if len(argv) < 2:
+		print(USAGE_TEXT, file=sys.stderr)
+		return 2
+	mode, rest = argv[1], argv[2:]
+	if mode in ("--help", "-h"):
+		print(USAGE_TEXT, file=sys.stdout)
+		return 0
+	if mode == "oc":
+		return run_oc(rest)
+	if mode == "pi":
+		return run_pi(rest)
+	if mode == "rollup":
+		print("task-metrics rollup: not implemented; aggregation, soft-budget "
+			"flags, and digest emission land with ORCH-4-3-4", file=sys.stderr)
+		return 2
+	print(f"task-metrics: unknown mode {mode!r} (known: {', '.join(MODES)})",
+		file=sys.stderr)
+	return 2
 
 
 if __name__ == "__main__":
