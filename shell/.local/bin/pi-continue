@@ -2,8 +2,9 @@
 # pi-continue: scheduling and event-driven continuation for headless pi
 # runs that hit provider quota windows. A port of oc-continue's engine
 # with the pi coupling surface retrained: text print-mode classification,
-# --session-id lockstep, full PI_CONTINUE_* env seams, a bare -- before
-# every prompt. Pure shell, no models.
+# attach-only session identity (never creates a session), full
+# PI_CONTINUE_* env seams, a bare -- before every prompt. Pure shell, no
+# models.
 # State: ~/.local/share/pi/pi-continue/.
 #
 # Usage:
@@ -31,8 +32,8 @@
 #                                        PI_CONTINUE_NO_PROGRESS_LIMIT to
 #                                        tune) end the ride with a
 #                                        limit-never-reset report.
-#                                        Detaches immediately: parks and
-#                                        sessions happen in the background.
+#                                        Detaches immediately: parks happen
+#                                        in the background.
 #                                        --follow: stay in the foreground and
 #                                        tail the live output after
 #                                        detaching; Ctrl-C stops the
@@ -46,10 +47,11 @@
 #                                        rate-limit hit just fails; `run`
 #                                        rides windows. Detaches immediately.
 #   pi-continue stop                     Kill a running engine and its child.
-#   pi-continue status                   Running pid, the ride's session id,
-#                                        tail, the consecutive no-progress
-#                                        ("failed") streak, and which
-#                                        per-session outputs are retained.
+#   pi-continue status                   Running pid, the ride's resolved
+#                                        session id, tail, the consecutive
+#                                        no-progress ("failed") streak, and
+#                                        which per-session outputs are
+#                                        retained.
 #   pi-continue clean                    Remove state (log, live and retained
 #                                        output, stale pid); refuses while
 #                                        running.
@@ -61,12 +63,44 @@
 # check with `status`, cancel with `stop`. For a foreground run right now,
 # call `pi -p` directly.
 #
-# Sessions: one session id per ride, generated as
-# pi-continue-<YYYYmmddTHHMMSS>-<pid> (matches pi's documented id pattern),
-# stored in $STATE_DIR/session.id, and passed to every invocation as
-# `pi -p --session-id <id> [flags] -- <prompt>`, so pi appends to one
-# session across quota windows. The supervisor never uses cwd-based
-# --continue or --resume lookup. `status` shows the id.
+# Sessions: attach-only, and pi-continue never creates a session. Every
+# invocation is `pi -p --session <id> [flags] -- <prompt>`: pi's
+# --session is the one attach primitive that creates nothing on an
+# unknown id (it hard-errors), while `pi -p --continue` would silently
+# create a session with no prior one in the cwd, so it never appears in
+# an invocation. The id is pinned once per ride in
+# $STATE_DIR/session.id: either the caller's --session, accepted bare
+# or as --session=<id> and canonicalized to the two-token wire form at
+# every invocation (pi's parser has no =-form for its known flags and
+# consumes a value flag's next token unconditionally: a forwarded
+# --session=<id> lands in pi's unknown flags and hard-errors the
+# invocation as an unknown option before attaching anything, and a
+# --session swallowed as the value of a preceding bare value flag
+# silently starts a fresh session on pi's first append; re-emitting the
+# pin first, right after -p, in two-token form is the only shape pi
+# provably attaches), or, absent that, one auto-resolution at engine start: the effective
+# session root (PI_CODING_AGENT_SESSION_DIR if set, else
+# ~/.pi/agent/sessions/), the physical cwd's group dir per pi's
+# documented encoding (leading separator removed, / \ : replaced by -;
+# physical because pi encodes process.cwd(), so a launch through a
+# symlinked directory still resolves), and the newest *.jsonl in it by
+# mtime, its id being the filename minus the <timestamp>_ prefix and
+# the .jsonl suffix. A mtime tie or an empty/missing/unreadable root is
+# unresolvable: the launch refuses (rc 2, before detaching) rather than
+# guesses. A malformed pin (valueless, dash-leading, or empty) refuses
+# rc 2 before detaching too, and an invalid pin surfaces pi's hard
+# error as a fatal non-quota stop; a pin that exists only in another
+# project makes pi print its cross-project notice and abort (the
+# engine's stdin is at EOF, so pi's fork prompt gets EOF and pi exits 0
+# having done nothing), which classifies as a fatal non-quota stop,
+# never as a clean completion; the caller-facing stop summary names the
+# foreign project from pi's notice line and the pinned id, while the
+# log and retained output stay the durable record. Limitation: a
+# sessionDir set only in
+# pi's settings file is invisible to this supervisor (it reads no pi
+# config), so such a cwd degrades to the refusal path unless
+# PI_CODING_AGENT_SESSION_DIR names the same directory. `status` shows
+# the resolved/pinned id.
 #
 # Retention: each invocation's complete output is kept at
 # $STATE_DIR/last.N.out (N = the invocation's number across the run;
@@ -84,11 +118,15 @@
 #
 # Flag contract: pi-continue declares its own flags in the PI_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
-# zone and never forwarded to pi. The declared table governs `run` only:
+# zone and never forwarded to pi. The PI_RUN_* tables govern `run` only:
 # `at` and `in` declare none, so --follow there forwards verbatim today.
 # Every other dash-prefixed arg before the prompt passes through to pi
 # verbatim, so `pi-continue run --provider openai --model gpt-4o-mini fix
-# it` works. Known value-taking flags (PI_VALUE_FLAGS, tracked against
+# it` works. The one exception is `--session`: it is declared for run, at,
+# and in alike, accepted bare or as --session=<id>, validated, and
+# canonicalized to the two-token wire form at every invocation (see
+# Sessions); its value never rides in the verbatim set. Known value-taking
+# flags (PI_VALUE_FLAGS, tracked against
 # `pi --help`) consume their value token; others can use --flag=value.
 # -n is pi-continue's: pi spells session naming `--name, -n <name>`, and on
 # overlap the supervisor wins, so -n never reaches pi and callers name
@@ -97,19 +135,33 @@
 # Rejections and parser traps: the leading-flag zone rejects (rc 2, before
 # detaching) --mode json and --mode rpc plus their =-forms (non-text modes
 # change the output shape the classifiers and the completion marker check
-# assume; --mode text passes), the session-identity flags --session,
-# --session-id, --continue, -c, --resume, -r, and --no-session (the
-# supervisor owns session identity via its own --session-id lockstep), and
-# -p / --print (the supervisor already invokes pi in print mode). A bare
+# assume; --mode text passes), the never-create session-identity flags
+# --session-id, --continue, -c, --resume, -r, --no-session, and --fork,
+# bare and =-form (--session-id creates on an unknown id, --no-session
+# skips storage, --continue/-c and --resume/-r let pi pick or silently
+# create one, and --fork forks into a new session; identity is pinned by
+# the declared --session or by auto-resolution), and -p / --print (the
+# supervisor already invokes pi in print mode). A bare
 # `--` forces everything after it to be prompt, including dash-leading
 # prompts and anything rejection-shaped. The guard is not cosmetic: pi's
 # parser lets a trailing valueless -p swallow the next token as the first
 # message, and an unknown bare long flag consumes the next non-flag token
 # as its value, so without `--` a forwarded unknown flag adjacent to the
-# prompt could eat the prompt and run with zero messages. Unknown or
-# =-form flags are still forwarded verbatim (pi knows its surface better
-# than this script); against real pi they surface as pi's own clear
-# startup error, classified as a non-quota failure. No prompt given: the
+# prompt could eat the prompt and run with zero messages. --session-dir
+# is rejected (rc 2, before detaching): its =-form always, because pi's
+# parser has no =-form for it and the root would never reach pi; its
+# two-token form unless an explicit --session pin rides with it,
+# because pi gives --session-dir top precedence over the root
+# auto-resolution reads (PI_CODING_AGENT_SESSION_DIR or the default),
+# so an auto-resolved pin would not exist in the --session-dir root and
+# the ride would die detached. Unknown flags are still forwarded
+# verbatim (pi knows its surface better than this script) and surface
+# as pi's own clear startup error, classified as a non-quota failure;
+# an =-form of one of pi's known value flags is not parsed by pi at all
+# (its parser has no =-forms for known flags): it lands in pi's
+# extension-flag values and hard-errors the invocation as an unknown
+# option, which is exactly the divergence the --session
+# canonicalization closes. No prompt given: the
 # resume-the-interrupted-turn default is used.
 #
 # Permission gate: rides load the user's pi config and extensions. The
@@ -168,6 +220,8 @@
 #                              the default 10m park); a productive session
 #                              resets the count
 #   PI_CONTINUE_STATE_DIR      state directory override (testing)
+#   PI_CONTINUE_SESSION_ID     the ride's pinned session id, set by the
+#                              launcher for the detached engine (internal)
 
 set -u
 # The per-session tee (last.out plus last.N.out) rides multios onto the
@@ -240,10 +294,14 @@ RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
 CHALLENGE_PROMPT='Your last turn claimed completion. List every remaining item from the todo list or task board you have been tracking. If and only if that list is empty, do a terse final verification (no new work) and end your final message with the single terminal line: PI-CONTINUE: COMPLETE. Otherwise continue the listed work without redoing finished steps.'
 # pi flags that consume a separate value token, for passthrough, tracked
 # against `pi --help`; bare flags and --flag=value forms need no entry
-# here. --session, --session-id, --fork, and --mode sit in the table for
-# token pairing ("needs a value" detection) while the rejection branch
-# intercepts the session-identity ones and the json/rpc modes. -n is
-# deliberately absent: the supervisor declares it (PI_RUN_VALUE_FLAGS).
+# here. --mode's entry is load-bearing: bare `--mode text` pairs its
+# value through this table, and only --mode json and --mode rpc are
+# refused before pairing. The --session, --session-id, and --fork
+# entries are parity-only: the declared --session branch and the
+# rejection branch intercept those names before pairing is ever
+# consulted, so their entries exist only to satisfy the tests'
+# live-help parity pin. -n is deliberately absent: the supervisor
+# declares it (PI_RUN_VALUE_FLAGS).
 PI_VALUE_FLAGS=(--provider --model --api-key --system-prompt --append-system-prompt --name --session --session-id --fork --session-dir --models --tui-mode --tools --exclude-tools --thinking --export --extension --skill --prompt-template --theme --use-theme --mode -t -xt -e)
 # pi-continue's declared flag table: names split_run_args parses and
 # consumes itself, never forwarding them to pi. -n collides with pi's
@@ -366,6 +424,32 @@ session_completed() {
     [[ "$last" == "$COMPLETE_MARKER" ]]
 }
 
+# True when the session's output carries pi's cross-project --session
+# abort: the pinned id exists only in another project, pi prints its
+# cross-project notice and its fork prompt together, the engine's stdin
+# is at EOF, and pi exits 0 having run nothing. That exit 0 must never
+# read as a clean completion, so the pair classifies as a fatal
+# non-quota stop. Neither line matches alone: model output can
+# legitimately quote the notice, and `Aborted.` prints only when
+# something answers pi's prompt, so a notice-only output and a bare
+# trailing `Aborted.` both stay clear of this classifier.
+cross_project_abort() {
+    command grep -q 'Session found in different project' "$1" 2>/dev/null \
+        && command grep -q 'Fork this session into current directory?' "$1" 2>/dev/null
+}
+
+# The caller-facing stop-summary fragment for a cross-project abort:
+# pi's notice line carries the session's home project after its colon,
+# and the ride's pinned id is what a manual fork or a --session-dir pin
+# would rescue. Parsed from the merged output ($1) with the ride id
+# ($2); the log line and the retained output stay the durable record.
+cross_project_summary() {
+    local project
+    project="$(command grep -m1 'Session found in different project' "$1" 2>/dev/null \
+        | sed 's#^.*Session found in different project:[[:space:]]*##')"
+    printf 'project: %s, session: %s' "${project:-<unparsed>}" "$2"
+}
+
 # True when the leading tokens ($1, $2) name a rejected non-text output
 # mode: prints the pointed message and returns 0 exactly then. --mode
 # text and --mode=<other> pass (harmless, explicit).
@@ -389,25 +473,111 @@ reject_bad_mode() {
     return 1
 }
 
+# True when the leading token names a rejected session-identity flag, bare
+# or =-form; prints the pointed message and returns 0 exactly then.
+# pi-continue never creates sessions: --session-id creates on an unknown
+# id, --no-session skips storage, --continue/-c and --resume/-r let pi
+# pick or silently create one, and --fork forks into a new session.
+# Identity is pinned by the sanctioned --session <id|path> passthrough or
+# by auto-resolution, never by any of these.
+reject_session_flag() {
+    case "$1" in
+        --fork|'--fork='*)
+            printf 'pi-continue: %s is rejected: forking creates a new session; see the header\n' "$1" >&2
+            ;;
+        --session-id|'--session-id='*|--continue|'--continue='*|-c|--resume|'--resume='*|-r|--no-session|'--no-session='*)
+            printf 'pi-continue: %s is rejected: pi-continue never creates sessions; pin one explicitly with --session <id|path>; see the header\n' "$1" >&2
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# Resolve the ride's session id from existing storage, never creating
+# anything: the effective session root (PI_CODING_AGENT_SESSION_DIR if
+# set, else ~/.pi/agent/sessions/), the physical cwd's group dir per
+# pi's documented encoding (leading separator removed, / \ : replaced
+# by -; ${PWD:A} resolves symlinks so the encoding matches pi's
+# process.cwd(), and a launch through a symlinked directory still
+# resolves), and the newest *.jsonl in it by mtime. The id is the
+# filename minus its
+# <timestamp>_ prefix and .jsonl suffix. A mtime tie (stat's nanosecond
+# resolution) or no candidate at all is unresolvable: prints nothing and
+# returns 1, and the caller refuses rather than guesses. Files not
+# matching pi's documented <timestamp>_<session-id>.jsonl shape are
+# skipped, not fatal.
+resolve_session_id() {
+    local root group f t best best_t id tie
+    local -a files
+    root="${PI_CODING_AGENT_SESSION_DIR:-$HOME/.pi/agent/sessions}"
+    group="$root/--$(printf '%s' "${PWD:A}" | sed -e 's#^/##' -e 's#[/\\:]#-#g')--"
+    files=("$group"/*.jsonl(.N))
+    (( ${#files} )) || return 1
+    best=''
+    best_t=''
+    tie=false
+    for f in "${files[@]}"; do
+        [[ "${f:t}" == *_*.jsonl ]] || continue
+        t=$(stat -c %.9Y -- "$f" 2>/dev/null) || return 1
+        if [[ -z "$best_t" ]]; then
+            best="$f"; best_t="$t"; tie=false
+        elif (( t > best_t )); then
+            best="$f"; best_t="$t"; tie=false
+        elif (( t == best_t )); then
+            tie=true
+        fi
+    done
+    [[ -n "$best_t" && "$tie" == false ]] || return 1
+    id="${best:t}"
+    id="${id#*_}"
+    id="${id%.jsonl}"
+    [[ -n "$id" ]] || return 1
+    print -r -- "$id"
+}
+
+# One pi invocation: print mode, the ride's pinned session ($3) in
+# canonical two-token form immediately after -p, the caller's pi flags,
+# a bare -- before the prompt, output merged into the live last.out and
+# the per-session file ($1). The pin decision was made once at split
+# time (the caller's --session, canonicalized by split_run_args into
+# $session_pin) or once at engine start (auto-resolution), so every
+# invocation re-emits it unconditionally at the front of the wire: front
+# placement is what keeps pi's parser from swallowing the pin as the
+# value of a caller's bare value flag, and pi attaches only the
+# two-token form.
+invoke_pi() {
+    printf 'pi-continue: %s -p --session %s %s -- %s\n' "$PI_BIN" "$3" "${pi_flags[*]}" "$2"
+    "$PI_BIN" -p --session "$3" ${pi_flags[@]+"${pi_flags[@]}"} -- "$2" >> "$OUT_FILE" >> "$1" 2>&1
+}
+
 # Split a launching command's args into pi flags (with their value
 # tokens) and the prompt words that follow. Declared flags (PI_RUN_*_FLAGS,
 # gated by pi_declared so only `run` consumes them) are stripped into
 # pi_declared_args with their value pairings and never forwarded. The
 # rejection set exits rc 2 before any detaching: non-text modes, the
-# session-identity flags the supervisor owns or that conflict with its
-# lockstep, and -p/--print (print mode is forced). A bare `--` forces
+# never-create session-identity flags (reject_session_flag), and
+# -p/--print (print mode is forced). --session is declared rather than
+# forwarded: its value (bare or =-form, nonempty, not dash-leading) is
+# validated and stored in session_pin as the ride's pin, and a malformed
+# pin refuses rc 2 here, before detaching: forwarded as-is it dies
+# detached instead (pi reads a valueless or dash-leading value as a
+# garbage session id and hard-errors after the supervisor has forked),
+# never surfacing in the caller's terminal. A bare `--` forces
 # everything after it to be prompt, so dash-leading prompts and
 # rejection-shaped tokens after it stay passable.
 split_run_args() {
     pi_flags=()
     prompt_words=()
     pi_declared_args=()
+    session_pin=''
     while (( $# )); do
         case "$1" in
             --)
                 shift
                 prompt_words+=("$@")
-                return 0
+                break
                 ;;
             -*)
                 if [[ "$pi_declared" == true ]] && (( ${PI_RUN_VALUE_FLAGS[(Ie)$1]} )); then
@@ -425,9 +595,33 @@ split_run_args() {
                     # Before the valueless rejection below, so --mode names
                     # its own hazard, not a missing value.
                     return 2
-                elif [[ "$1" == --session || "$1" == --session-id || "$1" == --continue || "$1" == -c || "$1" == --resume || "$1" == -r || "$1" == --no-session ]]; then
-                    printf 'pi-continue: %s is rejected: the supervisor owns session identity (--session-id lockstep); see the header\n' "$1" >&2
+                elif reject_session_flag "$1"; then
                     return 2
+                elif [[ "$1" == --session || "$1" == --session=* ]]; then
+                    # Declared, not forwarded: pi attaches only the
+                    # two-token form, so the value is validated here and
+                    # re-emitted canonically by invoke_pi. Malformed pins
+                    # refuse rc 2 here, before detaching: forwarded
+                    # as-is they die detached instead (pi reads a
+                    # valueless or dash-leading value as a garbage
+                    # session id and hard-errors after the supervisor
+                    # has forked), and --session= reads as an unknown
+                    # option to pi. The dash-leading check validates both
+                    # forms, so `--session=-x` and `--session=--` refuse
+                    # exactly like their bare shapes.
+                    local val=''
+                    if [[ "$1" == --session=* ]]; then
+                        val="${1#--session=}"
+                        shift
+                    elif [[ -n "${2:-}" ]]; then
+                        val="$2"
+                        shift 2
+                    fi
+                    if [[ -z "$val" || "$val" == -* ]]; then
+                        printf 'pi-continue: --session needs a value\n' >&2
+                        return 2
+                    fi
+                    session_pin="$val"
                 elif [[ "$1" == -p || "$1" == --print ]]; then
                     printf 'pi-continue: %s is rejected: the supervisor already invokes pi in print mode; see the header\n' "$1" >&2
                     return 2
@@ -446,10 +640,37 @@ split_run_args() {
                 ;;
             *)
                 prompt_words+=("$@")
-                return 0
+                break
                 ;;
         esac
     done
+    # Checked after the scan so the pin may ride on either side of it.
+    # The =-form is refused always, pin or not: pi's parser has no
+    # =-form for --session-dir (the token lands in pi's unknown flags
+    # and hard-errors the invocation while pi resolves sessions from
+    # the default root), so the two-token form is the only usable
+    # spelling. The two-token form is refused without a pin: pi gives
+    # --session-dir top precedence over the root auto-resolution reads
+    # (PI_CODING_AGENT_SESSION_DIR or the default), so an auto-resolved
+    # id would not exist in that root and the ride would die detached.
+    # With an explicit pin the caller has made the root match their
+    # pin's home, so the flag passes through.
+    local f
+    for f in ${pi_flags[@]+"${pi_flags[@]}"}; do
+        case "$f" in
+            --session-dir=*)
+                printf "pi-continue: %s is rejected: pi's parser has no =-form for --session-dir, so the root would never reach pi (the token hard-errors as an unknown option); pass it as two tokens: --session-dir <path>\n" "$f" >&2
+                return 2
+                ;;
+            --session-dir)
+                if [[ -z "$session_pin" ]]; then
+                    printf 'pi-continue: %s is rejected without an explicit --session pin: auto-resolution reads PI_CODING_AGENT_SESSION_DIR or the default root while pi gives --session-dir top precedence, so the pin would not exist in that root; pass --session <id|path> to use --session-dir\n' "$f" >&2
+                    return 2
+                fi
+                ;;
+        esac
+    done
+    return 0
 }
 
 # Give the declared flags split_run_args consumed their meaning: -n caps
@@ -488,11 +709,25 @@ start_engine() {
     # longer old run's tail as current; `clean` stays the explicit wipe.
     rm -f "$STATE_DIR"/last.<->.out(N)
     persist_failed 0
-    # One session id per ride: pi appends to it across quota windows (the
-    # deterministic analog of oc-continue's --continue), and every
-    # invocation passes the same --session-id. The engine pid keeps ids
-    # unique per ride; the shape matches pi's documented id pattern.
-    RIDE_ID="pi-continue-$(date +%Y%m%dT%H%M%S)-$$"
+    # One session id per ride, pinned once: the caller's canonicalized
+    # --session pin from split_run_args (a directly-invoked detached
+    # engine re-derives it from its own args, so `--session x` attaches
+    # x there too), then the launcher's PI_CONTINUE_SESSION_ID (the
+    # same pin, handed over so the engine never re-resolves), else one
+    # auto-resolution at launch (validate_launch, so an unresolvable
+    # ride refuses before detaching). Nothing is minted here
+    # and pi never creates a session: every invocation attaches with
+    # --session, whose unknown-id path is pi's hard error, creating
+    # nothing. The set-test keeps even an explicitly empty env pin
+    # verbatim in session.id instead of silently swapping in a resolved
+    # id.
+    if [[ -n "$session_pin" ]]; then
+        RIDE_ID="$session_pin"
+    elif [[ -n "${PI_CONTINUE_SESSION_ID+x}" ]]; then
+        RIDE_ID="$PI_CONTINUE_SESSION_ID"
+    else
+        RIDE_ID="$(resolve_session_id)" || return 2
+    fi
     print -r -- "$RIDE_ID" > "$SESSION_FILE"
     print -r -- $$ > "$PID_FILE"
 }
@@ -555,13 +790,22 @@ cmd_run() {
         : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
         log_line "session $session: invoking pi"
         write_session_stamp "$session" "$session_out"
-        printf 'pi-continue: %s -p --session-id %s %s -- %s\n' "$PI_BIN" "$ride" "${pi_flags[*]}" "$prompt"
         start_s=$SECONDS
-        "$PI_BIN" -p --session-id "$ride" ${pi_flags[@]+"${pi_flags[@]}"} -- "$prompt" >> "$OUT_FILE" >> "$session_out" 2>&1
+        invoke_pi "$session_out" "$prompt" "$ride"
         rc=$?
         elapsed=$(( SECONDS - start_s ))
         is_quota=false
         (( rc == 0 )) || if looks_like_quota "$OUT_FILE"; then is_quota=true; fi
+        # A cross-project pin aborts pi before any model run, with exit
+        # 0: a fatal stop regardless of the challenge cycle, since every
+        # retry with the same pin aborts identically and reporting it as
+        # clean completion (or as work found) would lie.
+        if cross_project_abort "$OUT_FILE"; then
+            log_line "session $session: pinned session found in a different project; pi aborted (rc=0) without running; not retrying"
+            printf 'pi-continue: pinned session is from a different project (%s); pi aborted; output: %s, events: %s\n' \
+                "$(cross_project_summary "$OUT_FILE" "$ride")" "$OUT_FILE" "$LOG_FILE"
+            return 1
+        fi
 
         # A completion claim never ends the ride outright: the first
         # claim arms exactly one challenge session, and only a challenge
@@ -697,9 +941,17 @@ cmd_once() {
     : > "$OUT_FILE" || { log_line 'truncate failed'; return 1; }
     log_line 'one-shot: invoking pi'
     write_session_stamp 1 "$STATE_DIR/last.1.out"
-    printf 'pi-continue: %s -p --session-id %s %s -- %s\n' "$PI_BIN" "$ride" "${pi_flags[*]}" "$prompt"
-    "$PI_BIN" -p --session-id "$ride" ${pi_flags[@]+"${pi_flags[@]}"} -- "$prompt" >> "$OUT_FILE" >> "$STATE_DIR/last.1.out" 2>&1
+    invoke_pi "$STATE_DIR/last.1.out" "$prompt" "$ride"
     local rc=$?
+    # Same classification as the ride: pi's cross-project abort exits 0
+    # having run nothing, and reporting a one-shot that did nothing as a
+    # clean completion would lie.
+    if cross_project_abort "$OUT_FILE"; then
+        log_line 'one-shot: pinned session found in a different project; pi aborted (rc=0) without running'
+        printf 'pi-continue: pinned session is from a different project (%s); pi aborted; output: %s\n' \
+            "$(cross_project_summary "$OUT_FILE" "$ride")" "$OUT_FILE"
+        return 1
+    fi
     if (( rc == 0 )); then
         log_line 'one-shot: run completed cleanly'
         printf 'pi-continue: completed cleanly\n'
@@ -817,6 +1069,20 @@ validate_launch() {
     esac
     split_run_args "$@" || return 2
     [[ "$sub" != run ]] || interpret_run_flags || return 2
+    # Pin the ride's session id here, in the caller's terminal: the
+    # detached engine's stderr goes to /dev/null, so an unresolvable ride
+    # must refuse before forking. The caller's --session already sat out
+    # split_run_args as the validated $session_pin; absent it, exactly
+    # one auto-resolution runs, and launch() hands the pin to the engine
+    # via PI_CONTINUE_SESSION_ID.
+    if [[ -n "$session_pin" ]]; then
+        SESSION_PIN="$session_pin"
+    else
+        SESSION_PIN="$(resolve_session_id)" || {
+            printf 'pi-continue: no existing session to attach to in this directory; pi-continue never creates sessions; pin one explicitly with --session <id|path>\n' >&2
+            return 2
+        }
+    fi
 }
 
 launch() {
@@ -828,9 +1094,9 @@ launch() {
         return 1
     fi
     if command -v setsid >/dev/null 2>&1; then
-        PI_CONTINUE_DETACHED=1 setsid nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+        PI_CONTINUE_DETACHED=1 PI_CONTINUE_SESSION_ID="$SESSION_PIN" setsid nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
     else
-        PI_CONTINUE_DETACHED=1 nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
+        PI_CONTINUE_DETACHED=1 PI_CONTINUE_SESSION_ID="$SESSION_PIN" nohup "$SCRIPT_PATH" "$sub" "$@" </dev/null >/dev/null 2>&1 &
     fi
     # Report readiness, not just spawn: setsid may fork, so $! is not
     # reliably the engine pid. Wait for the engine to arm its pid file and
