@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-oc-continue test-pi-continue test-pi lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-pi lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -381,7 +381,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+test: lint-corpus test-links test-rules test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -395,7 +395,7 @@ check: test
 # runner script and make stops at the first nonzero exit, so no aggregate
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
-verify-inner: lint-corpus test-tasks test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+verify-inner: lint-corpus test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -488,6 +488,13 @@ lint-corpus:
 test-tasks:
 	@echo "Testing tasks board tool..."
 	@bash tests/tasks/test-tasks.sh
+
+# Characterization suite for the tasks CLI parser's heading-delimiter
+# hazard (FM-1..FM-12): reproduced-pins document current corruption and
+# flip only with the parser-fix follow-up; safe-pins must stay green.
+test-tasks-hazard:
+	@echo "Testing tasks CLI parser hazard pins..."
+	@bash tests/tasks/test-tasks-hazard.sh
 
 # Test the oc-continue runner (budgets, retention, follow, flag contract)
 test-oc-continue:
@@ -593,6 +600,7 @@ help:
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
 	@echo "  make test-tasks  - Verify the tasks board tool"
+	@echo "  make test-tasks-hazard - Verify the tasks CLI parser hazard pins (FM-1..FM-12)"
 	@echo "  make test-oc-continue - Verify the oc-continue runner"
 	@echo "  make test-pi-continue - Verify the pi-continue runner (quota-riding supervisor)"
 	@echo "  make test-agents-md - Verify ~/.pi/agent/AGENTS.md matches a fresh generation of the opencode rules"
