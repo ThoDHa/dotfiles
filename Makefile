@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-pi lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-oc-continue test-pi-continue test-pi lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -381,7 +381,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+test: lint-corpus test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -395,7 +395,7 @@ check: test
 # runner script and make stops at the first nonzero exit, so no aggregate
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
-verify-inner: lint-corpus test-tasks test-tasks-hazard test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+verify-inner: lint-corpus test-tasks test-tasks-hazard test-task-metrics test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -506,6 +506,11 @@ test-oc-continue:
 test-pi-continue:
 	@echo "Testing pi-continue runner..."
 	@bash tests/pi-continue/test-pi-continue.sh
+
+# Test the versioned metrics ledger contract (schema, validator, fixtures)
+test-task-metrics:
+	@echo "Testing task-metrics ledger contract..."
+	@bash tests/task-metrics/test-task-metrics.sh
 
 # Test that the generated pi AGENTS.md matches a fresh generation of the rules
 test-agents-md:
