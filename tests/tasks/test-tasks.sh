@@ -2206,6 +2206,131 @@ assert_contains "the --force override lists the superseded criteria" "$mix_log" 
 rm -f "$f_tilde" "$f_tilde_mix"
 t render >/dev/null
 
+echo "== close: verdict markers and the unverifiable gate =="
+# The three-way verdict dimension rides the same shared criteria counter
+# the gate and lint run: a Success Criteria line may carry (verdict:
+# verified), (verdict: refuted), or (verdict: unverifiable), optionally
+# with (exception: <text>) documenting on the same line why closure is
+# acceptable without recorded evidence. The gate refuses a criterion
+# whose unverifiable verdict lacks the documented exception (the
+# mandatory-unverifiable class) and admits one that carries it; verified
+# and refuted classify through the same counter without gate rules of
+# their own. Fenced example markers count zero in both consumers, a
+# verdict citation outside Success Criteria classifies as nothing, and
+# plain-box files (no verdict tags) classify exactly as before.
+f_vv="$(t new --id VVD-1 --name "Unverifiable Gate Probe")"
+TASKS_TEST_CLOCK="2026-06-16 10:00" t log "$f_vv" "only anchor" >/dev/null
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_vv"
+t edit "$f_vv" --section "Success Criteria" --append <<<"- [x] unestablishable claim (verdict: unverifiable)" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 10:15" t log "$f_vv" "digest quoting (verdict: unverifiable) as prose" >/dev/null
+vv_before="$(cat "$f_vv")"
+vv_err="$(t close "$f_vv" 2>&1 >/dev/null || true)"
+assert_contains "close refuses an unverifiable verdict without an exception" "$vv_err" "fails the closure gate"
+assert_contains "the refusal names the unexcepted unverifiable criterion" "$vv_err" \
+	"unverifiable Success Criteria verdict(s) without a documented exception: unestablishable claim (verdict: unverifiable)"
+assert_not_contains "the refusal adds no unticked count for ticked criteria" "$vv_err" "unchecked Success Criteria boxes"
+assert_not_contains "a Work Log prose citation of the verdict stays inert" "$vv_err" "digest quoting"
+assert_eq "the refused verdict closure leaves the file byte-identical" "$vv_before" "$(cat "$f_vv")"
+refuse "the verdict gate refuses without --force" close "$f_vv"
+vv_out="$(TASKS_TEST_CLOCK="2026-06-16 10:30" t close "$f_vv" --force)"
+assert_contains "close --force closes past the verdict gate" "$vv_out" "closed $(basename "$f_vv")"
+vv_log="$(awk '/^## Work Log/{f=1} f' "$f_vv")"
+assert_contains "the override note names the verdict finding" "$vv_log" \
+	"unverifiable Success Criteria verdict(s) without a documented exception: unestablishable claim"
+
+# The documented exception admits the closure: the same criterion with
+# (exception: ...) on the line closes without --force.
+f_vv_ok="$(t new --id VVD-2 --name "Excepted Verdict Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_vv_ok"
+t edit "$f_vv_ok" --section "Success Criteria" --append \
+	<<<"- [x] unestablishable claim (verdict: unverifiable) (exception: design-review sign-off recorded in the Decision Log)" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 10:45" t close "$f_vv_ok" >/dev/null
+assert_eq "the documented exception admits the closure" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_vv_ok")"
+
+# Refuted and verified verdicts carry no gate rule of their own: a
+# refuted claim left unticked refuses as a plain unticked box.
+f_vv_ref="$(t new --id VVD-3 --name "Refuted Classification Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_vv_ref"
+t edit "$f_vv_ref" --section "Success Criteria" --append <<<"- [ ] disproven claim (verdict: refuted)" >/dev/null
+vv_err="$(t close "$f_vv_ref" 2>&1 >/dev/null || true)"
+assert_contains "a refuted claim unticked refuses as a plain unticked box" "$vv_err" "unchecked Success Criteria boxes: 1"
+assert_not_contains "the refuted verdict adds no gate finding of its own" "$vv_err" "verdict(s) without a documented exception"
+
+# The verdict dimension is box-state-agnostic: a ~-superseded criterion
+# carrying an unexcepted unverifiable verdict refuses too, and the
+# finding names it stripped of the superseded marker prefix.
+f_vv_sup="$(t new --id VVD-5 --name "Superseded Verdict Probe")"
+sed -i 's/^- \[ \] TODO$/- ~ [ ] replaced claim (verdict: unverifiable)/' "$f_vv_sup"
+vv_err="$(t close "$f_vv_sup" 2>&1 >/dev/null || true)"
+assert_contains "a superseded criterion with an unexcepted unverifiable verdict refuses" "$vv_err" "fails the closure gate"
+assert_contains "the verdict finding strips the superseded marker prefix" "$vv_err" \
+	"unverifiable Success Criteria verdict(s) without a documented exception: replaced claim (verdict: unverifiable)"
+assert_not_contains "the superseded verdict finding adds no unticked count" "$vv_err" "unchecked Success Criteria boxes"
+
+# Fenced example verdict markers count zero in the gate and the lint.
+f_vv_fence="$(t new --id VVD-4 --name "Verdict Fence Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_vv_fence"
+t edit "$f_vv_fence" --section "Success Criteria" --append <<'IN' >/dev/null
+Example markers:
+
+```
+- [ ] fenced example (verdict: unverifiable)
+- [x] fenced established example (verdict: verified)
+```
+IN
+TASKS_TEST_CLOCK="2026-06-16 11:15" t close "$f_vv_fence" >/dev/null
+assert_eq "fenced verdict markers do not block close" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_vv_fence")"
+vv_lint="$(t lint --verbose 2>&1 || true)"
+assert_not_contains "lint reports no drift for the fenced verdict criteria" "$vv_lint" "$(basename "$f_vv_fence")"
+
+# Gate and lint classify through the ONE shared counter: the same body's
+# counts agree across the gate's refusal findings (close leg, Status
+# untouched) and the lint's advisories (lint leg, the same file hand-set
+# Completed the way the lint section's direct fixtures are).
+f_vv_agree="$(t new --id VVA-1 --name "Verdict Agreement Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_vv_agree"
+t edit "$f_vv_agree" --section "Success Criteria" --append <<'IN' >/dev/null
+- [x] verified claim (verdict: verified)
+- [x] unestablishable claim (verdict: unverifiable)
+- [x] disproven claim (verdict: refuted)
+- [ ] open claim
+IN
+vv_err="$(t close "$f_vv_agree" 2>&1 >/dev/null || true)"
+assert_contains "the gate counts the unticked box" "$vv_err" "unchecked Success Criteria boxes: 1"
+assert_contains "the gate counts the unexcepted unverifiable verdict" "$vv_err" \
+	"unverifiable Success Criteria verdict(s) without a documented exception: unestablishable claim (verdict: unverifiable)"
+assert_not_contains "the gate states no refuted finding" "$vv_err" "refuted"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_vv_agree"
+vv_lint="$(t lint --verbose 2>&1 || true)"
+assert_contains "lint counts the same unchecked box" "$vv_lint" \
+	"ADVISORY current/$(basename "$f_vv_agree"): Status Completed with 1 unchecked Success Criteria boxes"
+assert_contains "lint counts the same refuted verdict" "$vv_lint" \
+	"ADVISORY current/$(basename "$f_vv_agree"): Status Completed with 1 refuted Success Criteria verdict(s)"
+assert_contains "lint counts the same unverifiable verdict" "$vv_lint" \
+	"ADVISORY current/$(basename "$f_vv_agree"): Status Completed with 1 unverifiable Success Criteria verdict(s) without a documented exception"
+assert_not_contains "a verified verdict reports no drift anywhere" "$vv_lint" \
+	"$(basename "$f_vv_agree"): Status Completed with 1 verified Success"
+
+# The open-file nudge splits on the exception state: an all-checked open
+# file with an unexcepted unverifiable gets the corrected refusal nudge
+# instead of the closure nudge the gate would refuse, and documenting the
+# exception restores the plain closure nudge.
+f_vv_nudge="$(t new --id VVN-1 --name "Verdict Nudge Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO (verdict: unverifiable)/' "$f_vv_nudge"
+vv_lint="$(t lint --verbose 2>&1 || true)"
+assert_contains "the open all-checked nudge names the unverifiable block" "$vv_lint" \
+	"ADVISORY current/$(basename "$f_vv_nudge"): all 1 Success Criteria boxes checked while Triage, but 1 unverifiable verdict(s) lack documented exceptions (closure refuses)"
+assert_not_contains "the plain closure nudge stays silent while the block stands" "$vv_lint" \
+	"$(basename "$f_vv_nudge"): all 1 Success Criteria boxes checked while Triage (closure is 'tasks close')"
+sed -i 's/(verdict: unverifiable)/(verdict: unverifiable) (exception: recorded sign-off)/' "$f_vv_nudge"
+vv_lint="$(t lint --verbose 2>&1 || true)"
+assert_contains "the exception restores the plain closure nudge" "$vv_lint" \
+	"ADVISORY current/$(basename "$f_vv_nudge"): all 1 Success Criteria boxes checked while Triage (closure is 'tasks close')"
+rm -f "$f_vv" "$f_vv_ok" "$f_vv_ref" "$f_vv_sup" "$f_vv_fence" "$f_vv_agree" "$f_vv_nudge"
+t render >/dev/null
+
 echo "== archive: terminal tasks move to archive/ =="
 # The sanctioned alternative to the hand mv the battery's earlier archive
 # lane tests used: archive refuses open tasks, moves a terminal one under

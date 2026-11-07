@@ -359,6 +359,7 @@ A child task file MUST be registered in the master index dashboard and move betw
 
 - [ ] Specific, measurable requirement 1
 - [ ] Specific, measurable requirement 2
+- [ ] [Criterion carrying a claim verdict: append `(verdict: verified)`, `(verdict: refuted)`, or `(verdict: unverifiable)` to the marker line. A ticked box (`- [x]`) means reviewed-and-established with recorded evidence (a test result, verification report, manual inspection, or design review), not merely code-written. A verdict tag is machine-classified only on Success Criteria marker lines outside a fenced block; fenced example markers count zero. `(verdict: unverifiable)` refuses the closure gate unless the same line also documents `(exception: <why closure is acceptable without recorded evidence>)`, which admits it]
 - ~ [ ] [Superseded criterion: replaced by later work; counts as resolved for the closure gate while staying visibly unfulfilled, and the close Work Log entry lists it as superseded]
 
 ## Technical Approach
@@ -476,6 +477,7 @@ A task cannot be marked Completed unless:
 - The Simplify and Review Loop has converged, or the cap was reached with findings documented and accepted by the user
 - Final verification passed per the `simplify-review` skill (unit/integration tests, or manual verification of intended behavior where coverage is absent)
 - Each loop iteration is documented in the Work Log
+- Every `[x]` tick carries recorded evidence per the Success Criteria semantics, and no criterion carries `(verdict: unverifiable)` without a documented `(exception: ...)` on the same line (the closure gate refuses that class; `--force` overrides are recorded in the Work Log)
 
 ## Task Breakdown
 

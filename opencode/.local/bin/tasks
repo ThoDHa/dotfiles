@@ -116,22 +116,37 @@ readonly AWK_HEADING_LEVEL='		function heading_level(text,    h) {
 
 # Shared awk function source: the Success-Criteria counter both the
 # closure gate and the board lint run, so the two can never drift apart
-# on what counts as checked, unchecked, or superseded. Requires
-# AWK_HEADING_LEVEL concatenated ahead of it: track_criteria_section
-# builds on heading_level, whose parser and trailing-whitespace trim are
-# the single heading-reading implementation. Call track_criteria_section
-# on heading lines; on a level-2 heading it sets SECNAME to the trimmed
-# heading text and INSC to whether that heading opens the Success
-# Criteria section, leaving both untouched on any other line. criteria_box
-# classifies a Success Criteria body line as "checked" (- [x] / - [X]),
-# "unchecked" (- [ ]), or "superseded" (- ~ [ ], the resolved-but-
-# unfulfilled annotation), returning "" for everything else. The ^```
-# fence toggle rides here too: criteria_box tracks fenced regions in
-# fence and returns "" for every line inside one (delimiters included),
-# so a fenced example box counts zero in both consumers and the gate and
-# lint cannot drift on fenced content; each file must start with fence
-# unset. superseded_text strips the exact marker prefix criteria_box
-# matched.
+# on what counts as checked, unchecked, or superseded, or on the verdict
+# a criterion carries. Requires AWK_HEADING_LEVEL concatenated ahead of
+# it: track_criteria_section builds on heading_level, whose parser and
+# trailing-whitespace trim are the single heading-reading implementation.
+# Call track_criteria_section on heading lines; on a level-2 heading it
+# sets SECNAME to the trimmed heading text and INSC to whether that
+# heading opens the Success Criteria section, leaving both untouched on
+# any other line. criteria_box classifies a Success Criteria body line
+# as "checked" (- [x] / - [X], the reviewed-and-established tick whose
+# claim carries recorded evidence), "unchecked" (- [ ]), or "superseded"
+# (- ~ [ ], the resolved-but-unfulfilled annotation), returning "" for
+# everything else. The ^``` fence toggle rides here too: criteria_box
+# tracks fenced regions in fence and returns "" for every line inside
+# one (delimiters included), so a fenced example box counts zero in both
+# consumers and the gate and lint cannot drift on fenced content; each
+# file must start with fence unset. superseded_text strips the exact
+# marker prefix criteria_box matched.
+#
+# The verdict dimension rides the same marker lines as a second,
+# orthogonal classification: criteria_verdict returns "verified",
+# "refuted", or "unverifiable" when the line carries the tag
+# (verdict: <word>) (lowercase, exactly one of the three), and
+# criteria_excepted returns 1 when it also carries (exception: <text>)
+# with non-empty text, the documented exception that admits a closure
+# the unverifiable verdict would otherwise refuse. Both run on lines
+# criteria_box has already classified this pass (it must run on every
+# body line: it owns the fence toggle the two verdict readers depend on)
+# and return ""/0 outside the Success Criteria section, inside a fence,
+# or on a line without a criteria marker prefix, so verdict-shaped prose
+# elsewhere in a file classifies as nothing. criteria_claim_line is the
+# shared prologue both verdict readers guard with.
 readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 			lvl = heading_level(line)
 			if (lvl != 2) { SECNAME = ""; return }
@@ -145,6 +160,21 @@ readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 			if (line ~ /^- \[ \] /) return "unchecked"
 			if (line ~ /^- ~ \[ \] /) return "superseded"
 			return ""
+		}
+		function criteria_claim_line(line) {
+			if (fence || !INSC) return 0
+			return (line ~ /^- \[[xX ]\] / || line ~ /^- ~ \[ \] /) ? 1 : 0
+		}
+		function criteria_verdict(line) {
+			if (!criteria_claim_line(line)) return ""
+			if (match(line, /\(verdict: (verified|refuted|unverifiable)\)/)) {
+				return substr(line, RSTART + 10, RLENGTH - 11)
+			}
+			return ""
+		}
+		function criteria_excepted(line) {
+			if (!criteria_claim_line(line)) return 0
+			return (line ~ /\(exception: .+\)/) ? 1 : 0
 		}
 		function superseded_text(line,    text) {
 			text = substr(line, 9)
@@ -304,9 +334,12 @@ Commands:
                                        Success Criteria carry unticked boxes (a
                                        '- ~ [ ] ' line is a superseded annotation:
                                        resolved for the gate, listed in the close Work
-                                       Log entry) or a child named on a dedicated
-                                       dependency surface is unfinished; --force closes
-                                       anyway and records the override in the Work Log.
+                                       Log entry), a criterion carries
+                                       (verdict: unverifiable) without a documented
+                                       (exception: ...) on the same line, or a child
+                                       named on a dedicated dependency surface is
+                                       unfinished; --force closes anyway and records
+                                       the override in the Work Log.
                                        --cancelled transitions to Cancelled instead: Status,
                                        Duration, Updated (no Completed stamp); keeps the
                                        Status Reason already on file (refused without one),
@@ -1696,7 +1729,11 @@ task_id_of_basename() {
 # "U<TAB>n" (unticked Success Criteria boxes, counted by the shared
 # criteria counter AWK_CRITERIA_COUNTER, the exact code the board lint's
 # C record runs), one "S<TAB>text" per ~-marked superseded criterion in
-# file order, and one "I<TAB>token" per task-ID-shaped token carried by a
+# file order, one "V<TAB>text" per criterion carrying an unverifiable
+# verdict without a documented (exception: ...) on the same line (the
+# mandatory-unverifiable class: a claim closure cannot treat as
+# established, admitted only by the recorded exception), and one
+# "I<TAB>token" per task-ID-shaped token carried by a
 # dedicated dependency surface. The dedicated surfaces are the ##
 # Dependencies section body, the template's **Dependencies:** field
 # lines, and explicit **Child tasks:** declaration lines; the two field
@@ -1716,6 +1753,13 @@ closure_gate_scan() { # <file>
 			box = criteria_box($0)
 			if (box == "unchecked") unticked++
 			else if (box == "superseded") print "S\t" superseded_text($0)
+			if (criteria_verdict($0) == "unverifiable" && !criteria_excepted($0)) {
+				vtext = $0
+				sub(/^- \[[xX ]\] /, "", vtext)
+				sub(/^- ~ \[ \] /, "", vtext)
+				sub(/[ \t\r]+$/, "", vtext)
+				print "V\t" vtext
+			}
 			if (indeps || (!inwork && ($0 ~ /^[ \t]*\*\*Dependencies:\*\*/ || $0 ~ /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/))) {
 				rest = $0
 				while (match(rest, /[A-Za-z]+(-[0-9]+)+/)) {
@@ -1745,11 +1789,13 @@ superseded_note() { # <array-name>
 # Closure gate findings for a task about to be completed: every refusal
 # finding, appended to the named findings array (an empty array means the
 # closure may proceed), plus the file's superseded criteria appended to
-# the named superseded array for the closure note. Two finding classes:
-# the unticked Success Criteria boxes count, and every child task declared
-# on a dedicated dependency surface (see closure_gate_scan) that is still
-# open. A declared child is matched when the token resolves to a board
-# file whose leading Task ID equals the token; the file's own ID and
+# the named superseded array for the closure note. Three finding classes:
+# the unticked Success Criteria boxes count, every criterion carrying an
+# unverifiable verdict without a documented exception (see the scan's V
+# records; the finding lists the criteria in file order), and every child
+# task declared on a dedicated dependency surface (see closure_gate_scan)
+# that is still open. A declared child is matched when the token resolves
+# to a board file whose leading Task ID equals the token; the file's own ID and
 # tokens naming no board file are ignored, and a child blocks unless its
 # status is terminal (Completed/Cancelled).
 closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <file>
@@ -1761,15 +1807,21 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 	local -n gate_superseded="$2"
 	local tasks_dir="$3" file="$4"
 	local rec tag unticked=0
-	local -a child_tokens=()
+	local -a child_tokens=() unverifiable=()
 	while IFS=$'\t' read -r tag rec; do
 		case "$tag" in
 			U) unticked="$rec" ;;
 			S) gate_superseded+=("$rec") ;;
+			V) unverifiable+=("$rec") ;;
 			I) child_tokens+=("$rec") ;;
 		esac
 	done < <(closure_gate_scan "$file")
 	((unticked > 0)) && gate_findings+=("unchecked Success Criteria boxes: $unticked")
+	if ((${#unverifiable[@]} > 0)); then
+		local joined_verdicts
+		joined_verdicts="$(IFS=';'; printf '%s' "${unverifiable[*]}")"
+		gate_findings+=("unverifiable Success Criteria verdict(s) without a documented exception: $joined_verdicts")
+	fi
 	local own_id cand f child_id child_status child_rel
 	own_id="$(task_id_of_basename "${file##*/}")"
 	local -a children=()
@@ -1799,8 +1851,9 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 # under Blocked/Cancelled) and releases any claim sidecar with its Owner
 # field, then renders. The completion gate refuses before any write on
 # unticked Success Criteria (a ~-marked superseded annotation counts as
-# resolved) or an unfinished child declared on a dedicated dependency
-# surface; --force closes past it, recording the override (with any
+# resolved), a criterion carrying an unverifiable verdict without a
+# documented exception, or an unfinished child declared on a dedicated
+# dependency surface; --force closes past it, recording the override (with any
 # superseded fragment) as a Work Log anchor, and a gate that passes on
 # ~-marked criteria alone records them as its own Work Log anchor, both
 # stamped at the closure clock so Duration derives after the append. The
@@ -2202,8 +2255,10 @@ LINT_ADVISORY_CAP=20
 # The lint scanner itself: one awk pass over every task file, emitting
 # tab-separated records the bash side classifies. S (file, status, archive
 # bit, have-status), O (file, Owner value), C (file, checked, unchecked,
-# superseded Success Criteria boxes, counted by the shared criteria
-# counter AWK_CRITERIA_COUNTER the closure gate also runs), M (file,
+# superseded Success Criteria boxes, then the verdict counts verified,
+# refuted, unverifiable, and unverifiable-without-a-documented-exception,
+# all counted by the shared criteria counter AWK_CRITERIA_COUNTER the
+# closure gate's U/S/V records also run), M (file,
 # missing section), H (file, field, value, expected), L (file, line,
 # ../reports/ link target), T (file, line, commit-hash candidate). Links
 # inside code spans or fences and lines that
@@ -2317,6 +2372,7 @@ lint_scan_files() { # tasks_dir files...
 			have_status = 0; have_created = 0; have_updated = 0; have_completed = 0
 			have_lu = 0; have_dur = 0; have_prog = 0; have_owner = 0; have_reason = 0
 			checked = 0; unchecked = 0; superseded = 0
+			verified = 0; refuted = 0; unverifiable = 0; unexcepted = 0
 			inhdr = 1; INSC = 0; SECNAME = ""; fence = 0; fnr = 0
 			while ((getline line < (td fpath)) > 0) {
 				fnr++
@@ -2361,6 +2417,13 @@ lint_scan_files() { # tasks_dir files...
 				if (box == "checked") checked++
 				else if (box == "unchecked") unchecked++
 				else if (box == "superseded") superseded++
+				verdict = criteria_verdict(line)
+				if (verdict == "verified") verified++
+				else if (verdict == "refuted") refuted++
+				else if (verdict == "unverifiable") {
+					unverifiable++
+					if (!criteria_excepted(line)) unexcepted++
+				}
 				if (!fence) {
 					scan_links(line, rel, fnr)
 					scan_hashes(line, rel, fnr)
@@ -2370,7 +2433,7 @@ lint_scan_files() { # tasks_dir files...
 			print "S" sep rel sep (have_status ? status : "-") sep archbit sep have_status
 			print "O" sep rel sep owner
 			print "R" sep rel sep reason
-			print "C" sep rel sep checked sep unchecked sep superseded
+			print "C" sep rel sep checked sep unchecked sep superseded sep verified sep refuted sep unverifiable sep unexcepted
 			for (s in reqsec) if (!(s in have_sec)) print "M" sep rel sep s
 			}
 		}
@@ -2410,7 +2473,7 @@ cmd_lint() {
 		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
 	fi
 
-	local -A status_of arch_of have_status_of checked_of unchecked_of superseded_of owner_of reason_of findings_of
+	local -A status_of arch_of have_status_of checked_of unchecked_of superseded_of verified_of refuted_of unverifiable_of unexcepted_of owner_of reason_of findings_of
 	local rec tag rel
 	for rec in "${scan_recs[@]}"; do
 		local -a parts=()
@@ -2420,7 +2483,8 @@ cmd_lint() {
 			S) status_of["$rel"]="${parts[2]:-}"; arch_of["$rel"]="${parts[3]:-}"; have_status_of["$rel"]="${parts[4]:-}" ;;
 			O) owner_of["$rel"]="${parts[2]:-}" ;;
 			R) reason_of["$rel"]="${parts[2]:-}" ;;
-			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}"; superseded_of["$rel"]="${parts[4]:-}" ;;
+			C) checked_of["$rel"]="${parts[2]:-}"; unchecked_of["$rel"]="${parts[3]:-}"; superseded_of["$rel"]="${parts[4]:-}"
+				verified_of["$rel"]="${parts[5]:-}"; refuted_of["$rel"]="${parts[6]:-}"; unverifiable_of["$rel"]="${parts[7]:-}"; unexcepted_of["$rel"]="${parts[8]:-}" ;;
 			M) findings_of["$rel"]+="M"$'\t'"${parts[2]:-}"$'\n' ;;
 			H) findings_of["$rel"]+="H"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\t'"${parts[4]:-}"$'\n' ;;
 			L) findings_of["$rel"]+="L"$'\t'"${parts[2]:-}"$'\t'"${parts[3]:-}"$'\n' ;;
@@ -2498,11 +2562,32 @@ cmd_lint() {
 		# nor ticked: it never reports as an unchecked box on a terminal
 		# file, and an open file whose boxes are all ticked reports only
 		# when no ~ annotation stands (the "all checked" message would
-		# otherwise be a ticked lie about the whole section).
+		# otherwise be a ticked lie about the whole section). Verdict
+		# counts ride the same shared counter, so an open all-checked
+		# file whose unverifiable verdicts lack documented exceptions
+		# gets the corrected nudge instead of the closure nudge the gate
+		# would refuse.
 		if (( "${unchecked_of[$rel]}" > 0 )) && is_terminal_status "$st"; then
 			advisory_out+=("ADVISORY $rel: Status $st with ${unchecked_of[$rel]} unchecked Success Criteria boxes")
-		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 && "${superseded_of[$rel]:-0}" == 0 )) && ! is_terminal_status "$st"; then
+		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 && "${superseded_of[$rel]:-0}" == 0 && "${unexcepted_of[$rel]:-0}" == 0 )) && ! is_terminal_status "$st"; then
 			advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st (closure is 'tasks close')")
+		fi
+		# Verdict drift rides the same advisory lane (body-space findings
+		# stay advisory everywhere, so legacy plain-box boards keep lint
+		# green unchanged): a terminal file carrying refuted verdicts
+		# reports the disproven claims its closure recorded, and an
+		# unverifiable verdict without a documented exception reports
+		# the claim the gate refuses to treat as established (a terminal
+		# file reached that state only through a --force override).
+		if (( "${refuted_of[$rel]:-0}" > 0 )) && is_terminal_status "$st"; then
+			advisory_out+=("ADVISORY $rel: Status $st with ${refuted_of[$rel]} refuted Success Criteria verdict(s)")
+		fi
+		if (( "${unexcepted_of[$rel]:-0}" > 0 )); then
+			if is_terminal_status "$st"; then
+				advisory_out+=("ADVISORY $rel: Status $st with ${unexcepted_of[$rel]} unverifiable Success Criteria verdict(s) without a documented exception")
+			elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 )); then
+				advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st, but ${unexcepted_of[$rel]} unverifiable verdict(s) lack documented exceptions (closure refuses)")
+			fi
 		fi
 		# Archive hygiene: an archived file still carrying an open status is
 		# work the board no longer shows in any active lane.
