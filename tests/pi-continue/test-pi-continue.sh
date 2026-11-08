@@ -249,8 +249,8 @@ wait_for 15 engine_idle && ok "engine rides two quota windows and finishes" \
 assert_eq "three sessions ran under a three-session budget" "3" "$(fake_calls)"
 assert_contains "the engine log names each invoking pi run" "$(cat "$STATE/engine.log")" \
 	"session 1: invoking pi"
-assert_contains "engine log records the clean completion" "$(cat "$STATE/engine.log")" \
-	"session 3: run completed cleanly"
+assert_contains "the final clean turn spent the last budget cycle" "$(cat "$STATE/engine.log")" \
+	"session 3: clean turn 3 of budget 3; budget spent, quitting"
 assert_contains "engine log records the PI_CONTINUE_WAIT_SECONDS park" "$(cat "$STATE/engine.log")" \
 	"parking 0.5s"
 assert_invocation "the final session resumes with only the resumption prompt" 3 \
@@ -316,6 +316,8 @@ assert_not_contains "the warning shape never reads as a productive hit" "$log" "
 assert_not_contains "a one-cycle budget is never burned on the warning shape" "$log" "budget spent"
 wait_for 10 engine_idle && ok "the ride continues past the dead window to a clean finish" \
 	|| bad "the ride continues past the dead window to a clean finish"
+assert_contains "the budget quit fired on the following clean turn, not the warning" \
+	"$(cat "$STATE/engine.log")" "session 2: clean turn 1 of budget 1; budget spent, quitting"
 assert_eq "the retry after the dead window ran the second session" "2" "$(fake_calls)"
 assert_contains "the real warning shape reached the retained session output" \
 	"$(cat "$STATE/last.1.out")" "Warning: No project session found with id "
@@ -348,7 +350,8 @@ wait_for 15 engine_idle && ok "the slow warning ride finishes" || bad "the slow 
 log="$(cat "$STATE/engine.log")"
 assert_contains "the elapsed floor classifies the slow warning session productive" "$log" \
 	"productive quota hit 1 of budget 2; parking 0.5s"
-assert_contains "the ride finished cleanly after the fallback hit" "$log" "run completed cleanly"
+assert_contains "the following clean turn spent the last cycle" "$log" \
+	"session 2: clean turn 2 of budget 2; budget spent, quitting"
 
 echo "== no-progress re-parks and the never-reset bound =="
 fresh budget_free
@@ -372,19 +375,21 @@ assert_contains "the budget still quits on the second productive hit" "$log" \
 
 fresh repark
 # an immediate quota fail right after a park means the reset never took:
-# the engine re-parks on the same math without consuming budget and can
-# still finish cleanly later
+# the engine re-parks on the same math without consuming budget, and the
+# clean turns that follow spend the two-session budget
 printf 'quota\nquota\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
 pc run -n 2 keep trying >/dev/null 2>&1
 PC_ENV=()
-wait_for 15 engine_idle && ok "two no-progress fails re-park and a later session finishes cleanly" \
-	|| bad "two no-progress fails re-park and a later session finishes cleanly"
-assert_eq "both re-parks retried without spending the two-session budget" "3" "$(fake_calls)"
+wait_for 15 engine_idle && ok "two no-progress fails re-park before the clean turns spend the budget" \
+	|| bad "two no-progress fails re-park before the clean turns spend the budget"
+assert_eq "both re-parks ran before the two clean turns spent the budget" "4" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
-assert_contains "the run ends cleanly rather than on the budget" "$log" "run completed cleanly"
-assert_not_contains "no productive cycle was ever spent" "$log" "budget spent"
-for n in 1 2 3; do
+assert_contains "the ride ended on the second clean turn's budget spend" "$log" \
+	"session 4: clean turn 2 of budget 2; budget spent, quitting"
+assert_contains "no no-progress attempt ever consumed a budget unit" "$log" \
+	"no-progress quota hit 1 of 90 consecutive; no budget consumed"
+for n in 1 2 3 4; do
 	[[ -f "$STATE/last.$n.out" ]] && ok "retry session $n keeps its own last.$n.out" \
 		|| bad "retry session $n keeps its own last.$n.out"
 done
@@ -428,11 +433,11 @@ assert_eq "the persisted streak reads zero after the productive budget quit" "0"
 echo "== cycle-differentiated prompts and the completion marker =="
 fresh prompts
 # cycle 1 sends the caller's words plus the appended marker line, cycles
-# 2 and up only the resumption prompt; the plan ends ok so the ride
-# stops cleanly after three invocations
+# 2 and up only the resumption prompt; the plan ends ok so the ride's
+# clean turn spends the third cycle and the budget stops it there
 printf 'productive\nproductive\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run ship the feature >/dev/null 2>&1
+pc run -n 3 ship the feature >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a caller-prompt ride completes" \
 	|| bad "a caller-prompt ride completes"
@@ -449,7 +454,7 @@ fresh no_progress_repeats_prompt
 # resumption note would claim a window reset that never happened
 printf 'quota\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run ship it >/dev/null 2>&1
+pc run -n 1 ship it >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a ride past a no-progress attempt finishes" \
 	|| bad "a ride past a no-progress attempt finishes"
@@ -461,7 +466,7 @@ fresh productive_switches_to_resume
 # resumption note
 printf 'productive\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run ship it >/dev/null 2>&1
+pc run -n 2 ship it >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a ride past a productive cycle finishes" \
 	|| bad "a ride past a productive cycle finishes"
@@ -471,7 +476,7 @@ assert_invocation "the first productive cycle switches the next invocation to th
 fresh marker_in_prompt
 # the append skips when the caller's own words already carry the marker
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run "wrap up; end with $complete_marker when finished" >/dev/null 2>&1
+pc run -n 1 "wrap up; end with $complete_marker when finished" >/dev/null 2>&1
 wait_for 10 engine_idle && ok "a self-marking prompt run completes" \
 	|| bad "a self-marking prompt run completes"
 assert_invocation "a caller prompt already carrying the marker is sent verbatim" 1 \
@@ -498,7 +503,7 @@ fresh marker_ansi
 # its challenge
 printf 'complete_ansi\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run finish in color >/dev/null 2>&1
+pc run -n 2 finish in color >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "an ANSI-wrapped marker still earns its challenge" \
 	|| bad "an ANSI-wrapped marker still earns its challenge"
@@ -520,17 +525,20 @@ assert_not_contains "the quota hit never reached the park logic" "$log" "parking
 
 fresh marker_mid
 # a bare marker line mid-output is a mention, not a stop: the ride
-# continues, spends a productive cycle, and finishes cleanly
+# continues, spends a productive cycle, and stops on the budget once the
+# following clean turn spends the last one
 printf 'marker_mid_quota\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run mention and keep going >/dev/null 2>&1
+pc run -n 2 mention and keep going >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a mid-output marker mention does not stop the ride" \
 	|| bad "a mid-output marker mention does not stop the ride"
 assert_eq "the ride continued past the mention to a second session" "2" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
 assert_contains "the mention session spent a productive cycle" "$log" \
-	"session 1: productive quota hit 1; unbounded ride continues"
+	"session 1: productive quota hit 1 of budget 2"
+assert_contains "the following clean turn spent the last cycle" "$log" \
+	"session 2: clean turn 2 of budget 2; budget spent, quitting"
 assert_not_contains "no complete report for a mid-output mention" "$log" "work complete"
 
 echo "== the challenge cycle: one challenge per completion claim =="
@@ -539,7 +547,7 @@ fresh challenge_first_claim
 # follows it, running the enumeration prompt, and the ride goes on
 printf 'complete\nok\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run claim and get challenged >/dev/null 2>&1
+pc run -n 2 claim and get challenged >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "the ride continues past a challenged claim" \
 	|| bad "the ride continues past a challenged claim"
@@ -556,18 +564,19 @@ fresh challenge_finds_work
 # nothing
 printf 'complete\nok\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
-pc run challenged with work left >/dev/null 2>&1
+pc run -n 2 challenged with work left >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a work-finding challenge continues the ride without parking" \
 	|| bad "a work-finding challenge continues the ride without parking"
 assert_eq "the ride reached three sessions with no park in between" "3" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
 assert_contains "the work-finding challenge spent a productive cycle" "$log" \
-	"session 2: productive challenge 1; unbounded ride continues; work found, continuing immediately with session 3"
+	"session 2: productive challenge 1 of budget 2; work found, continuing immediately with session 3"
 assert_not_contains "the work-found transition parks nothing" "$log" "; parking "
 assert_invocation "the session after a work-finding challenge resumes the normal cycle immediately" 3 \
 	-p --session "$(ride_id)" -- "$resume_prompt"
-assert_contains "the continued ride finished cleanly" "$log" "run completed cleanly"
+assert_contains "the final clean turn spent the last cycle" "$log" \
+	"session 3: clean turn 2 of budget 2; budget spent, quitting"
 assert_not_contains "work found is never read as completion" "$log" "work complete"
 
 fresh challenge_budget
@@ -619,7 +628,7 @@ fresh challenge_no_progress
 # is never taken for granted and the ride continues past the re-ask
 printf 'complete\nquota\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5 PI_CONTINUE_NO_PROGRESS_LIMIT=5)
-pc run claim challenged through a dead window >/dev/null 2>&1
+pc run -n 2 claim challenged through a dead window >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a quota-eaten challenge re-parks with the claim still challenged" \
 	|| bad "a quota-eaten challenge re-parks with the claim still challenged"
@@ -630,8 +639,8 @@ assert_invocation "the retry after the quota-eaten challenge re-asks the enumera
 log="$(cat "$STATE/engine.log")"
 assert_contains "the quota-eaten challenge re-parked as no progress" "$log" \
 	"session 2: no-progress quota hit 1 of 5 consecutive"
-assert_contains "the ride ended cleanly only after the re-asked challenge" "$log" \
-	"session 4: run completed cleanly"
+assert_contains "the ride ended on the budget only after the re-asked challenge" "$log" \
+	"session 4: clean turn 2 of budget 2; budget spent, quitting"
 
 fresh challenge_zeroes_streak
 # a claim session is productive (marker content ends it, whatever the
@@ -687,6 +696,57 @@ assert_eq "the second challenge confirmed and ended the ride" "4" "$(fake_calls)
 assert_contains "the ride ended on the second challenge's confirmation" \
 	"$(cat "$STATE/engine.log")" "challenge confirmed"
 
+echo "== loop rides: clean turns run back-to-back; bare resumes end ==="
+fresh loop_ride_budget
+# a prompt-carrying ride's clean marker-less turn means work remains: the
+# next session follows at once with no park, and each clean turn spends a
+# productive cycle, so the budget still ends the ride
+printf 'ok\nok\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
+pc run -n 2 loop the objective >/dev/null 2>&1
+PC_ENV=()
+wait_for 15 engine_idle && ok "a two-clean-turn budgeted ride ends on the budget" \
+	|| bad "a two-clean-turn budgeted ride ends on the budget"
+assert_eq "the second session followed the first immediately" "2" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the clean turn continued the ride without parking" "$log" \
+	"session 1: clean turn 1 of budget 2; continuing immediately with session 2"
+assert_not_contains "the clean-turn transition parks nothing" "$log" "; parking "
+assert_contains "the second clean turn spent the last cycle" "$log" \
+	"session 2: clean turn 2 of budget 2; budget spent, quitting"
+assert_invocation "the session after a clean turn resumes with the resumption note" 2 \
+	-p --session "$(ride_id)" -- "$resume_prompt"
+
+fresh loop_ride_unbounded
+# unbounded: clean turns keep the ride going until the challenge-confirmed
+# marker ends it; a clean turn never ends a prompt-carrying ride
+printf 'ok\ncomplete\ncomplete\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
+pc run loop until done >/dev/null 2>&1
+PC_ENV=()
+wait_for 15 engine_idle && ok "an unbounded ride runs past clean turns to the confirmed marker" \
+	|| bad "an unbounded ride runs past clean turns to the confirmed marker"
+assert_eq "the ride ran past the clean turn to the confirming challenge" "3" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the unbounded clean turn continues immediately" "$log" \
+	"session 1: clean turn 1; unbounded ride continues; session 2 proceeding now"
+assert_contains "the ride ended on the confirmed marker, not the clean turn" "$log" \
+	"challenge confirmed"
+assert_not_contains "a loop ride never reports a clean completion" "$log" "completed cleanly"
+
+fresh bare_resume_clean_exit
+# a bare resume ride (no prompt) keeps the old contract: a clean
+# completion ends the ride, the interrupted work being done
+printf 'ok\n' >"$FAKE_STATE/plan"
+pc run >/dev/null 2>&1
+wait_for 10 engine_idle && ok "a bare resume ends on the clean completion" \
+	|| bad "a bare resume ends on the clean completion"
+assert_eq "the bare resume ran exactly one session" "1" "$(fake_calls)"
+assert_contains "the bare resume logged the clean completion" "$(cat "$STATE/engine.log")" \
+	"session 1: run completed cleanly"
+assert_not_contains "the bare resume never spends budget on the clean exit" \
+	"$(cat "$STATE/engine.log")" "budget spent"
+
 echo "== unbounded ride =="
 fresh unbounded
 # no -n: the ride outlasts any default and ends on a challenge-confirmed
@@ -739,22 +799,23 @@ assert_eq "the slow fail ran once and the run resumed past it" "2" "$(fake_calls
 log="$(cat "$STATE/engine.log")"
 assert_contains "the at-floor slow fail spent a productive cycle" "$log" \
 	"productive quota hit 1 of budget 2; parking 0.5s"
-assert_contains "the run finished cleanly after the fallback hit" "$log" "run completed cleanly"
+assert_contains "the following clean turn spent the last cycle" "$log" \
+	"session 2: clean turn 2 of budget 2; budget spent, quitting"
 
 fresh fallback_under
 # under the floor the same fail is no-progress: the engine re-parks
-# without spending budget and still finishes cleanly
+# without spending budget and the clean turns that follow spend it
 printf 'slowquota\nok\n' >"$FAKE_STATE/plan"
 PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5 FAKE_SLOW=1.2 PI_CONTINUE_MIN_PROGRESS_SECONDS=5 PI_CONTINUE_NO_PROGRESS_LIMIT=3)
 pc run -n 2 slow start >/dev/null 2>&1
 PC_ENV=()
 wait_for 15 engine_idle && ok "a slow quota fail under the floor is no progress" \
 	|| bad "a slow quota fail under the floor is no progress"
-assert_eq "the sub-floor fail re-parked instead of spending budget" "2" "$(fake_calls)"
+assert_eq "the sub-floor fail re-parked and the clean turns followed without parking" "3" "$(fake_calls)"
 log="$(cat "$STATE/engine.log")"
 assert_contains "the sub-floor fail logged a no-progress re-park" "$log" \
 	"no-progress quota hit 1 of 3 consecutive; no budget consumed"
-assert_not_contains "no productive cycle was recorded" "$log" "productive quota hit"
+assert_not_contains "no productive quota cycle was recorded" "$log" "productive quota hit"
 
 echo "== truncation stops the ride as a non-quota failure =="
 fresh truncation
@@ -915,7 +976,7 @@ fresh failedrestart
 # a fresh run zeroes the stale count from an earlier killed ride
 printf 'ok\n' >"$FAKE_STATE/plan"
 printf '%s\n' 7 >"$STATE/failed.count"
-pc run reopen cleanly >/dev/null 2>&1
+pc run -n 1 reopen cleanly >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the reopening run completes" \
 	|| bad "the reopening run completes"
 assert_eq "the fresh start zeroed the stale failed count" "0" \
@@ -1006,7 +1067,7 @@ fresh resolve_newest
 printf 'ok\n' >"$FAKE_STATE/plan"
 touch -d '2026-03-01 12:00:00' "$GROUP_DIR/2026-01-01T00-00-00.000Z_older-id.jsonl"
 touch -d '2026-03-02 12:00:00' "$GROUP_DIR/2026-01-02T00-00-00.000Z_newest-id.jsonl"
-pc run resolve the newest >/dev/null 2>&1
+pc run -n 1 resolve the newest >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the resolution ride completes" || bad "the resolution ride completes"
 assert_eq "auto-resolution pins the newest-mtime session id" "newest-id" "$(ride_id)"
 assert_invocation "the resolved id attaches via --session" 1 \
@@ -1022,7 +1083,7 @@ home_grp="$fakehome/.pi/agent/sessions/--$(grp_name)--"
 mkdir -p "$home_grp"
 touch -d '2026-04-01 00:00:00' "$home_grp/2026-04-01T00-00-00.000Z_home-resolved.jsonl"
 env -u PI_CODING_AGENT_SESSION_DIR PI_CONTINUE_BIN="$FAKE" PI_CONTINUE_STATE_DIR="$STATE" \
-	HOME="$fakehome" "$PC" run home default >/dev/null 2>&1
+	HOME="$fakehome" "$PC" run -n 1 home default >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the default-root ride completes" || bad "the default-root ride completes"
 assert_eq "the unset env falls back to HOME/.pi/agent/sessions" "home-resolved" "$(ride_id)"
 
@@ -1077,7 +1138,7 @@ ln -s "$real_dir" "$link_dir"
 sym_grp="$SESSIONS/--$(grp_name_for "$real_dir")--"
 mkdir -p "$sym_grp"
 touch -d '2026-05-01 00:00:00' "$sym_grp/2026-05-01T00-00-00.000Z_symlink-resolved.jsonl"
-(cd "$link_dir" && pc run symlink ride) >/dev/null 2>&1
+(cd "$link_dir" && pc run -n 1 symlink ride) >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the symlinked-cwd ride completes" \
 	|| bad "the symlinked-cwd ride completes"
 assert_eq "a symlinked launch cwd resolves through to the physical group dir" \
@@ -1089,7 +1150,7 @@ fresh session_pin
 # outranks the seeded fixture, so a matching session.id proves the pin,
 # not a re-resolution
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run --session my-pin-123 fix >/dev/null 2>&1
+pc run -n 1 --session my-pin-123 fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the pinned ride completes" || bad "the pinned ride completes"
 assert_invocation "a two-token pin rides as given" 1 \
 	-p --session my-pin-123 -- "$(with_marker fix)"
@@ -1104,7 +1165,7 @@ fresh session_pin_equals
 # invocation without ever attaching (the live-pi probe below pins that);
 # canonicalization is what makes an =-form pin attach instead of die
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run --session=pin-via-equals fix >/dev/null 2>&1
+pc run -n 1 --session=pin-via-equals fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the equals-form pin ride completes" || bad "the equals-form pin ride completes"
 assert_invocation "an equals-form pin canonicalizes to the two-token wire form" 1 \
 	-p --session pin-via-equals -- "$(with_marker fix)"
@@ -1116,7 +1177,7 @@ fresh session_pin_ordering
 # (dash-leading or not), so only front placement survives a caller's
 # bare value flag like --system-prompt
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run --system-prompt --session pinned-after-bare fix >/dev/null 2>&1
+pc run -n 1 --system-prompt --session pinned-after-bare fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the bare-value-flag ride completes" || bad "the bare-value-flag ride completes"
 assert_invocation "the pin rides first, ahead of a caller's bare value flag" 1 \
 	-p --session pinned-after-bare --system-prompt -- "$(with_marker fix)"
@@ -1128,7 +1189,7 @@ fresh session_pin_duplicate
 # and the winning pin is re-emitted exactly once in the canonical
 # two-token form
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run --session pin-a --session pin-b fix >/dev/null 2>&1
+pc run -n 1 --session pin-a --session pin-b fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the duplicate-pin ride completes" \
 	|| bad "the duplicate-pin ride completes"
 assert_invocation "the last --session wins and rides exactly once as two tokens" 1 \
@@ -1180,7 +1241,7 @@ fresh session_dir_pinned
 # pin-then-dir order; the =-form is always refused even with a pin,
 # covered by session_dir_pinned_equals below
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run --session pinned-dir --session-dir "$ROOT/session_dir_pinned/sdroot" fix >/dev/null 2>&1
+pc run -n 1 --session pinned-dir --session-dir "$ROOT/session_dir_pinned/sdroot" fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the pinned session-dir ride completes" \
 	|| bad "the pinned session-dir ride completes"
 assert_invocation "a pinned --session-dir forwards verbatim" 1 \
@@ -1270,22 +1331,23 @@ assert_not_contains "a notice-only output never fires the cross-project stop" "$
 	"pinned session found in a different project"
 assert_contains "the quoted-notice session classified as a normal quota hit" "$log" \
 	"session 1: productive quota hit 1 of budget 2"
-assert_contains "the ride continued past the quoted notice and finished cleanly" "$log" \
-	"run completed cleanly"
+assert_contains "the ride continued past the quoted notice to the following clean turn's budget spend" "$log" \
+	"session 2: clean turn 2 of budget 2; budget spent, quitting"
 assert_eq "the ride reached both sessions" "2" "$(fake_calls)"
 
 fresh crossproject_aborted_only
 # a model output that merely ends in pi's Aborted. line, with no
 # notice and no fork prompt, is equally never a cross-project stop:
-# the ride reads it as a clean session and finishes
+# the ride reads it as a clean turn and the one-cycle budget ends it
 printf 'aborted_only\n' >"$FAKE_STATE/plan"
-pc run aborted output ride >/dev/null 2>&1
+pc run -n 1 aborted output ride >/dev/null 2>&1
 wait_for 10 engine_idle && ok "a bare trailing Aborted. never stops the ride" \
 	|| bad "a bare trailing Aborted. never stops the ride"
 log="$(cat "$STATE/engine.log")"
 assert_not_contains "an Aborted.-only output never fires the cross-project stop" "$log" \
 	"pinned session found in a different project"
-assert_contains "the Aborted.-only session completed cleanly" "$log" "run completed cleanly"
+assert_contains "the Aborted.-only session counted a clean turn" "$log" \
+	"session 1: clean turn 1 of budget 1; budget spent, quitting"
 assert_eq "the ride ended after its single clean session" "1" "$(fake_calls)"
 
 fresh session_pin_invalid
@@ -1380,7 +1442,7 @@ follower=""
 
 echo "== passthrough isolation =="
 fresh pass_known
-pc run --provider openai --model gpt-4o-mini --tools 'read,edit' -e ./ext.js --thinking high \
+pc run -n 1 --provider openai --model gpt-4o-mini --tools 'read,edit' -e ./ext.js --thinking high \
 	fix it now >/dev/null 2>&1
 wait_for 10 engine_idle && ok "flag-heavy run completes" || bad "flag-heavy run completes"
 assert_invocation "value flags pair with their tokens, long and short forms alike" 1 \
@@ -1388,7 +1450,7 @@ assert_invocation "value flags pair with their tokens, long and short forms alik
 	-e ./ext.js --thinking high -- "$(with_marker "fix it now")"
 
 fresh pass_equals
-pc run --model=zhipu/glm fix >/dev/null 2>&1
+pc run -n 1 --model=zhipu/glm fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "equals-form run completes" || bad "equals-form run completes"
 assert_invocation "an equals-form flag forwards verbatim as one token" 1 \
 	-p --session "$(ride_id)" --model=zhipu/glm -- "$(with_marker fix)"
@@ -1414,20 +1476,20 @@ assert_invocation "a trailing declared value flag after a passthrough flag is co
 	-p --session "$(ride_id)" --model zhipu/glm-5.3 -- "$(with_marker "fix it")"
 
 fresh pass_unknown
-pc run --bogus --nonsense=1 fix >/dev/null 2>&1
+pc run -n 1 --bogus --nonsense=1 fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown-flag run completes" || bad "unknown-flag run completes"
 assert_invocation "unknown dash tokens pass through verbatim" 1 \
 	-p --session "$(ride_id)" --bogus --nonsense=1 -- "$(with_marker fix)"
 
 fresh pass_unknown_val
-pc run --flavor spicy fix >/dev/null 2>&1
+pc run -n 1 --flavor spicy fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "unknown bare-flag run completes" \
 	|| bad "unknown bare-flag run completes"
 assert_invocation "unknown bare flags do not steal the next token" 1 \
 	-p --session "$(ride_id)" --flavor -- "$(with_marker "spicy fix")"
 
 fresh pass_dashdash
-pc run -- --weird -n 2 >/dev/null 2>&1
+pc run -n 1 -- --weird -n 2 >/dev/null 2>&1
 wait_for 10 engine_idle && ok "dash-forced prompt run completes" \
 	|| bad "dash-forced prompt run completes"
 assert_invocation "bare -- forces everything after it to be prompt" 1 \
@@ -1436,14 +1498,14 @@ assert_invocation "bare -- forces everything after it to be prompt" 1 \
 fresh pass_mode_hazard
 # pins the parser-trap guard: a rejection-hazard token after a bare --
 # rides as prompt text instead of tripping the preflight rejection
-pc run -- --mode json fix >/dev/null 2>&1
+pc run -n 1 -- --mode json fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "dash-forced rejection-hazard prompt run completes" \
 	|| bad "dash-forced rejection-hazard prompt run completes"
 assert_invocation "a --mode json after bare -- rides as prompt text" 1 \
 	-p --session "$(ride_id)" -- "$(with_marker "--mode json fix")"
 
 fresh pass_prompt_first
-pc run fix --session ID >/dev/null 2>&1
+pc run -n 1 fix --session ID >/dev/null 2>&1
 wait_for 10 engine_idle && ok "prompt-first run completes" || bad "prompt-first run completes"
 assert_invocation "flags after the first prompt word stay prompt" 1 \
 	-p --session "$(ride_id)" -- "$(with_marker "fix --session ID")"
@@ -1458,7 +1520,7 @@ assert_not_contains "the ride default never claims your quota is fresh" \
 
 fresh pass_mode_text
 # --mode text is legal: the output shape the classifiers assume
-pc run --mode text fix it >/dev/null 2>&1
+pc run -n 1 --mode text fix it >/dev/null 2>&1
 wait_for 10 engine_idle && ok "text-mode passthrough run completes" \
 	|| bad "text-mode passthrough run completes"
 assert_invocation "--mode text pairs with its value and forwards" 1 \
@@ -1466,20 +1528,20 @@ assert_invocation "--mode text pairs with its value and forwards" 1 \
 
 echo "== no model injection =="
 fresh model_absent
-pc run pin me >/dev/null 2>&1
+pc run -n 1 pin me >/dev/null 2>&1
 wait_for 10 engine_idle && ok "default run completes" || bad "default run completes"
 assert_not_contains "no model flag is ever injected by the supervisor" \
 	"$(invocation_args 1)" "--model"
 
 fresh model_explicit
-pc run --model other/model pin me >/dev/null 2>&1
+pc run -n 1 --model other/model pin me >/dev/null 2>&1
 wait_for 10 engine_idle && ok "explicit-model run completes" || bad "explicit-model run completes"
 assert_eq "an explicit --model passes through exactly once, never duplicated" \
 	"$(printf '%s\n' --model other/model)" \
 	"$(invocation_args 1 | grep -A1 '^--model$')"
 
 fresh model_explicit_equals
-pc run --model=other/model pin me >/dev/null 2>&1
+pc run -n 1 --model=other/model pin me >/dev/null 2>&1
 wait_for 10 engine_idle && ok "equals-form explicit-model run completes" \
 	|| bad "equals-form explicit-model run completes"
 assert_eq "an equals-form --model forwards verbatim, never appended to" "1" \

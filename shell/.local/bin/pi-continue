@@ -24,10 +24,20 @@
 #                                        challenge session demanding an
 #                                        enumeration of remaining work;
 #                                        the ride stops on that
-#                                        challenge's own marker, a clean
-#                                        exit, a non-quota failure, or
-#                                        (with -n) the Nth productive
-#                                        cycle; consecutive no-progress
+#                                        challenge's own marker, a
+#                                        non-quota failure, or (with -n)
+#                                        the Nth productive cycle. A
+#                                        clean exit stops a bare resume
+#                                        ride (no prompt: the
+#                                        interrupted work is done), while
+#                                        a prompt-carrying ride treats a
+#                                        clean marker-less turn as one
+#                                        productive cycle and invokes the
+#                                        next session immediately,
+#                                        parking only on quota walls, so
+#                                        it runs back-to-back sessions
+#                                        until the confirmed marker ends
+#                                        it; consecutive no-progress
 #                                        attempts (default 90,
 #                                        PI_CONTINUE_NO_PROGRESS_LIMIT to
 #                                        tune) end the ride with a
@@ -112,9 +122,10 @@
 # the classifiers treat the stamp as metadata, never as progress or a quota
 # signal. The consecutive no-progress ("failed") streak persists in
 # $STATE_DIR/failed.count, so `status` reports it mid-ride; any productive
-# session, a successful ride end (challenge-confirmed marker or clean exit),
-# and a fresh engine start zero it, and the limit-never-reset quit leaves
-# the count visible.
+# session (a prompt-carrying ride's clean marker-less turn included), a
+# successful ride end (challenge-confirmed marker or a bare resume's clean
+# exit), and a fresh engine start zero it, and the limit-never-reset quit
+# leaves the count visible.
 #
 # Flag contract: pi-continue declares its own flags in the PI_RUN_* tables
 # (-n, --follow); they are parsed and consumed anywhere in the leading flag
@@ -745,8 +756,9 @@ cmd_run() {
     split_run_args "$@" || return 2
     interpret_run_flags || return 2
     # Empty means unbounded: the ride runs until a challenge-confirmed
-    # completion marker, a clean exit, a non-quota failure, or the
-    # never-reset bound.
+    # completion marker, a non-quota failure, or the never-reset bound.
+    # A bare resume (no prompt) also stops on a clean exit, while a
+    # prompt-carrying ride continues across clean turns.
     local sessions="$run_sessions"
     local caller_prompt="${prompt_words[*]:-}"
 
@@ -839,10 +851,36 @@ cmd_run() {
         fi
 
         if [[ "$was_challenge" == false ]] && (( rc == 0 )); then
-            persist_failed 0
-            log_line "session $session: run completed cleanly"
-            printf 'pi-continue: completed cleanly (session %s)\n' "$session"
-            return 0
+            if [[ -z "$caller_prompt" ]]; then
+                persist_failed 0
+                log_line "session $session: run completed cleanly"
+                printf 'pi-continue: completed cleanly (session %s)\n' "$session"
+                return 0
+            fi
+            # A prompt-carrying ride's clean marker-less turn means work
+            # remains: only the marker says the objective is done, so
+            # the next session follows at once. The turn spends a
+            # productive cycle like any other hit, keeping -n budgets
+            # finite; only quota walls park.
+            no_progress=0
+            persist_failed "$no_progress"
+            cycles=$(( cycles + 1 ))
+            if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
+                log_line "session $session: clean turn $cycles of budget $sessions; budget spent, quitting"
+                printf 'pi-continue: budget spent (%s productive cycle(s)); quitting after clean turn %s\n' "$sessions" "$cycles"
+                return 0
+            fi
+            session=$(( session + 1 ))
+            if [[ -n "$sessions" ]]; then
+                log_line "session $(( session - 1 )): clean turn $cycles of budget $sessions; continuing immediately with session $session"
+                printf 'pi-continue: clean turn (cycle %s of %s); session %s proceeding now (pi-continue stop to cancel)\n' \
+                    "$cycles" "$sessions" "$session"
+            else
+                log_line "session $(( session - 1 )): clean turn $cycles; unbounded ride continues; session $session proceeding now"
+                printf 'pi-continue: clean turn (cycle %s); session %s proceeding now (pi-continue stop to cancel)\n' \
+                    "$cycles" "$session"
+            fi
+            continue
         fi
 
         if (( rc != 0 )) && [[ "$is_quota" != true ]]; then
