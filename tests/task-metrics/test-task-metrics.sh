@@ -508,7 +508,7 @@ done
 assert_contains "schema doc names pi's reasoning source field" "$doc" "\`usage.reasoning\`"
 for tally_field in verifier_findings_by_severity verifier_caught_defects reviewer_blocker \
 	reviewer_major reviewer_minor escaped_defects false_positives time_to_close_ms \
-	batch_cost_total source_links; do
+	batch_cost_total source_links covered_units count_basis; do
 	assert_contains "schema doc names yield-tally field $tally_field" "$doc" "\`$tally_field\`"
 done
 
@@ -995,9 +995,548 @@ assert_eq "an unknown mode exits 2" "2" "$bad_mode_rc"
 
 python3 "$EXTRACTOR" pi --help >/dev/null 2>&1; pi_help_rc=$?
 assert_eq "the pi mode answers --help after integration" "0" "$pi_help_rc"
-python3 "$EXTRACTOR" rollup >/dev/null 2>"$ROOT/oc-rollup-stderr"; rollup_rc=$?
-assert_eq "the rollup mode stays reserved" "2" "$rollup_rc"
-assert_contains "the rollup mode names its delivery slice" "$(cat "$ROOT/oc-rollup-stderr")" "ORCH-4-3-4"
+python3 "$EXTRACTOR" rollup --help >/dev/null 2>&1; rollup_help_rc=$?
+assert_eq "the rollup mode answers --help after integration" "0" "$rollup_help_rc"
+python3 "$EXTRACTOR" ac12 --help >/dev/null 2>&1; ac12_help_rc=$?
+assert_eq "the ac12 mode answers --help after integration" "0" "$ac12_help_rc"
+
+echo "== rollup mode: fixture arithmetic and emission =="
+run_rollup() { # outfile rcvar [args...]; runs the rollup, capturing records and exit
+	local out="$1" rcvar="$2"
+	shift 2
+	local rc=0
+	"$EXTRACTOR" rollup "$@" > "$out" 2> "$out.err" || rc=$?
+	printf '%s' "$rc" > "$rcvar"
+}
+
+run_rollup "$ROOT/rollup-pi.jsonl" "$ROOT/rollup-pi.rc" --ledger "$FIXTURES/pi-ledger.jsonl" \
+	--unit ORCH-4-3-1
+assert_eq "rollup over the pi fixture exits 0" "0" "$(cat "$ROOT/rollup-pi.rc")"
+assert_eq "rollup emits one unit and one batch record" "2" "$(wc -l < "$ROOT/rollup-pi.jsonl" | tr -d ' ')"
+python3 "$VALIDATOR" "$ROOT/rollup-pi.jsonl" > /dev/null 2>&1
+assert_eq "emitted rollups validate" "0" "$?"
+run_rollup "$ROOT/rollup-pi-strict.jsonl" "$ROOT/rollup-pi-strict.rc" --ledger "$FIXTURES/pi-ledger.jsonl"
+assert_eq "the strict no-unit rollup exits 0" "0" "$(cat "$ROOT/rollup-pi-strict.rc")"
+strict_gaps_rc=0
+strict_gaps="$(python3 - "$ROOT/rollup-pi-strict.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+unit = next(r for r in records if r["record_type"] == "unit_rollup")
+problems = []
+if unit["invocation_count"] != 5:
+	problems.append(f"without --unit the unit rollup counts only attributed records: {unit['invocation_count']} != 5")
+if unit["attribution_confidence_histogram"]["unattributed"] != 0:
+	problems.append("without --unit no unattributed record joins the unit rollup")
+print("\n".join(problems))
+PYEOF
+)" || strict_gaps_rc=$?
+strict_gaps="$(crash_sentinel "$strict_gaps_rc" "$strict_gaps")"
+assert_no_output "without --unit unattributed records stay out of unit rollups" "$strict_gaps"
+rollup_arith_gaps_rc=0
+rollup_arith_gaps="$(python3 - "$FIXTURES/pi-ledger.jsonl" "$FIXTURES/rollups-ledger.jsonl" "$ROOT/rollup-pi.jsonl" <<'PYEOF'
+import json, sys
+
+invocations = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+fixture_unit = next(r for r in (json.loads(l) for l in open(sys.argv[2], encoding="utf-8") if l.strip())
+	if r["record_type"] == "unit_rollup")
+records = [json.loads(l) for l in open(sys.argv[3], encoding="utf-8") if l.strip()]
+unit = next(r for r in records if r["record_type"] == "unit_rollup")
+batch = next(r for r in records if r["record_type"] == "batch_rollup")
+problems = []
+for field in ("invocation_count", "retry_count", "restart_count", "stop_reason_histogram",
+		"tokens", "nested_tokens", "cost", "duration_ms_total",
+		"attribution_confidence_histogram"):
+	if unit[field] != fixture_unit[field]:
+		problems.append(f"unit_rollup.{field}: tool {unit[field]!r} != fixture {fixture_unit[field]!r}")
+for field in ("unit_id", "batch_id"):
+	expected = "ORCH-4-3-1" if field == "unit_id" else "ORCH-4-3"
+	if unit[field] != expected:
+		problems.append(f"unit_rollup.{field}: tool {unit[field]!r} != {expected!r}")
+for field in ("unit_id", "batch_id", "generated_at"):
+	if field != "unit_id" and field not in unit:
+		problems.append(f"unit_rollup lacks {field}")
+if batch["batch_id"] != "ORCH-4-3":
+	problems.append(f"batch_rollup.batch_id: tool {batch['batch_id']!r} != ORCH-4-3")
+if batch["invocation_count"] != len(invocations):
+	problems.append(f"batch_rollup.invocation_count: tool {batch['invocation_count']} != {len(invocations)}")
+if batch["unit_count"] != 1:
+	problems.append(f"batch_rollup.unit_count: tool {batch['unit_count']} != 1 attributed unit")
+if batch["stop_reason_histogram"] != fixture_unit["stop_reason_histogram"]:
+	problems.append("batch_rollup.stop_reason_histogram does not match the fixture histogram")
+for field in ("tokens", "nested_tokens", "cost", "duration_ms_total"):
+	if batch[field] != fixture_unit[field]:
+		problems.append(f"batch_rollup.{field}: tool {batch[field]!r} != fixture {fixture_unit[field]!r}")
+if batch["budget"]["declared"] != {"tokens": None, "cost": None, "wall_clock_ms": None, "requests": None}:
+	problems.append(f"batch_rollup declared budgets without --budget: {batch['budget']['declared']!r}")
+if batch["budget"]["over_budget"] != []:
+	problems.append(f"no budgets declared but flags raised: {batch['budget']['over_budget']!r}")
+if not isinstance(unit.get("runtime_ms"), int) or unit["runtime_ms"] < 0:
+	problems.append(f"unit_rollup.runtime_ms missing or malformed: {unit.get('runtime_ms')!r}")
+if not isinstance(batch.get("runtime_ms"), int) or batch["runtime_ms"] < 0:
+	problems.append(f"batch_rollup.runtime_ms missing or malformed: {batch.get('runtime_ms')!r}")
+print("\n".join(problems))
+PYEOF
+)" || rollup_arith_gaps_rc=$?
+rollup_arith_gaps="$(crash_sentinel "$rollup_arith_gaps_rc" "$rollup_arith_gaps")"
+assert_no_output "tool rollup matches the fixture arithmetic field by field" "$rollup_arith_gaps"
+assert_contains "the digest names the batch" "$(cat "$ROOT/rollup-pi.jsonl.err")" "batch ORCH-4-3"
+
+run_rollup "$ROOT/rollup-over.jsonl" "$ROOT/rollup-over.rc" --ledger "$FIXTURES/pi-ledger.jsonl" \
+	--budget tokens=1 --budget cost=0.01 --budget wall_clock_ms=1000 --budget requests=5
+assert_eq "over-budget rollup exits 0" "0" "$(cat "$ROOT/rollup-over.rc")"
+over_flags_rc=0
+over_flags="$(python3 - "$ROOT/rollup-over.jsonl" <<'PYEOF'
+import json, sys
+batch = next(json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()
+	and json.loads(l)["record_type"] == "batch_rollup")
+flags = batch["budget"]["over_budget"]
+problems = []
+if sorted(flags) != ["cost", "requests", "tokens", "wall_clock"]:
+	problems.append(f"expected all four dimensions flagged, got {flags!r}")
+declared = batch["budget"]["declared"]
+if (declared["tokens"], declared["cost"], declared["wall_clock_ms"], declared["requests"]) != (1, 0.01, 1000, 5):
+	problems.append(f"declared budgets not carried verbatim: {declared!r}")
+print("\n".join(problems))
+PYEOF
+)" || over_flags_rc=$?
+over_flags="$(crash_sentinel "$over_flags_rc" "$over_flags")"
+assert_no_output "every exceeded dimension is flagged and declared values carry" "$over_flags"
+for dimension in tokens cost wall_clock requests; do
+	assert_contains "the digest routes over-budget($dimension)" "$(cat "$ROOT/rollup-over.jsonl.err")" "over-budget($dimension)"
+done
+
+run_rollup "$ROOT/rollup-under.jsonl" "$ROOT/rollup-under.rc" --ledger "$FIXTURES/pi-ledger.jsonl" \
+	--budget tokens=999999999 --budget cost=99999 --budget wall_clock_ms=999999999 --budget requests=999
+assert_eq "generous-budget rollup exits 0" "0" "$(cat "$ROOT/rollup-under.rc")"
+assert_contains "generous budgets flag nothing" "$(cat "$ROOT/rollup-under.jsonl")" '"over_budget":[]'
+
+run_rollup "$ROOT/rollup-partial.jsonl" "$ROOT/rollup-partial.rc" --ledger "$FIXTURES/pi-ledger.jsonl" \
+	--budget wall_clock_ms=1
+partial_flags_rc=0
+partial_flags="$(python3 - "$ROOT/rollup-partial.jsonl" <<'PYEOF'
+import json, sys
+batch = next(json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()
+	and json.loads(l)["record_type"] == "batch_rollup")
+problems = []
+if batch["budget"]["over_budget"] != ["wall_clock"]:
+	problems.append(f"expected only wall_clock flagged, got {batch['budget']['over_budget']!r}")
+if batch["budget"]["declared"]["tokens"] is not None:
+	problems.append("undeclared dimension carries a non-null declared value")
+print("\n".join(problems))
+PYEOF
+)" || partial_flags_rc=$?
+partial_flags="$(crash_sentinel "$partial_flags_rc" "$partial_flags")"
+assert_no_output "only declared dimensions flag, nulls stay null" "$partial_flags"
+
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --budget nonsense >/dev/null 2>&1
+assert_eq "a malformed --budget exits 2" "2" "$?"
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --budget speed=1 >/dev/null 2>&1
+assert_eq "an unknown --budget dimension exits 2" "2" "$?"
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --budget requests=1.5 >/dev/null 2>&1
+assert_eq "a fractional requests budget exits 2" "2" "$?"
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --frobnicate >/dev/null 2>&1
+assert_eq "an unknown rollup option exits 2" "2" "$?"
+printf '' > "$ROOT/empty-ledger.jsonl"
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/empty-ledger.jsonl" --out "$ROOT/empty-out.jsonl" >/dev/null 2>&1; empty_rollup_rc=$?
+assert_eq "an empty ledger exits 1 without writing rollups" "1" "$empty_rollup_rc"
+assert_eq "an empty rollup writes nothing" "" "$(cat "$ROOT/empty-out.jsonl")"
+
+python3 - "$ROOT/orphan-ledger.jsonl" <<'PYEOF'
+import json, sys
+record = {
+	"schema_version": "1.0", "record_type": "invocation",
+	"timestamp": "2026-11-06T10:00:00Z", "harness": "pi", "session_id": "s",
+	"message_id": "m-orphan", "agent_role": None, "model": "glm-5.3", "provider": "zai",
+	"tokens": {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "reasoning": 0},
+	"cost": {"amount": 0.01, "source": "reported"},
+	"duration_ms": 100, "stop_reason": "stop",
+	"retry": {"count": 0, "evidence": None},
+	"restart": {"of_session_id": None, "engine_log": None},
+	"nested": {"child_count": 0, "children": []},
+	"attribution": {"method": "none", "confidence": "unattributed",
+		"unit_id": None, "batch_id": None},
+}
+open(sys.argv[1], "w").write(json.dumps(record) + "\n")
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/orphan-ledger.jsonl" --out "$ROOT/orphan-out.jsonl" >/dev/null 2> "$ROOT/orphan.err"; orphan_rc=$?
+assert_eq "an all-orphan aggregation exits 1 (produced nothing)" "1" "$orphan_rc"
+assert_eq "an all-orphan aggregation writes nothing" "" "$(cat "$ROOT/orphan-out.jsonl")"
+assert_contains "the all-orphan digest names the empty aggregation" "$(cat "$ROOT/orphan.err")" "aggregation produced nothing"
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/orphan-ledger.jsonl" --unit ORCH-4-3-1 --out "$ROOT/orphan-claimed.jsonl" >/dev/null 2>&1
+assert_eq "--unit claims the orphans and the same ledger exits 0" "0" "$?"
+
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/does-not-exist.jsonl" >/dev/null 2>&1
+assert_eq "an unreadable ledger exits 2" "2" "$?"
+
+echo "== rollup mode: grouping, cursors, yield tally =="
+python3 - "$ROOT/mixed-ledger.jsonl" <<'PYEOF'
+import json, sys
+
+def invocation(record_id, timestamp, harness, unit, batch, provider="zai",
+		stop="stop", tokens=None, cost=None, source="reported"):
+	return {
+		"schema_version": "1.0", "record_type": "invocation",
+		"timestamp": timestamp, "harness": harness, "session_id": "s", "message_id": record_id,
+		"agent_role": None, "model": "glm-5.3", "provider": provider,
+		"tokens": tokens or {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "reasoning": 0},
+		"cost": {"amount": cost, "source": source},
+		"duration_ms": 100, "stop_reason": stop,
+		"retry": {"count": 0, "evidence": None},
+		"restart": {"of_session_id": None, "engine_log": None},
+		"nested": {"child_count": 0, "children": []},
+		"attribution": {"method": "none" if unit is None else "cwd-match",
+			"confidence": "unattributed" if unit is None else "exact",
+			"unit_id": unit, "batch_id": batch},
+	}
+
+records = [
+	invocation("m1", "2026-11-06T10:00:00Z", "pi", "ORCH-4-3-1", "ORCH-4-3", stop="toolUse"),
+	invocation("m2", "2026-11-06T10:01:00Z", "opencode", None, "ORCH-4-3", provider="claude-sonnet-4", stop="tool-calls"),
+	invocation("m3", "2026-11-06T10:02:00Z", "opencode", None, "ORCH-4-3", provider="glm-5.3", stop="length",
+		cost=0, source="none"),
+	invocation("m4", "2026-11-06T10:03:00Z", "pi", "ORCH-4-3-2", None),
+	invocation("m5", "2026-11-06T10:04:00Z", "pi", None, None),
+]
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+	for record in records:
+		handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/mixed-ledger.jsonl" --out "$ROOT/mixed-rollup.jsonl" 2> "$ROOT/mixed-rollup.err"
+mixed_gaps_rc=0
+mixed_gaps="$(python3 - "$ROOT/mixed-rollup.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+problems = []
+units = {r["unit_id"]: r for r in records if r["record_type"] == "unit_rollup"}
+batches = {r["batch_id"]: r for r in records if r["record_type"] == "batch_rollup"}
+if sorted(units) != ["ORCH-4-3-1", "ORCH-4-3-2"]:
+	problems.append(f"expected two unit rollups, got {sorted(units)!r}")
+if units.get("ORCH-4-3-2", {}).get("batch_id") is not None:
+	problems.append("a unit rollup without a batch carries a batch_id")
+if sorted(batches) != ["ORCH-4-3"]:
+	problems.append(f"expected one batch rollup, got {sorted(batches)!r}")
+batch = batches.get("ORCH-4-3", {})
+if batch.get("invocation_count") != 3:
+	problems.append(f"batch invocation_count {batch.get('invocation_count')} != 3 (the unbatched record stays out)")
+if batch.get("unit_count") != 1:
+	problems.append(f"batch unit_count {batch.get('unit_count')} != 1 (only ORCH-4-3-1 carries a unit)")
+histogram = batch.get("stop_reason_histogram", {})
+if histogram.get("toolUse") != 1 or histogram.get("tool-calls") != 1 or histogram.get("length") != 1:
+	problems.append(f"verbatim multi-provider histogram wrong: {histogram!r}")
+print("\n".join(problems))
+PYEOF
+)" || mixed_gaps_rc=$?
+mixed_gaps="$(crash_sentinel "$mixed_gaps_rc" "$mixed_gaps")"
+assert_no_output "mixed ledger groups units, batches, and verbatim stop reasons correctly" "$mixed_gaps"
+assert_contains "unattributed-without-batch records are named, never dropped" \
+	"$(cat "$ROOT/mixed-rollup.err")" "outside every rollup"
+python3 "$VALIDATOR" "$ROOT/mixed-rollup.jsonl" > /dev/null 2>&1
+assert_eq "mixed-ledger rollups validate" "0" "$?"
+
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/mixed-ledger.jsonl" --unit ORCH-4-3-1 \
+	--out "$ROOT/claimed-rollup.jsonl" 2> "$ROOT/claimed-rollup.err"
+claimed_gaps_rc=0
+claimed_gaps="$(python3 - "$ROOT/claimed-rollup.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+problems = []
+units = sorted(
+	[(r["unit_id"], r["batch_id"] or "", r["invocation_count"])
+		for r in records if r["record_type"] == "unit_rollup"])
+if units != [("ORCH-4-3-1", "", 1), ("ORCH-4-3-1", "ORCH-4-3", 3),
+		("ORCH-4-3-2", "", 1)]:
+	problems.append(f"claimed unit rollups wrong: {sorted(units)!r}; expected the batch strays "
+		"and the orphan claimed into ORCH-4-3-1 per batch key, unit-only record untouched")
+batch = next((r for r in records if r["record_type"] == "batch_rollup"), None)
+if batch is not None and batch.get("invocation_count") != 3:
+	problems.append("--unit does not change batch totals")
+print("\n".join(problems))
+PYEOF
+)" || claimed_gaps_rc=$?
+claimed_gaps="$(crash_sentinel "$claimed_gaps_rc" "$claimed_gaps")"
+assert_no_output "--unit claims unattributed records without touching others" "$claimed_gaps"
+python3 "$VALIDATOR" "$ROOT/claimed-rollup.jsonl" > /dev/null 2>&1
+assert_eq "the claimed rollup validates" "0" "$?"
+
+printf '{"schema_version":"1.0","record_type":"unit_rollup","unit_id":"stale","batch_id":null,"generated_at":"2026-11-06T10:00:00Z","invocation_count":0,"retry_count":0,"restart_count":0,"stop_reason_histogram":{},"tokens":{"input":0,"output":0,"cache_read":0,"cache_write":0,"reasoning":0},"nested_tokens":{"input":0,"output":0,"cache_read":0,"cache_write":0},"cost":{"amount_sum":null,"reported_count":0,"unreported_count":0},"duration_ms_total":0,"attribution_confidence_histogram":{"exact":0,"window":0,"unattributed":0}}\n' > "$ROOT/polluted-ledger.jsonl"
+cat "$ROOT/mixed-ledger.jsonl" >> "$ROOT/polluted-ledger.jsonl"
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/polluted-ledger.jsonl" --out "$ROOT/polluted-rollup.jsonl" 2> "$ROOT/polluted-rollup.err"
+assert_eq "a mixed-type ledger still exits 0" "0" "$?"
+assert_contains "the non-invocation record is named and skipped" "$(cat "$ROOT/polluted-rollup.err")" "not an invocation"
+assert_contains "skipped rollup arithmetic unaffected" "$(cat "$ROOT/polluted-rollup.err")" "1 non-invocation"
+mixed_gaps_rc=0
+mixed_gaps="$(python3 - "$ROOT/polluted-rollup.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+if any(r.get("unit_id") == "stale" for r in records):
+	print("the stale unit_rollup record leaked into the rollup output")
+PYEOF
+)" || mixed_gaps_rc=$?
+mixed_gaps="$(crash_sentinel "$mixed_gaps_rc" "$mixed_gaps")"
+assert_no_output "prior rollup records never double count" "$mixed_gaps"
+
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --update-cursor "$ROOT/cursor.json" >/dev/null 2>&1
+assert_eq "cursor-updating rollup exits 0" "0" "$?"
+expected_pi_ms_rc=0
+expected_pi_ms="$(python3 - "$FIXTURES/pi-ledger.jsonl" <<'PYEOF'
+import json, sys
+from datetime import datetime
+best = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+	record = json.loads(line)
+	if record["harness"] != "pi":
+		continue
+	moment = int(datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
+	best = max(best, moment)
+print(best)
+PYEOF
+)" || expected_pi_ms_rc=$?
+expected_pi_ms="$(crash_sentinel "$expected_pi_ms_rc" "$expected_pi_ms")"
+assert_eq "the pi cursor is the pi high-water timestamp" "$expected_pi_ms" \
+	"$(python3 - "$ROOT/cursor.json" <<'PYEOF'
+import json, sys
+print(json.load(open(sys.argv[1]))["pi"])
+PYEOF
+)"
+assert_eq "the opencode cursor stays absent on a pi-only ledger" "" \
+	"$(python3 - "$ROOT/cursor.json" <<'PYEOF'
+import json, sys
+print(json.load(open(sys.argv[1])).get("opencode", ""))
+PYEOF
+)"
+printf '%s\n' "$expected_pi_ms" > "$ROOT/cursor-printed"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor.json" --harness pi > "$ROOT/cursor-printed" 2>/dev/null
+assert_eq "--print-cursor prints the bare epoch ms" "$expected_pi_ms" "$(cat "$ROOT/cursor-printed")"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor.json" > "$ROOT/cursor-json" 2>/dev/null
+assert_contains "--print-cursor without --harness prints the JSON" "$(cat "$ROOT/cursor-json")" '"pi":'
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor.json" --harness opencode >/dev/null 2>&1
+assert_eq "an absent harness cursor exits 2" "2" "$?"
+printf 'not json at all\n' > "$ROOT/cursor-corrupt.json"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor-corrupt.json" --harness pi >/dev/null 2> "$ROOT/cursor-corrupt.err"; corrupt_cursor_rc=$?
+assert_eq "a present-but-corrupt cursor file exits 2" "2" "$corrupt_cursor_rc"
+assert_contains "a corrupt cursor file warns instead of silent state loss" \
+	"$(cat "$ROOT/cursor-corrupt.err")" "present but unreadable"
+printf '["pi"]\n' > "$ROOT/cursor-array.json"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor-array.json" --harness pi >/dev/null 2> "$ROOT/cursor-array.err"
+assert_eq "a non-object cursor file exits 2" "2" "$?"
+assert_contains "a non-object cursor file warns" "$(cat "$ROOT/cursor-array.err")" "not a JSON object"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor-absent-probe.json" --harness pi >/dev/null 2> "$ROOT/cursor-absent.err"; absent_cursor_rc=$?
+assert_eq "an absent cursor file exits 2 with no value" "2" "$absent_cursor_rc"
+assert_contains "an absent cursor file starts fresh silently" "$(cat "$ROOT/cursor-absent.err")" "carries no pi value"
+assert_not_contains "an absent cursor file does not fire the corrupt warning" \
+	"$(cat "$ROOT/cursor-absent.err")" "starting fresh"
+python3 "$EXTRACTOR" rollup --print-cursor "$ROOT/cursor.json" --harness pi --ledger "$FIXTURES/pi-ledger.jsonl" >/dev/null 2>&1
+assert_eq "--print-cursor combined with --ledger exits 2" "2" "$?"
+printf '{"pi": 9999999999999}\n' > "$ROOT/cursor-high.json"
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/mixed-ledger.jsonl" --update-cursor "$ROOT/cursor-high.json" >/dev/null 2>&1
+assert_eq "cursor merge run exits 0" "0" "$?"
+assert_eq "the cursor merge is monotonic (never moves back)" "9999999999999" \
+	"$(python3 - "$ROOT/cursor-high.json" <<'PYEOF'
+import json, sys
+print(json.load(open(sys.argv[1]))["pi"])
+PYEOF
+)"
+
+python3 - "$ROOT/tally.json" <<'PYEOF'
+import json, sys
+tally = {
+	"verifier_findings_by_severity": {"blocker": 0, "major": 1, "minor": 3},
+	"verifier_caught_defects": 2,
+	"reviewer_blocker": 0,
+	"reviewer_major": 1,
+	"reviewer_minor": 2,
+	"escaped_defects": 0,
+	"false_positives": 1,
+	"time_to_close_ms": 5400000,
+	"batch_cost_total": 1.204,
+	"source_links": ["../reports/example.md/01-recon.md"],
+	"covered_units": ["ORCH-4-3-1"],
+	"count_basis": {
+		"verifier_findings_by_severity": "suite red run, fixture pin",
+		"verifier_caught_defects": "suite red run",
+		"reviewer_blocker": "review report",
+		"reviewer_major": "review report",
+		"reviewer_minor": "review report",
+		"escaped_defects": "no post-PASS entries",
+		"false_positives": "review report",
+	},
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally.json" --out "$ROOT/tally-rollup.jsonl" >/dev/null 2>&1
+assert_eq "yield-tally rollup exits 0" "0" "$?"
+python3 "$VALIDATOR" "$ROOT/tally-rollup.jsonl" > /dev/null 2>&1
+assert_eq "a yield-tally batch rollup validates" "0" "$?"
+tally_gaps_rc=0
+tally_gaps="$(python3 - "$ROOT/tally-rollup.jsonl" "$ROOT/tally.json" <<'PYEOF'
+import json, sys
+batch = next(json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()
+	and json.loads(l)["record_type"] == "batch_rollup")
+expected = json.load(open(sys.argv[2]))
+if batch.get("yield_tally") != expected:
+	print(f"embedded tally {batch.get('yield_tally')!r} != the file's {expected!r}")
+PYEOF
+)" || tally_gaps_rc=$?
+tally_gaps="$(crash_sentinel "$tally_gaps_rc" "$tally_gaps")"
+assert_no_output "the yield tally embeds verbatim" "$tally_gaps"
+python3 - "$ROOT/tally-nolinks.json" <<'PYEOF'
+import json, sys
+tally = json.load(open(sys.argv[1].replace("nolinks", ""))) if False else {
+	"verifier_findings_by_severity": {}, "verifier_caught_defects": 0,
+	"reviewer_blocker": 0, "reviewer_major": 0, "reviewer_minor": 0,
+	"escaped_defects": 0, "false_positives": 0, "time_to_close_ms": None,
+	"batch_cost_total": None, "source_links": [],
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally-nolinks.json" >/dev/null 2>&1
+assert_eq "a tally without source links exits 2" "2" "$?"
+python3 - "$ROOT/tally-nocovered.json" <<'PYEOF'
+import json, sys
+tally = {
+	"verifier_findings_by_severity": {"major": 1},
+	"verifier_caught_defects": 1,
+	"reviewer_blocker": 0, "reviewer_major": 1, "reviewer_minor": 0,
+	"escaped_defects": 0, "false_positives": 0, "time_to_close_ms": None,
+	"batch_cost_total": None, "source_links": ["../reports/example.md/01-recon.md"],
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally-nocovered.json" >/dev/null 2>&1
+assert_eq "a tally without covered_units exits 2" "2" "$?"
+python3 - "$ROOT/tally-emptycovered.json" <<'PYEOF'
+import json, sys
+tally = {
+	"verifier_findings_by_severity": {"major": 1},
+	"verifier_caught_defects": 1,
+	"reviewer_blocker": 0, "reviewer_major": 1, "reviewer_minor": 0,
+	"escaped_defects": 0, "false_positives": 0, "time_to_close_ms": None,
+	"batch_cost_total": None, "source_links": ["../reports/example.md/01-recon.md"],
+	"covered_units": [],
+	"count_basis": {field: "board entry" for field in (
+		"verifier_findings_by_severity", "verifier_caught_defects", "reviewer_blocker",
+		"reviewer_major", "reviewer_minor", "escaped_defects", "false_positives")},
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally-emptycovered.json" >/dev/null 2>&1
+assert_eq "a tally with an empty covered_units list exits 2" "2" "$?"
+python3 - "$ROOT/tally-nobasis.json" <<'PYEOF'
+import json, sys
+tally = {
+	"verifier_findings_by_severity": {"major": 1},
+	"verifier_caught_defects": 1,
+	"reviewer_blocker": 0, "reviewer_major": 1, "reviewer_minor": 0,
+	"escaped_defects": 0, "false_positives": 0, "time_to_close_ms": None,
+	"batch_cost_total": None, "source_links": ["../reports/example.md/01-recon.md"],
+	"covered_units": ["ORCH-4-3-1"],
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally-nobasis.json" >/dev/null 2>&1
+assert_eq "a tally without count_basis exits 2" "2" "$?"
+python3 - "$ROOT/tally-emptybasis.json" <<'PYEOF'
+import json, sys
+tally = {
+	"verifier_findings_by_severity": {"major": 1},
+	"verifier_caught_defects": 1,
+	"reviewer_blocker": 0, "reviewer_major": 1, "reviewer_minor": 0,
+	"escaped_defects": 0, "false_positives": 0, "time_to_close_ms": None,
+	"batch_cost_total": None, "source_links": ["../reports/example.md/01-recon.md"],
+	"covered_units": ["ORCH-4-3-1"],
+	"count_basis": {
+		"verifier_findings_by_severity": "suite red run",
+		"verifier_caught_defects": "suite red run",
+		"reviewer_blocker": "review report",
+		"reviewer_major": "review report",
+		"reviewer_minor": "review report",
+		"escaped_defects": "no post-PASS entries",
+		"false_positives": "",
+	},
+}
+open(sys.argv[1], "w").write(json.dumps(tally))
+PYEOF
+python3 "$EXTRACTOR" rollup --ledger "$FIXTURES/pi-ledger.jsonl" --yield-tally "$ROOT/tally-emptybasis.json" >/dev/null 2>&1
+assert_eq "a tally with an empty basis note exits 2" "2" "$?"
+
+echo "== ac12 mode: snapshot emission =="
+python3 - "$ROOT/ac12-results.json" <<'PYEOF'
+import json, sys
+families = {}
+for family in ("read_latency", "context_token_cost", "command_failures",
+		"retrieval_completeness", "permission_denials"):
+	families[family] = {
+		"method": "probe method for " + family,
+		"source": "probe source for " + family,
+		"values": {"sample": 3},
+		"notes": None,
+	}
+families["retrieval_completeness"]["values"] = {"q1": 1, "q2": 1, "q3": 0, "q4": 1, "q5": None}
+open(sys.argv[1], "w").write(json.dumps({"families": families}))
+PYEOF
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-results.json" --phase before --harness pi --out "$ROOT/ac12-snapshot.jsonl" 2> "$ROOT/ac12-snapshot.err"
+assert_eq "ac12 emission exits 0" "0" "$?"
+assert_eq "ac12 emits one record" "1" "$(wc -l < "$ROOT/ac12-snapshot.jsonl" | tr -d ' ')"
+python3 "$VALIDATOR" "$ROOT/ac12-snapshot.jsonl" > /dev/null 2>&1
+assert_eq "the emitted snapshot validates" "0" "$?"
+snapshot_gaps_rc=0
+snapshot_gaps="$(python3 - "$ROOT/ac12-snapshot.jsonl" <<'PYEOF'
+import json, sys
+record = json.loads(open(sys.argv[1]).read().splitlines()[0])
+problems = []
+if record.get("record_type") != "ac12_snapshot":
+	problems.append(f"record_type {record.get('record_type')!r} != ac12_snapshot")
+if record.get("phase") != "before" or record.get("harness") != "pi":
+	problems.append("phase and harness not carried verbatim")
+families = record.get("families", {})
+expected = {"read_latency", "context_token_cost", "command_failures",
+	"retrieval_completeness", "permission_denials"}
+if set(families) != expected:
+	problems.append(f"families {sorted(families)!r} != the contract's five")
+if families.get("retrieval_completeness", {}).get("values", {}).get("q5") is not None:
+	problems.append("a null probe value was not carried as null")
+print("\n".join(problems))
+PYEOF
+)" || snapshot_gaps_rc=$?
+snapshot_gaps="$(crash_sentinel "$snapshot_gaps_rc" "$snapshot_gaps")"
+assert_no_output "the snapshot carries phase, harness, and the five families" "$snapshot_gaps"
+
+python3 - "$ROOT/ac12-incomplete.json" <<'PYEOF'
+import json, sys
+families = {family: {"method": "m", "source": "s", "values": {}, "notes": None}
+	for family in ("read_latency", "context_token_cost", "command_failures",
+		"retrieval_completeness", "permission_denials")}
+del families["read_latency"]
+open(sys.argv[1], "w").write(json.dumps({"families": families}))
+PYEOF
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-incomplete.json" --phase before --harness pi >/dev/null 2>&1
+assert_eq "a snapshot missing a family exits 2" "2" "$?"
+python3 - "$ROOT/ac12-extra.json" <<'PYEOF'
+import json, sys
+families = {family: {"method": "m", "source": "s", "values": {}, "notes": None}
+	for family in ("read_latency", "context_token_cost", "command_failures",
+		"retrieval_completeness", "permission_denials")}
+families["wall_clock"] = {"method": "m", "source": "s", "values": {}, "notes": None}
+open(sys.argv[1], "w").write(json.dumps({"families": families}))
+PYEOF
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-extra.json" --phase before --harness pi >/dev/null 2>&1
+assert_eq "a snapshot with an unknown family exits 2" "2" "$?"
+python3 - "$ROOT/ac12-badvalue.json" <<'PYEOF'
+import json, sys
+families = {family: {"method": "m", "source": "s", "values": {}, "notes": None}
+	for family in ("read_latency", "context_token_cost", "command_failures",
+		"retrieval_completeness", "permission_denials")}
+families["read_latency"]["values"]["p50_ms"] = "fast"
+open(sys.argv[1], "w").write(json.dumps({"families": families}))
+PYEOF
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-badvalue.json" --phase before --harness pi >/dev/null 2>&1
+assert_eq "a non-numeric metric value exits 2" "2" "$?"
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-results.json" --phase midway --harness pi >/dev/null 2>&1
+assert_eq "an unknown phase exits 2" "2" "$?"
+python3 "$EXTRACTOR" ac12 --results "$ROOT/ac12-results.json" --phase before --harness claude >/dev/null 2>&1
+assert_eq "an unknown harness exits 2" "2" "$?"
+python3 "$EXTRACTOR" ac12 --results "$ROOT/does-not-exist.json" --phase before --harness pi >/dev/null 2>&1
+assert_eq "an unreadable results file exits 2" "2" "$?"
 
 echo "== make wiring =="
 grep -Eq '^test:.*(^| )test-task-metrics( |$)' "$MAKEFILE" \

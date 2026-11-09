@@ -82,7 +82,7 @@ The budget object records the batch's declared soft budgets and the flags raised
 
 A dimension may appear in `over_budget` only when its declared value is non-null and its actual exceeds it; the validator enforces this flag-side consistency. Flagging every exceeded dimension is the rollup tool's duty and is tested at ORCH-4-3-4. Overages are routed, never enforced: each flag is emitted as `over-budget(<dimension>)` in the digest and the batch task's Work Log, and routes to manager investigation or user escalation. No code path in the measurement tool terminates processes, edits task state, or gates closure; the runner usage-limit park and restart remains the only hard tripwire (parent Decision Log, "Soft budgets investigate or escalate, never terminate").
 
-The yield-tally object is optional (absent until a batch's tally is compiled) and fully typed when present, per artifact 20 DC1 refined by artifact 27 Q11. Every count names its source report link in `source_links`, which must carry at least one entry.
+The yield-tally object is optional (absent until a batch's tally is compiled) and fully typed when present, per artifact 20 DC1 refined by artifact 27 Q11. Every count names its source report link in `source_links`, which must carry at least one entry. The tally also names its scope and derivability: `covered_units` is a non-empty list of unit ids the counts were compiled over, and `count_basis` maps every counted field (`verifier_findings_by_severity` plus the six count fields) to a non-empty note naming the board entries the count came from; the rollup refuses to embed a tally missing either.
 
 | Field | Meaning |
 |---|---|

@@ -270,6 +270,41 @@ assert_no_output "batch-less extraction leaves batch_id null" "$nobatch_gaps"
 python3 "$VALIDATOR" "$ROOT/plain.jsonl" >/dev/null 2>&1
 assert_eq "batch-stamped single record validates" "0" "$?"
 
+echo "== unattached subagent result group warns and is counted ==="
+rm -rf "$ROOT/unattached-store"
+mkdir -p "$ROOT/unattached-store/sessions"
+printf '%s\n' \
+	'{"type":"session","version":3,"id":"ddd00004-0000-0000-0000-000000000004","timestamp":"2026-11-06T17:00:00.000Z","cwd":"/tmp/unattached"}' \
+	'{"type":"message","id":"u-d-0001","parentId":null,"timestamp":"2026-11-06T17:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Dispatch work."}]}}' \
+	'{"type":"message","id":"m-d-0001","parentId":"u-d-0001","timestamp":"2026-11-06T17:00:10.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3","stopReason":"toolUse","durationMs":9000,"usage":{"input":100,"output":20,"cacheRead":30,"cacheWrite":0,"reasoning":2,"cost":{"total":0.0002}},"content":[{"type":"toolCall","id":"tc-d-1","name":"subagent","arguments":{"task":"work"}}]}}' \
+	'{"type":"message","id":"m-d-0002","parentId":"u-d-0001","timestamp":"2026-11-06T17:00:20.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3","stopReason":"stop","durationMs":5000,"usage":{"input":110,"output":10,"cacheRead":30,"cacheWrite":0,"reasoning":0,"cost":{"total":0.0001}},"content":[]}}' \
+	'{"type":"message","id":"t-d-orphan","parentId":"u-d-0001","timestamp":"2026-11-06T17:00:30.000Z","message":{"role":"toolResult","toolCallId":"tc-d-orphan","toolName":"subagent","isError":false,"durationMs":4000,"content":[{"type":"text","text":"orphan result"}],"details":{"mode":"json","agentScope":"project","results":[{"agent":"lost","agentSource":"user","task":"work","exitCode":0,"stopReason":"stop","model":"glm-5.3","usage":{"input":10,"output":5,"cacheRead":10,"cacheWrite":0,"cost":0.0001,"contextTokens":40,"turns":1},"messages":[]}]}}}' \
+	> "$ROOT/unattached-store/sessions/2026-11-06T17-00-00-000Z_ddd00004-0000-0000-0000-000000000004.jsonl"
+: > "$ROOT/unattached-empty.log"
+run_extractor "$ROOT/unattached.jsonl" "$ROOT/unattached.rc" \
+	--session-dir "$ROOT/unattached-store/sessions" --engine-log "$ROOT/unattached-empty.log"
+assert_eq "an unattached result group does not fail extraction" "0" "$(cat "$ROOT/unattached.rc")"
+assert_contains "an unattached group warns naming its source entry" "$(cat "$ROOT/unattached.jsonl.err")" \
+	"entry t-d-orphan subagent result group resolves under neither"
+assert_contains "the summary names the unattached count" "$(cat "$ROOT/unattached.jsonl.err")" \
+	"1 unattached subagent group(s)"
+unattached_children="$(python3 - "$ROOT/unattached.jsonl" <<'PYEOF'
+import json, sys
+
+problems = []
+for line in open(sys.argv[1], encoding="utf-8"):
+	record = json.loads(line)
+	if record["nested"]["child_count"] != 0 or record["nested"]["children"]:
+		problems.append(f"{record['message_id']}: an unattached group leaked into nested children")
+print("\n".join(problems))
+PYEOF
+)"
+assert_no_output "an unattached group contributes no nested children" "$unattached_children"
+assert_eq "both assistant records still emit past the unattached group" "2" \
+	"$(wc -l < "$ROOT/unattached.jsonl" | tr -d ' ')"
+python3 "$VALIDATOR" "$ROOT/unattached.jsonl" >/dev/null 2>&1
+assert_eq "unattached-group output validates" "0" "$?"
+
 echo "== engine.log absence leaves restarts null =="
 default_rc=0
 PI_CONTINUE_STATE_DIR="$ROOT/quiet-state" "$EXTRACTOR" pi --session-dir "$SESSIONS" \

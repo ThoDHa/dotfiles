@@ -15,15 +15,22 @@ concentration lesson). Modes:
       subagent toolResult details, pi-continue engine.log) into the same
       ledger contract.
   task-metrics rollup [options]
-      Reserved: aggregation, soft-budget flags, and digest emission land
-      with ORCH-4-3-4.
+      Aggregate invocation ledger records into unit_rollup and
+      batch_rollup records (schema 1.0): per-unit and per-batch sums,
+      stop-reason histograms, soft-budget flags routed as
+      over-budget(<dimension>) (investigate or escalate, never
+      terminate), optional verification-yield tally embedding,
+      incremental-extraction cursor files, and self-reported runtime.
+  task-metrics ac12 [options]
+      Emit an ac12_snapshot record (schema 1.0) from an AC-12 probe
+      results file carrying the five metric families.
 
 Extraction is read-only against the live store: records append to
 --output/--out (default stdout) as JSONL in extraction order. Malformed
 store rows warn on stderr and are skipped, never silently dropped; the
 stderr summary names the counts. Exit ladder per mode: 0 records
-written, 1 extraction produced nothing (an empty ledger is
-contract-invalid), 2 usage or IO error.
+written, 1 extraction or aggregation produced nothing (an empty ledger
+is contract-invalid), 2 usage or IO error.
 
 oc mode derivation contract:
 
@@ -120,6 +127,57 @@ without JSON1 serve the tool; SQL filters stay on plain columns.
 Standard library only, python3 rather than jq because the bootstrap
 container installs python3 but not jq; sqlite is read through the
 stdlib module for the same reason, matching validate-ledger.py.
+
+rollup mode aggregation contract:
+
+- Input is a ledger of invocation records (extractor output). Records
+  of any other type, and malformed lines, warn and are skipped with the
+  count named on stderr, so a mixed ledger cannot double count.
+- Records with an attribution.unit_id form unit rollups keyed by
+  (unit_id, batch_id); records with an attribution.batch_id form one
+  batch rollup per batch. --unit ID declares the pass's territory: any
+  record whose attribution carries no unit counts toward the declared
+  unit's rollup instead of vanishing (the per-unit extraction-pass
+  form the rollups fixture pins). Without it, unattributed records
+  appear only in their batch's totals, and a record carrying neither
+  unit nor batch is named on stderr, never silently dropped.
+- Sums: tokens over the five contract fields (null reasoning
+  contributes 0), nested_tokens over each nested child's four token
+  fields, retry_count over retry.count, duration_ms_total over non-null
+  durations, restart_count counting records carrying restart evidence
+  (either field, per the contract's stand-alone rule), and
+  cost.amount_sum over reported amounts only, null when nothing was
+  reported. Stop reasons stay verbatim per record; cross-harness
+  grouping by semantic class is the consumer's duty (ORCH-4-7).
+- Budgets: --budget dimension=value declares a batch's soft budgets;
+  a dimension is flagged in budget.over_budget, and emitted as
+  over-budget(<dimension>) in the digest, only when its declared value
+  is non-null and its actual exceeds it. Actuals are pinned by the
+  contract: tokens compares tokens.input + tokens.output (cache traffic
+  excluded), cost compares cost.amount_sum (a null sum never flags),
+  wall_clock compares duration_ms_total, requests compares
+  invocation_count. Flags route to manager investigation or user
+  escalation; no code path terminates processes or edits task state.
+- --yield-tally FILE embeds the batch's verification-yield tally
+  (artifact 20 DC1) in every emitted batch rollup; the file must carry
+  every contract field including at least one source link.
+- --update-cursor FILE writes the per-harness high-water invocation
+  timestamps (pi, opencode) of the rolled ledger, merged monotonically
+  over any existing file, so the next oc extraction can pass its stored
+  value as --since; --print-cursor FILE prints the stored cursor JSON,
+  or the bare epoch-milliseconds value for --harness NAME.
+- Every emitted record carries the additive runtime_ms field naming the
+  aggregation pass's own wall time, and generated_at stamps the pass.
+
+ac12 mode contract:
+
+- --results FILE carries {"families": {...}} with exactly the five
+  contract families (read_latency, context_token_cost,
+  command_failures, retrieval_completeness, permission_denials), each
+  {method, source, values, notes} where values maps metric names to
+  numbers or null. The mode validates the shape, stamps generated_at,
+  phase, and harness, and emits the ac12_snapshot record; the probe
+  measurement protocol itself lives in tests/task-metrics/ac12-probe-spec.md.
 """
 
 import argparse
@@ -150,17 +208,34 @@ TASK_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+(?:-\d+)+)\b")
 PI_SESSION_ROOT = "~/.pi/agent/sessions"
 PI_CONTINUE_STATE_DIR = "~/.local/share/pi/pi-continue"
 
-MODES = ("oc", "pi", "rollup")
+MODES = ("oc", "pi", "rollup", "ac12")
+
+BUDGET_DIMENSIONS = ("tokens", "cost", "wall_clock", "requests")
+BUDGET_DECLARED_KEYS = {"tokens": "tokens", "cost": "cost",
+	"wall_clock": "wall_clock_ms", "requests": "requests"}
+BUDGET_FLAG_NAMES = ("tokens", "cost", "wall_clock_ms", "requests")
+TOKEN_SUM_FIELDS = ("input", "output", "cache_read", "cache_write", "reasoning")
+NESTED_TOKEN_SUM_FIELDS = ("input", "output", "cache_read", "cache_write")
+CONFIDENCE_CLASSES = ("exact", "window", "unattributed")
+CURSOR_HARNESSES = ("pi", "opencode")
+AC12_FAMILIES = ("read_latency", "context_token_cost", "command_failures",
+	"retrieval_completeness", "permission_denials")
+AC12_PHASES = ("before", "after")
+YIELD_TALLY_COUNT_FIELDS = ("verifier_caught_defects", "reviewer_blocker",
+	"reviewer_major", "reviewer_minor", "escaped_defects", "false_positives")
+YIELD_TALLY_BASIS_FIELDS = ("verifier_findings_by_severity",) + YIELD_TALLY_COUNT_FIELDS
 
 USAGE_TEXT = """usage: task-metrics <mode> [options]
 
 Modes:
   oc       Extract opencode.db into invocation ledger records (schema 1.0)
   pi       Extract a pi session store into invocation ledger records (schema 1.0)
-  rollup   Reserved for aggregation, budget flags, digests (ORCH-4-3-4)
+  rollup   Aggregate invocation records into unit/batch rollups with
+           soft-budget flags and digests (schema 1.0)
+  ac12     Emit an ac12_snapshot record from AC-12 probe results
 
 Run `task-metrics <mode> --help` for a mode's options and the
-derivation contract the extraction follows.
+contract the mode follows.
 """
 
 
@@ -1227,6 +1302,646 @@ def run_oc(argv):
 		return 2
 
 
+def new_rollup_accumulator():
+	"""An empty aggregate for one unit or batch, in the contract's field order."""
+	return {
+		"invocation_count": 0,
+		"retry_count": 0,
+		"restart_count": 0,
+		"stop_reason_histogram": {},
+		"tokens": {name: 0 for name in TOKEN_SUM_FIELDS},
+		"nested_tokens": {name: 0 for name in NESTED_TOKEN_SUM_FIELDS},
+		"cost_amount_sum": None,
+		"cost_reported": 0,
+		"cost_unreported": 0,
+		"duration_ms_total": 0,
+		"attribution_confidence_histogram": {name: 0 for name in CONFIDENCE_CLASSES},
+		"unit_ids": set(),
+		"unit_invocation_counts": {},
+	}
+
+
+def sum_tokens_field(source_tokens, name):
+	"""One contract token field summed safely: absent, null, or non-integer counts contribute 0."""
+	if isinstance(source_tokens, dict) and is_count(source_tokens.get(name)):
+		return source_tokens[name]
+	return 0
+
+
+def accumulate_invocation(accumulator, record, label):
+	"""Fold one invocation record into an accumulator.
+
+	Permissive on absent fields (they contribute zero) but loud on
+	anything that would distort a sum: unusable cost amounts, records
+	without a usable stop reason, and unclassifiable confidences all
+	warn so the digest can be traced back to its inputs.
+	"""
+	accumulator["invocation_count"] += 1
+	retry = record.get("retry")
+	if isinstance(retry, dict) and is_count(retry.get("count")):
+		accumulator["retry_count"] += retry["count"]
+	restart = record.get("restart")
+	if isinstance(restart, dict) and (restart.get("of_session_id") is not None
+			or restart.get("engine_log") is not None):
+		accumulator["restart_count"] += 1
+	stop_reason = record.get("stop_reason")
+	if isinstance(stop_reason, str) and stop_reason:
+		histogram = accumulator["stop_reason_histogram"]
+		histogram[stop_reason] = histogram.get(stop_reason, 0) + 1
+	else:
+		warn(f"{label}: invocation without a usable stop_reason, excluded from the histogram")
+	tokens = record.get("tokens")
+	for name in TOKEN_SUM_FIELDS:
+		accumulator["tokens"][name] += sum_tokens_field(tokens, name)
+	nested = record.get("nested")
+	children = nested.get("children", []) if isinstance(nested, dict) else []
+	if not isinstance(children, list):
+		children = []
+	for child in children:
+		child_tokens = child.get("tokens") if isinstance(child, dict) else None
+		for name in NESTED_TOKEN_SUM_FIELDS:
+			accumulator["nested_tokens"][name] += sum_tokens_field(child_tokens, name)
+	cost = record.get("cost")
+	if isinstance(cost, dict) and cost.get("source") == "reported":
+		accumulator["cost_reported"] += 1
+		amount = cost.get("amount")
+		if is_amount(amount):
+			accumulator["cost_amount_sum"] = (accumulator["cost_amount_sum"] or 0.0) + amount
+		else:
+			warn(f"{label}: reported cost without a usable amount, contributing zero to the sum")
+	else:
+		accumulator["cost_unreported"] += 1
+	duration = record.get("duration_ms")
+	if is_count(duration):
+		accumulator["duration_ms_total"] += duration
+	attribution = record.get("attribution")
+	if isinstance(attribution, dict):
+		confidence = attribution.get("confidence")
+		if confidence in accumulator["attribution_confidence_histogram"]:
+			accumulator["attribution_confidence_histogram"][confidence] += 1
+		else:
+			warn(f"{label}: attribution confidence {confidence!r} outside the contract classes, unclassified")
+		unit_id = attribution.get("unit_id")
+		if isinstance(unit_id, str) and unit_id:
+			accumulator["unit_ids"].add(unit_id)
+			accumulator["unit_invocation_counts"][unit_id] = \
+				accumulator["unit_invocation_counts"].get(unit_id, 0) + 1
+	else:
+		warn(f"{label}: invocation without an attribution object, no attribution class recorded")
+
+
+def evaluate_budget_flags(declared, accumulator):
+	"""The over_budget dimensions: declared non-null and actual exceeds it.
+
+	Actuals are the contract's pinned comparisons; a null actual (no
+	reported cost) never flags its dimension.
+	"""
+	actuals = {
+		"tokens": accumulator["tokens"]["input"] + accumulator["tokens"]["output"],
+		"cost": accumulator["cost_amount_sum"],
+		"wall_clock": accumulator["duration_ms_total"],
+		"requests": accumulator["invocation_count"],
+	}
+	return [dimension for dimension in BUDGET_DIMENSIONS
+		if declared.get(BUDGET_DECLARED_KEYS[dimension]) is not None
+		and actuals[dimension] is not None
+		and actuals[dimension] > declared[BUDGET_DECLARED_KEYS[dimension]]]
+
+
+def build_unit_rollup(unit_id, batch_id, accumulator, generated_at, runtime_ms):
+	"""One unit_rollup record from an accumulator (schema 1.0 plus the additive runtime_ms)."""
+	return {
+		"schema_version": SCHEMA_VERSION,
+		"record_type": "unit_rollup",
+		"unit_id": unit_id,
+		"batch_id": batch_id,
+		"generated_at": generated_at,
+		"invocation_count": accumulator["invocation_count"],
+		"retry_count": accumulator["retry_count"],
+		"restart_count": accumulator["restart_count"],
+		"stop_reason_histogram": dict(sorted(accumulator["stop_reason_histogram"].items())),
+		"tokens": dict(accumulator["tokens"]),
+		"nested_tokens": dict(accumulator["nested_tokens"]),
+		"cost": {
+			"amount_sum": accumulator["cost_amount_sum"],
+			"reported_count": accumulator["cost_reported"],
+			"unreported_count": accumulator["cost_unreported"],
+		},
+		"duration_ms_total": accumulator["duration_ms_total"],
+		"attribution_confidence_histogram": dict(accumulator["attribution_confidence_histogram"]),
+		"runtime_ms": runtime_ms,
+	}
+
+
+def build_batch_rollup(batch_id, declared, accumulator, generated_at, runtime_ms,
+		yield_tally):
+	"""One batch_rollup record from an accumulator (schema 1.0 plus the additive runtime_ms)."""
+	record = {
+		"schema_version": SCHEMA_VERSION,
+		"record_type": "batch_rollup",
+		"batch_id": batch_id,
+		"generated_at": generated_at,
+		"unit_count": len(accumulator["unit_ids"]),
+		"invocation_count": accumulator["invocation_count"],
+		"stop_reason_histogram": dict(sorted(accumulator["stop_reason_histogram"].items())),
+		"tokens": dict(accumulator["tokens"]),
+		"nested_tokens": dict(accumulator["nested_tokens"]),
+		"cost": {
+			"amount_sum": accumulator["cost_amount_sum"],
+			"reported_count": accumulator["cost_reported"],
+			"unreported_count": accumulator["cost_unreported"],
+		},
+		"duration_ms_total": accumulator["duration_ms_total"],
+		"budget": {
+			"declared": {
+				"tokens": declared.get("tokens"),
+				"cost": declared.get("cost"),
+				"wall_clock_ms": declared.get("wall_clock_ms"),
+				"requests": declared.get("requests"),
+			},
+			"over_budget": evaluate_budget_flags(declared, accumulator),
+		},
+		"runtime_ms": runtime_ms,
+	}
+	if yield_tally is not None:
+		record["yield_tally"] = yield_tally
+	return record
+
+
+def parse_budget(declared, value_text):
+	"""Parse one --budget dimension=value; usage error on a malformed pair or value."""
+	parts = value_text.split("=", 1)
+	if len(parts) != 2 or not parts[0] or not parts[1]:
+		raise UsageError(f"--budget expects dimension=value, got {value_text!r}")
+	name, value_text = parts
+	if name not in BUDGET_FLAG_NAMES:
+		raise UsageError(f"--budget dimension {name!r} unknown "
+			f"(known: {', '.join(BUDGET_FLAG_NAMES)})")
+	try:
+		value = float(value_text) if "." in value_text else int(value_text)
+	except ValueError:
+		raise UsageError(f"--budget {name} expects a number, got {value_text!r}")
+	if not is_amount(value) or value < 0:
+		raise UsageError(f"--budget {name} expects a nonnegative number, got {value_text!r}")
+	if name in ("wall_clock_ms", "requests") and not is_count(value):
+		raise UsageError(f"--budget {name} expects a nonnegative integer, got {value_text!r}")
+	declared[name] = value
+
+
+def load_yield_tally(path):
+	"""Load and shape-check a --yield-tally file; usage error on any gap.
+
+	The contract requires every count field, a nullable time_to_close_ms
+	and batch_cost_total, at least one source link, a non-empty
+	covered_units list, and a non-empty count_basis note per counted
+	field; the rollup refuses to embed an incomplete tally rather than
+	emit one silently.
+	"""
+	try:
+		with open(Path(path).expanduser(), encoding="utf-8") as handle:
+			tally = json.load(handle)
+	except (OSError, json.JSONDecodeError) as exc:
+		raise UsageError(f"--yield-tally {path} is unreadable or not valid JSON: {exc}")
+	if not isinstance(tally, dict):
+		raise UsageError(f"--yield-tally {path} must be a JSON object")
+	severities = tally.get("verifier_findings_by_severity")
+	if not isinstance(severities, dict) or not all(
+			isinstance(key, str) and key and is_count(value)
+			for key, value in severities.items()):
+		raise UsageError(f"--yield-tally {path}: verifier_findings_by_severity must map "
+			"severity names to nonnegative integer counts")
+	for field in YIELD_TALLY_COUNT_FIELDS:
+		if not is_count(tally.get(field)):
+			raise UsageError(f"--yield-tally {path}: {field} must be a nonnegative integer")
+	for field in ("time_to_close_ms", "batch_cost_total"):
+		value = tally.get(field)
+		if value is not None and not (is_count(value) or (field == "batch_cost_total"
+				and is_amount(value) and value >= 0)):
+			raise UsageError(f"--yield-tally {path}: {field} must be a nonnegative number or null")
+	links = tally.get("source_links")
+	if not isinstance(links, list) or not links or not all(
+			isinstance(link, str) and link for link in links):
+		raise UsageError(f"--yield-tally {path}: source_links must be a nonempty list "
+			"of report links; every count names its source")
+	covered = tally.get("covered_units")
+	if not isinstance(covered, list) or not covered or not all(
+			isinstance(unit, str) and unit for unit in covered):
+		raise UsageError(f"--yield-tally {path}: covered_units must be a nonempty list "
+			"of unit ids naming the scope the counts were compiled over")
+	basis = tally.get("count_basis")
+	if not isinstance(basis, dict) or not all(
+			isinstance(basis.get(field), str) and basis.get(field)
+			for field in YIELD_TALLY_BASIS_FIELDS):
+		raise UsageError(f"--yield-tally {path}: count_basis must map every counted field "
+			f"({', '.join(YIELD_TALLY_BASIS_FIELDS)}) to a non-empty note naming the "
+			"board entries the count came from")
+	return tally
+
+
+def read_invocation_ledger(path):
+	"""Read a ledger into invocation records; other record types and malformed lines warn and skip.
+
+	Returns (records, skipped_other, skipped_malformed). A ledger with
+	no invocation records yields an empty list; the caller decides the
+	exit ladder (nothing is written for an aggregation with no records,
+	because an empty ledger is contract-invalid).
+	"""
+	try:
+		with open(Path(path).expanduser(), encoding="utf-8") as handle:
+			lines = handle.read().splitlines()
+	except (OSError, UnicodeDecodeError) as exc:
+		raise UsageError(f"cannot read ledger {path}: {exc}")
+	records = []
+	skipped_other = 0
+	skipped_malformed = 0
+	for number, raw in enumerate(lines, start=1):
+		if not raw.strip():
+			continue
+		try:
+			record = json.loads(raw)
+		except json.JSONDecodeError as exc:
+			warn(f"ledger line {number} is not valid JSON ({exc.msg}), skipped")
+			skipped_malformed += 1
+			continue
+		if not isinstance(record, dict):
+			warn(f"ledger line {number} is not a JSON object, skipped")
+			skipped_malformed += 1
+			continue
+		if record.get("record_type") != "invocation":
+			warn(f"ledger line {number} is a {record.get('record_type')!r} record, "
+				"not an invocation; rollup aggregates invocations only, skipped")
+			skipped_other += 1
+			continue
+		records.append(record)
+	return records, skipped_other, skipped_malformed
+
+
+def parse_rollup_args(argv):
+	options = {
+		"ledger": None,
+		"out": None,
+		"declared": {},
+		"yield_tally_path": None,
+		"update_cursor": None,
+		"print_cursor": None,
+		"harness": None,
+		"unit": None,
+	}
+	value_flags = {
+		"--ledger": "ledger",
+		"--out": "out",
+		"--yield-tally": "yield_tally_path",
+		"--update-cursor": "update_cursor",
+		"--print-cursor": "print_cursor",
+		"--harness": "harness",
+		"--unit": "unit",
+	}
+	index = 0
+	while index < len(argv):
+		flag = argv[index]
+		if flag in ("--help", "-h"):
+			raise HelpRequested()
+		if flag == "--budget":
+			if index + 1 >= len(argv):
+				raise UsageError("--budget requires a value")
+			parse_budget(options["declared"], argv[index + 1])
+			index += 1
+		elif flag in value_flags:
+			if index + 1 >= len(argv):
+				raise UsageError(f"{flag} requires a value")
+			options[value_flags[flag]] = argv[index + 1]
+			index += 1
+		else:
+			raise UsageError(f"unknown option {flag!r}")
+		index += 1
+	if options["harness"] is not None and options["harness"] not in CURSOR_HARNESSES:
+		raise UsageError(f"--harness must be one of {', '.join(CURSOR_HARNESSES)}")
+	if options["harness"] is not None and options["print_cursor"] is None:
+		raise UsageError("--harness is a --print-cursor companion: give --print-cursor FILE")
+	if options["print_cursor"] is not None and options["ledger"] is not None:
+		raise UsageError("--print-cursor prints stored cursors and reads no ledger: "
+			"drop --ledger or run the aggregation without --print-cursor")
+	if options["unit"] is not None and (not isinstance(options["unit"], str) or not options["unit"]):
+		raise UsageError("--unit expects a non-empty unit id")
+	return options
+
+
+def read_cursor_file(path):
+	"""Read a cursor file into {harness: epoch_ms}; absent starts fresh, corrupt warns.
+
+	A present but unreadable or non-object file warns and starts fresh:
+	the rollup still runs, but the lost high-water marks reset
+	incrementality for every harness, and the warning keeps that state
+	loss visible instead of silent. An absent file is the legitimate
+	first-pass form and stays quiet.
+	"""
+	try:
+		with open(Path(path).expanduser(), encoding="utf-8") as handle:
+			cursors = json.load(handle)
+	except FileNotFoundError:
+		return {}
+	except (OSError, json.JSONDecodeError) as exc:
+		warn(f"cursor file {path} is present but unreadable ({exc}); starting fresh")
+		return {}
+	if not isinstance(cursors, dict):
+		warn(f"cursor file {path} is not a JSON object; starting fresh")
+		return {}
+	return {harness: cursors[harness] for harness in CURSOR_HARNESSES
+		if is_count(cursors.get(harness))}
+
+
+def merge_cursors(existing, records):
+	"""The monotonic per-harness high-water timestamps of the rolled records over any existing cursors."""
+	cursors = dict(existing)
+	for record in records:
+		harness = record.get("harness")
+		moment = iso_to_epoch_ms(record.get("timestamp"))
+		if harness in CURSOR_HARNESSES and moment is not None \
+				and moment > cursors.get(harness, 0):
+			cursors[harness] = moment
+	return cursors
+
+
+def iso_to_epoch_ms(text):
+	"""Parse an RFC3339 timestamp to epoch milliseconds, None when unusable."""
+	if not isinstance(text, str):
+		return None
+	normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+	try:
+		parsed = datetime.fromisoformat(normalized)
+	except ValueError:
+		return None
+	if parsed.tzinfo is None:
+		parsed = parsed.replace(tzinfo=timezone.utc)
+	return int(parsed.timestamp() * 1000)
+
+
+def print_rollup_digest(batches, unbatched_units, orphan_count):
+	"""The stderr digest: per batch one summary, histogram, cost line, and
+	over-budget(<dimension>) flags; then any unbatched units and orphans."""
+	for batch_id, accumulator, flags in batches:
+		print(f"task-metrics rollup: batch {batch_id}: {len(accumulator['unit_ids'])} unit(s), "
+			f"{accumulator['invocation_count']} invocation(s), retries {accumulator['retry_count']}, "
+			f"restarts {accumulator['restart_count']}", file=sys.stderr)
+		histogram = accumulator["stop_reason_histogram"]
+		if histogram:
+			rendered = " ".join(f"{reason}={count}"
+				for reason, count in sorted(histogram.items()))
+			print(f"task-metrics rollup: batch {batch_id} stop reasons: {rendered}", file=sys.stderr)
+		units_rendered = " ".join(
+			f"{unit} ({accumulator['unit_invocation_counts'].get(unit, 0)} invocations)"
+			for unit in sorted(accumulator["unit_ids"]))
+		print(f"task-metrics rollup: batch {batch_id} units: {units_rendered or 'none attributed'}",
+			file=sys.stderr)
+		amount = accumulator["cost_amount_sum"]
+		cost_text = f"{amount:.6g}" if amount is not None else "none reported"
+		print(f"task-metrics rollup: batch {batch_id} cost: {cost_text} "
+			f"({accumulator['cost_reported']}/{accumulator['invocation_count']} reported), "
+			f"duration total {accumulator['duration_ms_total']} ms", file=sys.stderr)
+		if flags:
+			print(f"task-metrics rollup: batch {batch_id} "
+				+ " ".join(f"over-budget({dimension})" for dimension in flags), file=sys.stderr)
+	for unit_id, accumulator in unbatched_units:
+		print(f"task-metrics rollup: unit {unit_id}: {accumulator['invocation_count']} invocation(s), "
+			"no batch declared", file=sys.stderr)
+	if orphan_count:
+		print(f"task-metrics rollup: {orphan_count} invocation(s) outside every rollup "
+			"(no unit and no batch)", file=sys.stderr)
+
+
+def run_rollup(argv):
+	"""Run the rollup aggregation; returns the process exit code."""
+	try:
+		options = parse_rollup_args(argv)
+	except HelpRequested:
+		print(__doc__, file=sys.stdout)
+		return 0
+	except UsageError as exc:
+		print(f"task-metrics rollup: {exc}", file=sys.stderr)
+		return 2
+	if options["print_cursor"] is not None:
+		cursors = read_cursor_file(options["print_cursor"])
+		if options["harness"] is not None:
+			if options["harness"] not in cursors:
+				print(f"task-metrics rollup: cursor file {options['print_cursor']} "
+					f"carries no {options['harness']} value", file=sys.stderr)
+				return 2
+			print(cursors[options["harness"]])
+		else:
+			print(json.dumps(cursors, separators=(",", ":"), sort_keys=True))
+		return 0
+	started = datetime.now(tz=timezone.utc)
+	try:
+		records, skipped_other, skipped_malformed = read_invocation_ledger(
+			options["ledger"] if options["ledger"] is not None else "/dev/stdin")
+	except UsageError as exc:
+		print(f"task-metrics rollup: {exc}", file=sys.stderr)
+		return 2
+	if not records:
+		print("task-metrics rollup: no invocation records in the given ledger; "
+			"an empty ledger is contract-invalid, nothing rolled", file=sys.stderr)
+		return 1
+	yield_tally = None
+	if options["yield_tally_path"] is not None:
+		try:
+			yield_tally = load_yield_tally(options["yield_tally_path"])
+		except UsageError as exc:
+			print(f"task-metrics rollup: {exc}", file=sys.stderr)
+			return 2
+	batches = {}
+	units = {}
+	orphan_count = 0
+	for position, record in enumerate(records, start=1):
+		label = f"ledger record {position}"
+		attribution = record.get("attribution") if isinstance(record.get("attribution"), dict) else {}
+		batch_id = attribution.get("batch_id")
+		batch_id = batch_id if isinstance(batch_id, str) and batch_id else None
+		unit_id = attribution.get("unit_id")
+		unit_id = unit_id if isinstance(unit_id, str) and unit_id else None
+		if unit_id is None and options["unit"] is not None:
+			# The pass ran over the declared unit's territory: its unattributed
+			# strays count toward that unit's rollup instead of vanishing.
+			unit_id = options["unit"]
+		if batch_id is not None:
+			batches.setdefault(batch_id, new_rollup_accumulator())
+			accumulate_invocation(batches[batch_id], record, label)
+		if unit_id is not None:
+			key = (unit_id, batch_id)
+			units.setdefault(key, new_rollup_accumulator())
+			accumulate_invocation(units[key], record, label)
+		elif batch_id is None:
+			orphan_count += 1
+	generated_at = rfc3339_utc(int(started.timestamp() * 1000))
+	runtime_ms = max(0, int((datetime.now(tz=timezone.utc) - started).total_seconds() * 1000))
+	batch_records = []
+	for batch_id in sorted(batches):
+		batch_records.append(build_batch_rollup(batch_id, options["declared"],
+			batches[batch_id], generated_at, runtime_ms, yield_tally))
+	unit_records = []
+	for key in sorted(units, key=lambda item: (item[0], item[1] or "")):
+		unit_records.append(build_unit_rollup(key[0], key[1], units[key],
+			generated_at, runtime_ms))
+	emitted = unit_records + batch_records
+	if not emitted and orphan_count > 0:
+		print(f"task-metrics rollup: aggregation produced nothing: all {orphan_count} "
+			"invocation(s) carry neither unit_id nor batch_id, no rollup emitted",
+			file=sys.stderr)
+		return 1
+	lines = "".join(json.dumps(record, separators=(",", ":")) + "\n" for record in emitted)
+	if options["out"] is None:
+		sys.stdout.write(lines)
+	else:
+		try:
+			with open(Path(options["out"]).expanduser(), "a", encoding="utf-8") as ledger:
+				ledger.write(lines)
+		except OSError as exc:
+			print(f"task-metrics rollup: cannot write {options['out']}: {exc}", file=sys.stderr)
+			return 2
+	if options["update_cursor"] is not None:
+		cursors = merge_cursors(read_cursor_file(options["update_cursor"]), records)
+		try:
+			with open(Path(options["update_cursor"]).expanduser(), "w", encoding="utf-8") as handle:
+				handle.write(json.dumps(cursors, separators=(",", ":"), sort_keys=True) + "\n")
+		except OSError as exc:
+			print(f"task-metrics rollup: cannot write cursor file "
+				f"{options['update_cursor']}: {exc}", file=sys.stderr)
+			return 2
+	digest_batches = [(record["batch_id"], batches[record["batch_id"]],
+			record["budget"]["over_budget"]) for record in batch_records]
+	digest_units = [(key[0], units[key]) for key in sorted(units) if key[1] is None]
+	print_rollup_digest(digest_batches, digest_units, orphan_count)
+	print(f"task-metrics rollup: {len(unit_records)} unit rollup(s), {len(batch_records)} "
+		f"batch rollup(s) from {len(records)} invocation(s) in {runtime_ms} ms "
+		f"({skipped_other} non-invocation and {skipped_malformed} malformed line(s) skipped)",
+		file=sys.stderr)
+	return 0
+
+
+def parse_ac12_args(argv):
+	options = {"results": None, "phase": None, "harness": None, "out": None}
+	value_flags = {
+		"--results": "results",
+		"--phase": "phase",
+		"--harness": "harness",
+		"--out": "out",
+	}
+	index = 0
+	while index < len(argv):
+		flag = argv[index]
+		if flag in ("--help", "-h"):
+			raise HelpRequested()
+		if flag in value_flags:
+			if index + 1 >= len(argv):
+				raise UsageError(f"{flag} requires a value")
+			options[value_flags[flag]] = argv[index + 1]
+			index += 1
+		else:
+			raise UsageError(f"unknown option {flag!r}")
+		index += 1
+	if options["results"] is None:
+		raise UsageError("--results FILE is required: the probe's five-family results JSON")
+	if options["phase"] not in AC12_PHASES:
+		raise UsageError(f"--phase must be one of {', '.join(AC12_PHASES)}")
+	if options["harness"] not in CURSOR_HARNESSES:
+		raise UsageError(f"--harness must be one of {', '.join(CURSOR_HARNESSES)}")
+	return options
+
+
+def build_ac12_snapshot(results, phase, harness, generated_at):
+	"""Shape-check probe results into an ac12_snapshot record; UsageError names the gap.
+
+	The contract fixes exactly the five family keys, each carrying a
+	non-empty method and source, a values map of metric names to numbers
+	or null, and a nullable notes string; anything else refuses rather
+	than emitting an invalid snapshot.
+	"""
+	if not isinstance(results, dict):
+		raise UsageError("probe results must be a JSON object with a families object")
+	families_in = results.get("families")
+	if not isinstance(families_in, dict):
+		raise UsageError("probe results must carry a families object")
+	unexpected = sorted(set(families_in) - set(AC12_FAMILIES))
+	if unexpected:
+		raise UsageError(f"probe results carry unknown families {unexpected} "
+			f"(known: {', '.join(AC12_FAMILIES)})")
+	missing = [family for family in AC12_FAMILIES if family not in families_in]
+	if missing:
+		raise UsageError(f"probe results are missing families {missing}")
+	families = {}
+	for family in AC12_FAMILIES:
+		spec = families_in[family]
+		if not isinstance(spec, dict):
+			raise UsageError(f"family {family} must be an object")
+		for field in ("method", "source"):
+			if not isinstance(spec.get(field), str) or not spec[field]:
+				raise UsageError(f"family {family} must carry a non-empty {field}")
+		values_in = spec.get("values")
+		if not isinstance(values_in, dict):
+			raise UsageError(f"family {family} must carry a values object")
+		values = {}
+		for name, value in values_in.items():
+			if not isinstance(name, str) or not name:
+				raise UsageError(f"family {family} carries an empty metric name")
+			if value is not None and not is_amount(value):
+				raise UsageError(f"family {family} value {name!r} must be a number or null, "
+					f"got {value!r}")
+			values[name] = value
+		notes = spec.get("notes")
+		if notes is not None and not isinstance(notes, str):
+			raise UsageError(f"family {family} notes must be a string or null")
+		families[family] = {
+			"method": spec["method"],
+			"source": spec["source"],
+			"values": values,
+			"notes": notes,
+		}
+	return {
+		"schema_version": SCHEMA_VERSION,
+		"record_type": "ac12_snapshot",
+		"generated_at": generated_at,
+		"phase": phase,
+		"harness": harness,
+		"families": families,
+	}
+
+
+def run_ac12(argv):
+	"""Run the ac12 snapshot emission; returns the process exit code."""
+	try:
+		options = parse_ac12_args(argv)
+	except HelpRequested:
+		print(__doc__, file=sys.stdout)
+		return 0
+	except UsageError as exc:
+		print(f"task-metrics ac12: {exc}", file=sys.stderr)
+		return 2
+	try:
+		with open(Path(options["results"]).expanduser(), encoding="utf-8") as handle:
+			results = json.load(handle)
+	except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+		print(f"task-metrics ac12: cannot read results {options['results']}: {exc}", file=sys.stderr)
+		return 2
+	try:
+		record = build_ac12_snapshot(results, options["phase"], options["harness"],
+			rfc3339_utc(int(datetime.now(tz=timezone.utc).timestamp() * 1000)))
+	except UsageError as exc:
+		print(f"task-metrics ac12: {exc}", file=sys.stderr)
+		return 2
+	line = json.dumps(record, separators=(",", ":")) + "\n"
+	if options["out"] is None:
+		sys.stdout.write(line)
+	else:
+		try:
+			with open(Path(options["out"]).expanduser(), "a", encoding="utf-8") as ledger:
+				ledger.write(line)
+		except OSError as exc:
+			print(f"task-metrics ac12: cannot write {options['out']}: {exc}", file=sys.stderr)
+			return 2
+	print(f"task-metrics ac12: {options['phase']} snapshot for {options['harness']} "
+		"emitted", file=sys.stderr)
+	return 0
+
+
 def run_pi(argv):
 	"""Parse pi mode arguments and run the extraction; returns the exit code."""
 	parser = argparse.ArgumentParser(
@@ -1260,9 +1975,9 @@ def main(argv):
 	if mode == "pi":
 		return run_pi(rest)
 	if mode == "rollup":
-		print("task-metrics rollup: not implemented; aggregation, soft-budget "
-			"flags, and digest emission land with ORCH-4-3-4", file=sys.stderr)
-		return 2
+		return run_rollup(rest)
+	if mode == "ac12":
+		return run_ac12(rest)
 	print(f"task-metrics: unknown mode {mode!r} (known: {', '.join(MODES)})",
 		file=sys.stderr)
 	return 2
