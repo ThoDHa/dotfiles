@@ -553,6 +553,20 @@ Commands:
                                        the live working set; --all also lists the findings
                                        grandfathered away under a GRANDFATHERED marker with
                                        their own count; always exits 0 (lint enforces).
+  frontier [--dir DIR] [--json]        Read-only dependency-ready frontier and graph over the
+                                       shared dependency-token scan: a live Ready task whose
+                                       resolvable dependencies are all terminal is Runnable
+                                       (derived, reported beside the declared status).
+                                       Unknown deps on active work fail closed (the doctor
+                                       flags them; the frontier never reports the task
+                                       runnable); legacy unknown deps on Ready/Triage report
+                                       in unknown_deps without blocking; archived deps
+                                       resolve by header status; self-deps are ignored;
+                                       live-cycle membership surfaces in cycle without
+                                       gating Runnable (the doctor's DEP_CYCLE stays the
+                                       repair arm). The human view lists the runnable and
+                                       open rows; --json emits the schema_version 1 payload
+                                       (tasks plus the from->to dep edges).
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render. A claim
                                        owned by another session warns with both
@@ -1990,6 +2004,21 @@ closure_gate_scan() { # <file>
 	' "$1"
 }
 
+# The dependency-token projection of the closure gate's scan: exactly
+# the gate's I records (one per task-ID-shaped token carried by a
+# dedicated dependency surface, in file order). This is the board's one
+# dependency-token consumer path: the closure gate reads the full scan,
+# and the doctor's MISSING_DEP/DEP_CYCLE passes and the frontier's graph
+# derivation read it through this projection, so a grammar change lands
+# in closure_gate_scan alone and every consumer sees it together (the
+# battery's cross-consumer agreement test pins the identity).
+dependency_tokens() { # <file>
+	local rec
+	while IFS=$'\t' read -r tag rec; do
+		[[ "$tag" == "I" ]] && printf '%s\n' "$rec"
+	done < <(closure_gate_scan "$1")
+}
+
 # The superseded-criteria fragment of a closure note: "<n> superseded
 # Success Criteria: <text>; <text>" from the gate scan's S records (file
 # order), empty when the file carries none. A ~-marked criterion counts
@@ -2969,7 +2998,7 @@ doctor_dependency_cycles() { # <succ-array-name>
 			if (( live_out[$n] == 0 )); then
 				changed=1
 				for p in ${pred[$n]:-}; do
-					[[ -n "${live_out[$p]+x}" ]] && (( live_out[$p] -= 1 ))
+					[[ -n "${live_out[$p]+x}" ]] && : $(( live_out[$p] -= 1 ))
 				done
 				unset "live_in[$n]" "live_out[$n]"
 				continue
@@ -2977,7 +3006,7 @@ doctor_dependency_cycles() { # <succ-array-name>
 			if (( live_in[$n] == 0 )); then
 				changed=1
 				for s in ${succ[$n]:-}; do
-					[[ -n "${live_in[$s]+x}" ]] && (( live_in[$s] -= 1 ))
+					[[ -n "${live_in[$s]+x}" ]] && : $(( live_in[$s] -= 1 ))
 				done
 				unset "live_in[$n]" "live_out[$n]"
 			fi
@@ -3112,9 +3141,7 @@ cmd_doctor() {
 	local own tok
 	for rel in "${sorted_files[@]}"; do
 		local -a toks=()
-		while IFS=$'\t' read -r tag tok; do
-			[[ "$tag" == "I" ]] && toks+=("$tok")
-		done < <(closure_gate_scan "$tasks_dir/$rel")
+		mapfile -t toks < <(dependency_tokens "$tasks_dir/$rel")
 		((${#toks[@]} > 0)) && tokens_of["$rel"]="$(printf '%s\n' "${toks[@]}" | LC_ALL=C sort -u | tr '\n' ' ')"
 		own="$(task_id_of_basename "${rel##*/}")"
 		st="${status_of[$rel]:-}"; arch="${arch_of[$rel]:-0}"
@@ -3308,6 +3335,211 @@ cmd_doctor() {
 		else
 			printf 'doctor: %d problem(s) across %d task files\n' "${#sorted_problems[@]}" "${#files[@]}"
 		fi
+	fi
+}
+
+# Read-only dependency-ready frontier and graph over the shared
+# dependency-token scan (dependency_tokens, the closure gate's grammar).
+# Derivation: a live, ID-bearing, declared-Ready task whose resolvable
+# dependencies are all terminal (Completed/Cancelled by header status) is
+# Runnable; the payload carries the declared status beside the derived
+# runnable flag so the distinction stays visible. Policy, pinned by the
+# battery's frontier suite:
+#   - Unknown tokens on active work (In Progress/Blocked) fail closed:
+#     the doctor fires MISSING_DEP and the task never reports runnable.
+#   - Legacy unknown tokens on Ready/Triage files report in unknown_deps
+#     but never block the derivation (the board's known unresolved tokens
+#     live on Ready files).
+#   - Archived dependencies resolve (terminality rides the header status,
+#     so an archived Completed dep satisfies while an archived legacy
+#     open-status file does not).
+#   - Self-deps are ignored, pinning the closure gate's behavior.
+#   - A dep naming a Task ID shared by several files requires every
+#     member terminal (the dup group is one dependency node), and the
+#     cycle flag keys on the ID, so an archived dup of a live cycle
+#     member carries it too.
+#   - Cycle membership comes from the doctor's ID-level successor map,
+#     classified by its live rule (a cycle with at least one live member
+#     fires; all-archived cycles stay inert). The cycle flag surfaces the
+#     finding but never independently gates Runnable: an all-live cycle
+#     is structurally unrunnable because every member's successor is
+#     non-terminal, and a mixed cycle with a terminal member is exactly
+#     the case where the member's own deps are satisfied; the doctor's
+#     DEP_CYCLE stays the repair arm.
+# Nodes are all board files (archived included, lane-derived like the
+# list projection); edges run dependent -> dependency, mirroring the
+# doctor's successor map. A file whose basename yields no Task ID keeps
+# its graph data but never reports runnable: an unidentifiable task is
+# not frontier material. The human view groups RUNNABLE rows ahead of
+# OPEN rows (board byte order within each group), so the startable set
+# reads without scanning the board. Strictly read-only: no lock, no
+# render, no header bump.
+cmd_frontier() {
+	local dir="" json=0
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "frontier: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			*) diec "$CODE_USAGE" "frontier: unknown argument: $1" ;;
+		esac
+	done
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+
+	local -a files=()
+	board_files "$tasks_dir" files
+	if ((${#files[@]} == 0)); then
+		((json == 1)) && printf '{"schema_version":%d,"type":"frontier","runnable":0,"total":0,"tasks":[],"edges":[]}\n' "$SCHEMA_VERSION"
+		((json == 0)) && printf 'frontier: 0 runnable of 0 task(s), 0 done, 0 edge(s)\n'
+		return 0
+	fi
+
+	local -a sorted_files=()
+	mapfile -t sorted_files < <(printf '%s\n' "${files[@]}" | LC_ALL=C sort)
+
+	# ---- pass 1: shared lint scan (status, archive bit)
+	local -A status_of arch_of
+	local -a scan_recs=()
+	local rec tag rel a b c
+	mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
+	for rec in "${scan_recs[@]}"; do
+		IFS=$'\t' read -r tag rel a b c <<<"$rec"
+		case "$tag" in
+			S) status_of["$rel"]="$a"; arch_of["$rel"]="$b" ;;
+		esac
+	done
+
+	# ---- pass 2: ID map, token classification, and edges over the shared scan
+	local -A id_rels_of unknown_of unmet_of
+	local -a succ_edges=()
+	local base bid own tok trel satisfied
+	for rel in "${sorted_files[@]}"; do
+		base="${rel##*/}"
+		bid="$(task_id_of_basename "$base")"
+		[[ -n "$bid" ]] && id_rels_of["$bid"]+="$rel "
+	done
+	for rel in "${sorted_files[@]}"; do
+		own="$(task_id_of_basename "${rel##*/}")"
+		local -a toks=()
+		mapfile -t toks < <(dependency_tokens "$tasks_dir/$rel")
+		((${#toks[@]} > 0)) || continue
+		local -a utoks=()
+		mapfile -t utoks < <(printf '%s\n' "${toks[@]}" | LC_ALL=C sort -u)
+		for tok in "${utoks[@]}"; do
+			[[ "$tok" == "$own" ]] && continue
+			if [[ -z "${id_rels_of[$tok]+x}" ]]; then
+				unknown_of["$rel"]+="$tok "
+				continue
+			fi
+			[[ -n "$own" ]] && succ_edges+=("$own"$'\t'"$tok")
+			satisfied=1
+			for trel in ${id_rels_of[$tok]}; do
+				is_terminal_status "${status_of[$trel]:-}" || { satisfied=0; break; }
+			done
+			((satisfied == 1)) || unmet_of["$rel"]+="$tok "
+		done
+	done
+
+	# ---- pass 3: cycle membership over the doctor's successor map
+	local -A succ_of=() fired_cycle_ids=()
+	local -a cyc sorted_edges=()
+	local e cid chain
+	for e in "${succ_edges[@]+${succ_edges[@]}}"; do
+		IFS=$'\t' read -r a b <<<"$e"
+		succ_of["$a"]+="$b "
+	done
+	((${#succ_edges[@]} > 0)) && mapfile -t sorted_edges < <(printf '%s\n' "${succ_edges[@]}" | LC_ALL=C sort -u)
+	while read -r chain; do
+		read -r -a cyc <<<"$chain"
+		local -a live_members=()
+		for cid in "${cyc[@]}"; do
+			for rel in ${id_rels_of[$cid]:-}; do
+				if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then
+					live_members+=("$cid")
+					break
+				fi
+			done
+		done
+		((${#live_members[@]} > 0)) || continue
+		for cid in "${live_members[@]}"; do fired_cycle_ids["$cid"]=1; done
+	done < <(doctor_dependency_cycles succ_of)
+
+	# ---- pass 4: runnable derivation, lane mapping, rows
+	local -a task_objs=() human_run=() human_open=() wparts uparts
+	local st arch lane run notes wj uj runnable_count=0 done_count=0 obj w u tasks_json="" ejson="" hr ea eb cycle_flagged
+	for rel in "${sorted_files[@]}"; do
+		st="${status_of[$rel]:-}"
+		arch="${arch_of[$rel]:-0}"
+		own="$(task_id_of_basename "${rel##*/}")"
+		if [[ "$arch" == "1" ]]; then
+			lane="Archive"
+		else
+			case "$st" in
+				"$STATUS_READY") lane="Ready" ;;
+				"$STATUS_IN_PROGRESS") lane="In Progress" ;;
+				"$STATUS_BLOCKED" | "$STATUS_CANCELLED") lane="Blocked/Cancelled" ;;
+				"$STATUS_COMPLETED") lane="Completed" ;;
+				*) lane="Triage" ;;
+			esac
+		fi
+		run=0
+		if [[ "$arch" == "0" && "$st" == "$STATUS_READY" && -n "$own" && -z "${unmet_of[$rel]:-}" ]]; then run=1; fi
+		((run == 1)) && runnable_count=$((runnable_count + 1))
+		if [[ "$arch" == "1" ]] || is_terminal_status "$st"; then done_count=$((done_count + 1)); fi
+		wj="" uj="" notes=""
+		[[ -n "${unmet_of[$rel]:-}" ]] && wj="${unmet_of[$rel]% }"
+		[[ -n "${unknown_of[$rel]:-}" ]] && uj="${unknown_of[$rel]% }"
+		cycle_flagged=""
+		[[ -n "$own" ]] && cycle_flagged="${fired_cycle_ids[$own]+x}"
+		if [[ -n "$wj" ]]; then notes="waiting: ${wj// /, }"; fi
+		if [[ -n "$uj" ]]; then
+			[[ -n "$notes" ]] && notes+="; "
+			notes+="unknown: ${uj// /, }"
+		fi
+		if [[ -n "$cycle_flagged" ]]; then
+			[[ -n "$notes" ]] && notes+="; "
+			notes+="cycle"
+		fi
+		if ((run == 1)); then
+			human_run+=("RUNNABLE"$'\t'"$rel"${notes:+$'\t'"($notes)"})
+		elif [[ "$arch" != "1" ]] && ! is_terminal_status "$st"; then
+			human_open+=("OPEN"$'\t'"$rel"${notes:+$'\t'"($notes)"})
+		fi
+		obj="{\"id\":$(jqstr_bash "$own"),\"file\":$(jqstr_bash "$rel"),\"status\":$(jqstr_bash "$st"),\"lane\":$(jqstr_bash "$lane")"
+		obj+=",\"archived\":$([[ "$arch" == "1" ]] && printf true || printf false)"
+		obj+=",\"runnable\":$([[ "$run" == "1" ]] && printf true || printf false)"
+		obj+=",\"cycle\":$([[ -n "$cycle_flagged" ]] && printf true || printf false)"
+		wparts=() uparts=()
+		if [[ -n "$wj" ]]; then
+			for w in $wj; do wparts+=("$(jqstr_bash "$w")"); done
+		fi
+		if [[ -n "$uj" ]]; then
+			for u in $uj; do uparts+=("$(jqstr_bash "$u")"); done
+		fi
+		obj+=",\"waiting_on\":[$(IFS=,; printf '%s' "${wparts[*]:-}")]"
+		obj+=",\"unknown_deps\":[$(IFS=,; printf '%s' "${uparts[*]:-}")]"
+		task_objs+=("$obj}")
+	done
+
+	# ---- emission: the schema_version 1 payload or the focused human view
+	for e in "${sorted_edges[@]+${sorted_edges[@]}}"; do
+		IFS=$'\t' read -r ea eb <<<"$e"
+		ejson+="{\"from\":$(jqstr_bash "$ea"),\"to\":$(jqstr_bash "$eb")},"
+	done
+	ejson="[${ejson%,}]"
+	if ((json == 1)); then
+		for obj in "${task_objs[@]}"; do tasks_json+="$obj,"; done
+		tasks_json="${tasks_json%,}"
+		printf '{"schema_version":%d,"type":"frontier","runnable":%d,"total":%d,"tasks":[%s],"edges":%s}\n' \
+			"$SCHEMA_VERSION" "$runnable_count" "${#sorted_files[@]}" "$tasks_json" "$ejson"
+	else
+		for hr in "${human_run[@]+${human_run[@]}}"; do printf '%s\n' "$hr"; done
+		for hr in "${human_open[@]+${human_open[@]}}"; do printf '%s\n' "$hr"; done
+		printf 'frontier: %d runnable of %d task(s), %d done, %d edge(s)\n' \
+			"$runnable_count" "${#sorted_files[@]}" "$done_count" "${#sorted_edges[@]}"
 	fi
 }
 
@@ -4045,6 +4277,7 @@ main() {
 		edit) cmd_edit "$@" ;;
 		lint) cmd_lint "$@" ;;
 		doctor) cmd_doctor "$@" ;;
+		frontier) cmd_frontier "$@" ;;
 		show) cmd_show "$@" ;;
 		list) cmd_list "$@" ;;
 		reports) cmd_reports "$@" ;;

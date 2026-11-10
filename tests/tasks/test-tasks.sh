@@ -3570,6 +3570,395 @@ t doctor --dir "$doc_dir" --all --json >/dev/null
 doc_tree_after="$(find "$doc_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
 assert_eq "the doctor leaves the board tree untouched" "$doc_tree_before" "$doc_tree_after"
 
+# --- shared dependency-token scan (ORCH-4-4-3) -------------------------------
+
+echo "== shared dependency-token scan: cross-consumer agreement =="
+# closure_gate_scan is the board's one dependency-token grammar; the
+# doctor's MISSING_DEP/DEP_CYCLE passes and the frontier's graph
+# derivation must consume it through the shared dependency_tokens
+# projection, never a forked parser. The agreement fixture carries
+# tokens on all three dedicated surfaces (## Dependencies section,
+# **Dependencies:** field line, **Child tasks:** line) plus a self
+# token and an unknown token, so every consumer's observable token
+# set pins against the same reference records.
+agr_dir="$ROOT/agr/.tasks"
+t init --dir "$agr_dir" >/dev/null
+mkdir -p "$agr_dir/archive"
+cat >"$agr_dir/current/AG-1-20260615-1200-agreement.md" <<'EOF'
+# Task: Agreement Fixture
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Dependencies:** FRD-1
+**Child tasks:** AG-2
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+agreement body
+
+## Dependencies
+
+- FR-1
+- GHOST-9
+- AG-1
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$agr_dir/current/AG-2-20260615-1200-child.md" <<'EOF'
+# Task: Agreement Child
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+agreement child body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$agr_dir/current/FR-1-20260615-1200-resolved.md" <<'EOF'
+# Task: Agreement Resolved
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+agreement resolved body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$agr_dir/archive/FRD-1-20260615-0900-archived-dep.md" <<'EOF'
+# Task: Agreement Archived Dep
+
+**Created:** 2026-06-15 09:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 10:00
+**Completed:** 2026-06-15 10:00
+
+## Objective
+
+agreement archived dep body
+
+## Work Log
+
+## Execution Log
+EOF
+t render --dir "$agr_dir" >/dev/null
+
+agr_agree_file="$agr_dir/current/AG-1-20260615-1200-agreement.md"
+agr_gate="$(
+	set -euo pipefail
+	source "$TASKS_BIN" help >/dev/null 2>&1
+	closure_gate_scan "$agr_agree_file" | awk -F'\t' '$1 == "I" { print $2 }' | LC_ALL=C sort -u
+)"
+agr_shared="$(
+	set -euo pipefail
+	source "$TASKS_BIN" help >/dev/null 2>&1
+	dependency_tokens "$agr_agree_file" | LC_ALL=C sort -u
+)"
+assert_eq "the gate scan's I records carry the token set from all three surfaces plus self" \
+	"$(printf 'AG-1\nAG-2\nFR-1\nFRD-1\nGHOST-9')" "$agr_gate"
+assert_eq "dependency_tokens yields the identical token set from the one scan" "$agr_gate" "$agr_shared"
+
+# The doctor's observable unknown-token projection is the same set's
+# unresolved members: exactly GHOST-9, grandfathered on the Ready file.
+agr_doc_all="$(t doctor --dir "$agr_dir" --all)"
+assert_eq "doctor projects the same scan: one grandfathered unknown token" \
+	"GRANDFATHERED MISSING_DEP current/AG-1-20260615-1200-agreement.md: dependency token 'GHOST-9' names no board file" \
+	"$(grep '^GRANDFATHERED MISSING_DEP' <<<"$agr_doc_all")"
+assert_not_contains "doctor projects no MISSING_DEP for resolved or self tokens" "$agr_doc_all" "AG-1-20260615-1200-agreement.md: dependency token 'AG-1'"
+assert_not_contains "doctor projects no MISSING_DEP for the resolved child" "$agr_doc_all" "dependency token 'AG-2'"
+
+# The gate's behavioral consumption of the same records: the declared
+# child blocks the closure while the unknown and self tokens stay inert.
+agr_gate_err="$(t close --dir "$agr_dir" AG-1-20260615-1200-agreement.md 2>&1 >/dev/null || true)"
+assert_contains "the gate consumes the same scan: the declared child refuses" "$agr_gate_err" "unfinished named child task(s): AG-2"
+assert_eq "the gate refusal carries exactly the one child finding" "1" "$(grep -c '^  - ' <<<"$agr_gate_err")"
+
+# --- frontier (ORCH-4-4-3) ---------------------------------------------------
+
+# The frontier fixture board: every policy clause gets its own file, so
+# each pin reads as the clause it pins. Live Ready with terminal deps is
+# Runnable (FR-1, FR-9's terminal-in-current dep, FR-3's archived dep,
+# FR-12's Cancelled dep); live Ready behind an open dep waits (FR-2,
+# FR-7, FR-13 behind the DUP-1 dup-ID pair); unknown tokens fail closed
+# on active work (FR-5) and report non-blocking on Ready (FR-4);
+# self-deps are ignored (FR-8); live-cycle members surface the flag
+# (FRC pair, FRM-2, and the FRC-1 archived dup that inherits it by ID)
+# while the all-archived cycle stays inert (ACY pair).
+fr_dir="$ROOT/fr/.tasks"
+t init --dir "$fr_dir" >/dev/null
+mkdir -p "$fr_dir/archive"
+fr_write() { # <file> <status> <progress>; FR_DEPS (newline tokens), FR_REASON, FR_COMPLETED optional
+	local file="$1" st="$2" prog="$3" tok
+	{
+		printf '# Task: %s\n\n' "${file##*/}"
+		printf '**Created:** 2026-06-15 12:00\n'
+		printf '**Status:** %s\n' "$st"
+		[[ -n "${FR_REASON:-}" ]] && printf '**Status Reason:** %s\n' "$FR_REASON"
+		printf '**Priority:** Medium\n'
+		printf '**Progress:** %s\n' "$prog"
+		printf '**Owner:**\n'
+		printf '**Updated:** 2026-06-15 12:00\n'
+		[[ -n "${FR_COMPLETED:-}" ]] && printf '**Completed:** %s\n' "$FR_COMPLETED"
+		printf '\n## Objective\n\nfixture body\n'
+		if [[ -n "${FR_DEPS:-}" ]]; then
+			printf '\n## Dependencies\n\n'
+			while IFS= read -r tok; do
+				[[ -n "$tok" ]] && printf -- '- %s\n' "$tok"
+			done <<<"$FR_DEPS"
+		fi
+		printf '\n## Work Log\n\n## Execution Log\n'
+	} >"$file"
+}
+fr_write "$fr_dir/current/FR-1-20260615-1200-alpha.md" Ready 0%
+FR_DEPS='FR-1' fr_write "$fr_dir/current/FR-2-20260615-1200-beta.md" Ready 0%
+FR_DEPS='FRD-1' fr_write "$fr_dir/current/FR-3-20260615-1200-gamma.md" Ready 0%
+FR_DEPS='GHOST-9' fr_write "$fr_dir/current/FR-4-20260615-1200-delta.md" Ready 0%
+FR_DEPS='GHOST-8' fr_write "$fr_dir/current/FR-5-20260615-1200-eps.md" "In Progress" 10%
+fr_write "$fr_dir/current/FR-6-20260615-1200-zeta.md" "In Progress" 10%
+FR_DEPS='FRC-1' fr_write "$fr_dir/current/FR-7-20260615-1200-eta.md" Ready 0%
+FR_DEPS='FR-8' fr_write "$fr_dir/current/FR-8-20260615-1200-theta.md" Ready 0%
+FR_DEPS='FRD-2' fr_write "$fr_dir/current/FR-9-20260615-1200-iota.md" Ready 0%
+FR_DEPS='ACY-1' fr_write "$fr_dir/current/FR-10-20260615-1200-kappa.md" Ready 0%
+FR_DEPS='FRM-1' fr_write "$fr_dir/current/FR-11-20260615-1200-lambda.md" Ready 0%
+FR_DEPS='FRC-2' fr_write "$fr_dir/current/FRC-1-20260615-1200-cycle-a.md" Ready 0%
+FR_DEPS='FRC-1' fr_write "$fr_dir/current/FRC-2-20260615-1200-cycle-b.md" Ready 0%
+FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/current/FRD-2-20260615-1200-done.md" Completed 100%
+FR_DEPS='FRM-2' FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/current/FRM-1-20260615-1200-mixed-a.md" Completed 100%
+FR_DEPS='FRM-1' fr_write "$fr_dir/current/FRM-2-20260615-1200-mixed-b.md" Ready 0%
+FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/archive/FRD-1-20260615-0900-archived-dep.md" Completed 100%
+FR_DEPS='ACY-2' FR_COMPLETED='2026-06-01 10:00' fr_write "$fr_dir/archive/ACY-1-20260601-0900-archived-cycle-a.md" Completed 100%
+FR_DEPS='ACY-1' FR_COMPLETED='2026-06-01 10:00' fr_write "$fr_dir/archive/ACY-2-20260601-0930-archived-cycle-b.md" Completed 100%
+FR_DEPS='FRD-3' fr_write "$fr_dir/current/FR-12-20260615-1200-nu.md" Ready 0%
+FR_DEPS='DUP-1' fr_write "$fr_dir/current/FR-13-20260615-1200-xi.md" Ready 0%
+FR_REASON='superseded before start' fr_write "$fr_dir/current/FRD-3-20260615-0900-cancelled-dep.md" Cancelled 0%
+fr_write "$fr_dir/current/DUP-1-20260615-1200-dup-open.md" "In Progress" 10%
+FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/archive/DUP-1-20260615-0930-dup-done.md" Completed 100%
+FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/archive/FRC-1-20260615-0945-archived-dup.md" Completed 100%
+t render --dir "$fr_dir" >/dev/null
+
+echo "== frontier: derived runnable and the graph payload =="
+fr_json="$(t frontier --dir "$fr_dir" --json)"
+assert_contains "frontier --json carries the schema_version 1 marker" "$fr_json" '{"schema_version":1,"type":"frontier"'
+assert_eq "frontier --json pins the runnable and total counts" '"runnable":9,"total":25' \
+	"$(printf '%s' "$fr_json" | grep -o '"runnable":[0-9]*,"total":[0-9]*')"
+assert_contains "a live Ready task with no deps is Runnable" "$fr_json" \
+	'{"id":"FR-1","file":"current/FR-1-20260615-1200-alpha.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a Ready task behind an open dep waits on it" "$fr_json" \
+	'{"id":"FR-2","file":"current/FR-2-20260615-1200-beta.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":false,"waiting_on":["FR-1"],"unknown_deps":[]}'
+assert_contains "an archived Completed dep satisfies the dependent" "$fr_json" \
+	'{"id":"FR-3","file":"current/FR-3-20260615-1200-gamma.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a legacy unknown dep on Ready reports without blocking" "$fr_json" \
+	'{"id":"FR-4","file":"current/FR-4-20260615-1200-delta.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":["GHOST-9"]}'
+assert_contains "an unknown dep on active work fails closed" "$fr_json" \
+	'{"id":"FR-5","file":"current/FR-5-20260615-1200-eps.md","status":"In Progress","lane":"In Progress","archived":false,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":["GHOST-8"]}'
+assert_contains "an In Progress task is never Runnable" "$fr_json" \
+	'{"id":"FR-6","file":"current/FR-6-20260615-1200-zeta.md","status":"In Progress","lane":"In Progress","archived":false,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a live-cycle member waits on its successor and carries the flag" "$fr_json" \
+	'{"id":"FRC-1","file":"current/FRC-1-20260615-1200-cycle-a.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":true,"waiting_on":["FRC-2"],"unknown_deps":[]}'
+assert_contains "the cycle's other member mirrors the pin" "$fr_json" \
+	'{"id":"FRC-2","file":"current/FRC-2-20260615-1200-cycle-b.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":true,"waiting_on":["FRC-1"],"unknown_deps":[]}'
+assert_contains "a dep on a cycle member blocks without the flag" "$fr_json" \
+	'{"id":"FR-7","file":"current/FR-7-20260615-1200-eta.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":false,"waiting_on":["FRC-1"],"unknown_deps":[]}'
+assert_contains "a self-dep is ignored" "$fr_json" \
+	'{"id":"FR-8","file":"current/FR-8-20260615-1200-theta.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_not_contains "the ignored self-dep produces no edge" "$fr_json" '"from":"FR-8"'
+assert_contains "a terminal-in-current dep satisfies the dependent" "$fr_json" \
+	'{"id":"FR-9","file":"current/FR-9-20260615-1200-iota.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a dep into an all-archived cycle resolves inertly" "$fr_json" \
+	'{"id":"FR-10","file":"current/FR-10-20260615-1200-kappa.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a dep on a terminal cycle-flagged task satisfies" "$fr_json" \
+	'{"id":"FR-11","file":"current/FR-11-20260615-1200-lambda.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "the terminal live member of the mixed cycle stays unflagged and not runnable" "$fr_json" \
+	'{"id":"FRM-1","file":"current/FRM-1-20260615-1200-mixed-a.md","status":"Completed","lane":"Completed","archived":false,"runnable":false,"cycle":false,"waiting_on":["FRM-2"],"unknown_deps":[]}'
+assert_contains "cycle membership surfaces without gating Runnable" "$fr_json" \
+	'{"id":"FRM-2","file":"current/FRM-2-20260615-1200-mixed-b.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":true,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a Cancelled dep satisfies the dependent (both terminal)" "$fr_json" \
+	'{"id":"FR-12","file":"current/FR-12-20260615-1200-nu.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "the Cancelled dep itself lands in the Blocked/Cancelled lane" "$fr_json" \
+	'{"id":"FRD-3","file":"current/FRD-3-20260615-0900-cancelled-dep.md","status":"Cancelled","lane":"Blocked/Cancelled","archived":false,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a dep on a dup-ID group requires every member terminal" "$fr_json" \
+	'{"id":"FR-13","file":"current/FR-13-20260615-1200-xi.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":false,"waiting_on":["DUP-1"],"unknown_deps":[]}'
+assert_contains "an archived dup of a live cycle member inherits the cycle flag" "$fr_json" \
+	'{"id":"FRC-1","file":"archive/FRC-1-20260615-0945-archived-dup.md","status":"Completed","lane":"Archive","archived":true,"runnable":false,"cycle":true,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "a terminal-in-current task lands in the Completed lane" "$fr_json" \
+	'{"id":"FRD-2","file":"current/FRD-2-20260615-1200-done.md","status":"Completed","lane":"Completed","archived":false,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "an archived task lands in the Archive lane" "$fr_json" \
+	'{"id":"FRD-1","file":"archive/FRD-1-20260615-0900-archived-dep.md","status":"Completed","lane":"Archive","archived":true,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "the all-archived cycle's members stay inert and unflagged" "$fr_json" \
+	'{"id":"ACY-1","file":"archive/ACY-1-20260601-0900-archived-cycle-a.md","status":"Completed","lane":"Archive","archived":true,"runnable":false,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "the graph carries the fourteen dep edges in order" "$fr_json" \
+	'"edges":[{"from":"ACY-1","to":"ACY-2"},{"from":"ACY-2","to":"ACY-1"},{"from":"FR-10","to":"ACY-1"},{"from":"FR-11","to":"FRM-1"},{"from":"FR-12","to":"FRD-3"},{"from":"FR-13","to":"DUP-1"},{"from":"FR-2","to":"FR-1"},{"from":"FR-3","to":"FRD-1"},{"from":"FR-7","to":"FRC-1"},{"from":"FR-9","to":"FRD-2"},{"from":"FRC-1","to":"FRC-2"},{"from":"FRC-2","to":"FRC-1"},{"from":"FRM-1","to":"FRM-2"},{"from":"FRM-2","to":"FRM-1"}]'
+assert_eq "tasks ride the board-tree byte order" \
+	"$(printf 'ACY-1\nACY-2\nDUP-1\nFRC-1\nFRD-1\nDUP-1\nFR-1\nFR-10\nFR-11\nFR-12\nFR-13\nFR-2\nFR-3\nFR-4\nFR-5\nFR-6\nFR-7\nFR-8\nFR-9\nFRC-1\nFRC-2\nFRD-2\nFRD-3\nFRM-1\nFRM-2')" \
+	"$(printf '%s' "$fr_json" | grep -o '"id":"[^"]*"' | sed 's/"id":"//; s/"$//')"
+
+if command -v python3 >/dev/null 2>&1; then
+	if printf '%s\n' "$fr_json" | python3 -c 'import json, sys; json.load(sys.stdin)' 2>/dev/null; then
+		ok "frontier --json parses as one complete JSON document (python3)"
+	else
+		bad "frontier --json parses as one complete JSON document (python3)"
+	fi
+elif command -v jq >/dev/null 2>&1; then
+	if printf '%s\n' "$fr_json" | jq empty 2>/dev/null; then
+		ok "frontier --json parses as one complete JSON document (jq)"
+	else
+		bad "frontier --json parses as one complete JSON document (jq)"
+	fi
+else
+	bad "no independent JSON parser on the host (python3 nor jq)"
+fi
+
+echo "== frontier: edge mirror against the doctor's successor map =="
+# The direct mirror the exact-output pins left implicit: the doctor's
+# pass-3 successor map (own ID -> resolved dependency token over the
+# shared dependency_tokens scan, self-deps skipped, ID-less files
+# emitting no edges) rebuilt on this adversarial board through the same
+# shared primitives cmd_doctor calls, then compared edge-for-edge with
+# the frontier's emitted graph, so a grammar edit cannot move one
+# consumer's edges without moving the other's.
+fr_doctor_map="$(
+	set -euo pipefail
+	source "$TASKS_BIN" help >/dev/null 2>&1
+	declare -A fr_id_rels=() fr_succ=()
+	declare -a fr_files=() fr_sorted=() fr_toks=()
+	board_files "$fr_dir" fr_files
+	mapfile -t fr_sorted < <(printf '%s\n' "${fr_files[@]}" | LC_ALL=C sort)
+	for fr_rel in "${fr_sorted[@]}"; do
+		fr_id="$(task_id_of_basename "${fr_rel##*/}")"
+		[[ -n "$fr_id" ]] && fr_id_rels["$fr_id"]+="$fr_rel "
+	done
+	for fr_rel in "${fr_sorted[@]}"; do
+		fr_own="$(task_id_of_basename "${fr_rel##*/}")"
+		mapfile -t fr_toks < <(dependency_tokens "$fr_dir/$fr_rel")
+		((${#fr_toks[@]} > 0)) || continue
+		mapfile -t fr_toks < <(printf '%s\n' "${fr_toks[@]}" | LC_ALL=C sort -u)
+		for fr_tok in "${fr_toks[@]}"; do
+			if [[ "$fr_tok" != "$fr_own" && -n "$fr_own" && -n "${fr_id_rels[$fr_tok]+x}" ]]; then
+				fr_succ["$fr_own"]+="$fr_tok "
+			fi
+		done
+	done
+	for fr_own in "${!fr_succ[@]}"; do
+		for fr_tok in ${fr_succ[$fr_own]}; do printf '%s\t%s\n' "$fr_own" "$fr_tok"; done
+	done | LC_ALL=C sort -u
+)"
+fr_json_edges="$(printf '%s' "$fr_json" | grep -o '"from":"[^"]*","to":"[^"]*"' | sed 's/"from":"\([^"]*\)","to":"\([^"]*\)"/\1\t\2/' | LC_ALL=C sort -u)"
+assert_eq "the frontier's emitted edges mirror the doctor's successor map exactly" \
+	"$fr_doctor_map" "$fr_json_edges"
+
+echo "== frontier: human view and the doctor's fail-closed arm =="
+
+fr_human_expected="$(printf '%b\n' \
+	'RUNNABLE\tcurrent/FR-1-20260615-1200-alpha.md' \
+	'RUNNABLE\tcurrent/FR-10-20260615-1200-kappa.md' \
+	'RUNNABLE\tcurrent/FR-11-20260615-1200-lambda.md' \
+	'RUNNABLE\tcurrent/FR-12-20260615-1200-nu.md' \
+	'RUNNABLE\tcurrent/FR-3-20260615-1200-gamma.md' \
+	'RUNNABLE\tcurrent/FR-4-20260615-1200-delta.md\t(unknown: GHOST-9)' \
+	'RUNNABLE\tcurrent/FR-8-20260615-1200-theta.md' \
+	'RUNNABLE\tcurrent/FR-9-20260615-1200-iota.md' \
+	'RUNNABLE\tcurrent/FRM-2-20260615-1200-mixed-b.md\t(cycle)' \
+	'OPEN\tcurrent/DUP-1-20260615-1200-dup-open.md' \
+	'OPEN\tcurrent/FR-13-20260615-1200-xi.md\t(waiting: DUP-1)' \
+	'OPEN\tcurrent/FR-2-20260615-1200-beta.md\t(waiting: FR-1)' \
+	'OPEN\tcurrent/FR-5-20260615-1200-eps.md\t(unknown: GHOST-8)' \
+	'OPEN\tcurrent/FR-6-20260615-1200-zeta.md' \
+	'OPEN\tcurrent/FR-7-20260615-1200-eta.md\t(waiting: FRC-1)' \
+	'OPEN\tcurrent/FRC-1-20260615-1200-cycle-a.md\t(waiting: FRC-2; cycle)' \
+	'OPEN\tcurrent/FRC-2-20260615-1200-cycle-b.md\t(waiting: FRC-1; cycle)' \
+	'frontier: 9 runnable of 25 task(s), 8 done, 14 edge(s)')"
+assert_eq "the human view groups RUNNABLE rows first with their notes" \
+	"$fr_human_expected" "$(t frontier --dir "$fr_dir")"
+fr_doc="$(t doctor --dir "$fr_dir")"
+# The dup-ID fixtures surface their doctor finding by design: a group
+# with a live member is exactly the DUPLICATE_ID contract, so the
+# default output grows from the 3 dependency problems to these 5.
+fr_doc_expected="$(printf '%s\n%s\n%s\n%s\n%s\n%s' \
+	'DEP_CYCLE current/FRC-1-20260615-1200-cycle-a.md: dependency cycle: FRC-1 -> FRC-2 -> FRC-1 (open: current/FRC-1-20260615-1200-cycle-a.md)' \
+	'DEP_CYCLE current/FRM-2-20260615-1200-mixed-b.md: dependency cycle: FRM-1 -> FRM-2 -> FRM-1 (open: current/FRM-2-20260615-1200-mixed-b.md)' \
+	'DUPLICATE_ID current/DUP-1-20260615-1200-dup-open.md: Task ID DUP-1 shared by: archive/DUP-1-20260615-0930-dup-done.md current/DUP-1-20260615-1200-dup-open.md' \
+	'DUPLICATE_ID current/FRC-1-20260615-1200-cycle-a.md: Task ID FRC-1 shared by: archive/FRC-1-20260615-0945-archived-dup.md current/FRC-1-20260615-1200-cycle-a.md' \
+	'MISSING_DEP current/FR-5-20260615-1200-eps.md: dependency token '\''GHOST-8'\'' names no board file' \
+	'doctor: 5 problem(s) across 25 task files')"
+assert_eq "the doctor's default output stays exactly the live problems" "$fr_doc_expected" "$fr_doc"
+fr_doc_all="$(t doctor --dir "$fr_dir" --all)"
+assert_contains "the Ready unknown token reports as a grandfathered doctor finding" "$fr_doc_all" \
+	"GRANDFATHERED MISSING_DEP current/FR-4-20260615-1200-delta.md: dependency token 'GHOST-9' names no board file"
+
+echo "== frontier: errors, empty board, read-only guarantee =="
+fr_usage_err="$(t frontier --dir "$fr_dir" --bogus 2>&1 >/dev/null || true)"
+assert_contains "frontier refuses an unknown argument with USAGE" "$fr_usage_err" "(code: USAGE)"
+fr_arg_err="$(t frontier extra 2>&1 >/dev/null || true)"
+assert_contains "frontier refuses a positional argument with USAGE" "$fr_arg_err" "(code: USAGE)"
+fr_dir_err="$(t frontier --dir 2>&1 >/dev/null || true)"
+assert_contains "frontier refuses a valueless --dir with USAGE" "$fr_dir_err" "(code: USAGE)"
+fr_nb_err="$(t frontier --dir "$ROOT/no-such-frontier-board" 2>&1 >/dev/null || true)"
+assert_contains "frontier on a missing board carries NO_BOARD" "$fr_nb_err" "(code: NO_BOARD)"
+fr_empty_dir="$ROOT/fr-empty/.tasks"
+t init --dir "$fr_empty_dir" >/dev/null
+assert_eq "frontier on an empty board prints the empty payload" \
+	'{"schema_version":1,"type":"frontier","runnable":0,"total":0,"tasks":[],"edges":[]}' \
+	"$(t frontier --dir "$fr_empty_dir" --json)"
+assert_eq "frontier on an empty board prints the empty summary" \
+	"frontier: 0 runnable of 0 task(s), 0 done, 0 edge(s)" \
+	"$(t frontier --dir "$fr_empty_dir")"
+fr_tree_before="$(find "$fr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+t frontier --dir "$fr_dir" >/dev/null
+t frontier --dir "$fr_dir" --json >/dev/null
+fr_tree_after="$(find "$fr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+assert_eq "the frontier leaves the board tree untouched" "$fr_tree_before" "$fr_tree_after"
+
+echo "== frontier: an ID-less file keeps its graph data and never kills the command =="
+# Legacy board shape: a file whose basename yields no Task ID carries
+# dependency tokens and rides the frontier like any other file. It keeps
+# its graph data (waiting_on, but never an edge, since an edge needs a
+# source ID) and never reports runnable, and the command must stay rc 0:
+# the fired-cycle lookup keyed on the empty ID used to abort the whole
+# command with a bad array subscript.
+fr_noid_dir="$ROOT/fr-noid/.tasks"
+t init --dir "$fr_noid_dir" >/dev/null
+mkdir -p "$fr_noid_dir/current"
+fr_write "$fr_noid_dir/current/NI-1-20260615-1200-named.md" Ready 0%
+FR_DEPS='NI-1' fr_write "$fr_noid_dir/current/notaskid.md" Ready 0%
+t render --dir "$fr_noid_dir" >/dev/null
+fr_noid_json="$(t frontier --dir "$fr_noid_dir" --json)"
+assert_contains "an ID-less file keeps waiting data without the flag" "$fr_noid_json" \
+	'{"id":"","file":"current/notaskid.md","status":"Ready","lane":"Ready","archived":false,"runnable":false,"cycle":false,"waiting_on":["NI-1"],"unknown_deps":[]}'
+assert_contains "the named task beside it stays plainly runnable" "$fr_noid_json" \
+	'{"id":"NI-1","file":"current/NI-1-20260615-1200-named.md","status":"Ready","lane":"Ready","archived":false,"runnable":true,"cycle":false,"waiting_on":[],"unknown_deps":[]}'
+assert_contains "an ID-less file's resolved dep still emits no edge" "$fr_noid_json" '"edges":[]'
+fr_noid_human="$(t frontier --dir "$fr_noid_dir")"
+assert_eq "the frontier stays rc 0 with the ID-less board's grouped human view" \
+	"$(printf '%b\n' \
+	'RUNNABLE\tcurrent/NI-1-20260615-1200-named.md' \
+	'OPEN\tcurrent/notaskid.md\t(waiting: NI-1)' \
+	'frontier: 1 runnable of 2 task(s), 0 done, 0 edge(s)')" \
+	"$fr_noid_human"
+
 # --- AC-06 write parity (ORCH-4-4-2) ----------------------------------------
 
 echo "== write parity: every permitted mutation has an authorized CLI path =="
