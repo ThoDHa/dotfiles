@@ -21,6 +21,12 @@ readonly ARCHIVE_DIR="archive"
 readonly REPORTS_DIR="reports"
 readonly CLAIM_SUFFIX=".claim"
 
+# The version marker every JSON payload of the read surface carries (the
+# versioned JSON readers' typed contract: consumers pin the marker and the
+# payload shape it names, and a breaking change requires a new version,
+# never a silent reshaping).
+readonly SCHEMA_VERSION=1
+
 # Keyed rows travel from the assembler through one LC_ALL=C sort as
 # "<ordinal><SORT_SEP><sortkey><SORT_SEP><idkey><SORT_SEP><row>"; the
 # ordinal is the lane's dashboard position, so byte order groups lanes in
@@ -83,8 +89,12 @@ readonly STATUS_REASON_KEY="Status Reason"
 # (the template's subtask **Dependencies:** field has this section as its
 # standalone form) and is a dedicated dependency surface: the closure
 # gate's child detection reads it, so a declared child blocks closure
-# while prose citations elsewhere do not.
-readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Dependencies" "Work Log" "Execution Log")
+# while prose citations elsewhere do not. Questions and Evidence give the
+# open questions and the evidence links their own cumulative record homes
+# (the template had no section for either), slotted immediately before
+# Work Log so the question/evidence appends never reorder or interleave
+# with the CLI-stamped timeline sections.
+readonly -a TEMPLATE_SECTIONS=("Table of Contents" "Objective" "Success Criteria" "Technical Approach" "Risk Assessment" "Testing Strategy" "TDD Workflow" "Task Breakdown" "Dependencies" "Questions" "Evidence" "Work Log" "Execution Log")
 readonly TEMPLATE_SECTION_LEVEL=2
 
 # The sections every task file must carry for the lint pass: the new-task
@@ -183,6 +193,159 @@ readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 		}
 '
 
+# Shared awk function source: the row-assembly helpers every board-wide
+# pass over task files needs, so the ID derivation, key computation, and
+# cell escaping exist exactly once and the dashboard and the JSON readers
+# can never drift on what a Task ID is. Requires the host program to set
+# idw (ID_KEY_SEGMENT_WIDTH) before the functions run; wsp, segmentre,
+# and stampre are defined in the fragment's own BEGIN so a host program
+# needs nothing beyond the idw environment value.
+readonly AWK_ROW_HELPERS='		BEGIN {
+			wsp = " \t\r\v\f"
+			ws = "[" wsp "]+"
+			d8 = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]"
+			d4 = "[0-9][0-9][0-9][0-9]"
+			segmentre = "^[A-Za-z]+(-[0-9]+)+$"
+			stampre = "^-" d8 "-" d4 "(-.*)?\\.md$"
+		}
+		function mdescape(s) {
+			gsub(/\\/, "&&", s)
+			gsub(/\n/, " ", s)
+			gsub(/\r/, " ", s)
+			gsub(/\|/, "\\|", s)
+			gsub(/\[/, "\\[", s)
+			gsub(/\]/, "\\]", s)
+			return s
+		}
+		function normprog(p) {
+			sub(/%$/, "", p)
+			gsub("[" wsp "]", "", p)
+			if (p == "") p = "0"
+			return p "%"
+		}
+		# The Task ID mirrors the greedy capture of the bash render regex
+		# with backtracking: walk the filename numeric -N segments from the
+		# rightmost backward; the ID is the longest segment-terminated
+		# prefix whose remainder is exactly ".md" or matches the stamp form
+		# "-YYYYMMDD-HHMM" plus an optional slug, so a numeric-only slug
+		# segment (TASK-5-20260101-1200-12-factor.md -> TASK-5) lands in
+		# the stamp role only when nothing right of it qualifies. Empty
+		# when no segment boundary qualifies.
+		function taskid(fb,  p, rest, segend, cand, remainder) {
+			for (p = length(fb) - 1; p > 1; p--) {
+				if (substr(fb, p, 1) != "-") continue
+				rest = substr(fb, p)
+				if (!match(rest, "^-[0-9]+")) continue
+				segend = p + RLENGTH
+				cand = substr(fb, 1, segend - 1)
+				if (cand !~ segmentre) continue
+				remainder = substr(fb, segend)
+				if (remainder == ".md" || remainder ~ stampre) return cand
+			}
+			return ""
+		}
+		function idkeyof(id,  rest, key, seg) {
+			rest = id
+			sub(/^[A-Za-z]+/, "", rest)
+			key = ""
+			while (match(rest, /^-[0-9]+/)) {
+				seg = substr(rest, 2, RLENGTH - 1) + 0
+				key = key "-" sprintf("%0" idw "d", seg)
+				rest = substr(rest, RLENGTH + 1)
+			}
+			sub(/^-/, "", key)
+			return key
+		}
+'
+
+# Shared awk function source: the JSON string escaper every emitter of the
+# versioned JSON readers runs, so escaping exists exactly once and no
+# reader can emit an invalid string. JSON strings need quoted backslashes
+# and quotes, named escapes for the common C0 controls, and \u00XX for any
+# other control character; valid UTF-8 passes through byte-for-byte (the
+# emitters assume task files are UTF-8 text). The fast path is a fixed
+# gsub chain; the slow path walks a line character by character only when
+# a control character outside the named escapes is present, using an ord
+# table built once per program (sprintf("%c", 0) is unreliable across
+# awk variants, so NUL is left to the slow path's table gap and control
+# codes run 1..31).
+readonly AWK_JSON_ESCAPE='		function json_escape(s,  out, i, n, c, code, hexd) {
+			gsub(/\\/, "\\\\\\\\", s)
+			gsub(/"/, "\\\"", s)
+			# The named-control replacements carry one source backslash ("\\n"):
+			# gawk >= 5.3 uses the replacement value literally after \\\\ collapsing,
+			# so "\\\\n" (value \\\\n) would emit two backslashes and break JSON
+			# decoding, while older awks that pairwise-collapse emit a non-special
+			# backslash-letter pair unchanged; one source backslash is correct under
+			# both replacement semantics.
+			gsub(/\n/, "\\n", s)
+			gsub(/\r/, "\\r", s)
+			gsub(/\t/, "\\t", s)
+			gsub(/\b/, "\\b", s)
+			gsub(/\f/, "\\f", s)
+			if (s !~ /[\001-\010\013\014\016-\037]/) return s
+			hexd = "0123456789abcdef"
+			out = ""; n = length(s)
+			for (i = 1; i <= n; i++) {
+				c = substr(s, i, 1)
+				code = ORDC[c]
+				if (code == "" ) {
+					out = out c
+					continue
+				}
+				out = out "\\u00" substr(hexd, int(code / 16) + 1, 1) substr(hexd, code % 16 + 1, 1)
+			}
+			return out
+		}
+		# The quoted-string form every emitter wraps values in, so call sites
+		# never hand-build quote pairs around json_escape.
+		function jq(s) {
+			return "\"" json_escape(s) "\""
+		}
+		BEGIN {
+			for (ORDI = 1; ORDI <= 31; ORDI++) ORDC[sprintf("%c", ORDI)] = ORDI
+		}
+'
+
+# Shared awk function source: the task-file header reader every row-level
+# emitter runs, so the header-field regexes exist exactly once and the
+# dashboard assembler and the versioned JSON readers can never drift on
+# what a logical header field is (artifact 28's named drift site between
+# assemble_rows and the board-wide scanners). hdr_reset clears the per-file
+# state (call before each file's header region); hdr_feed feeds one
+# candidate header line, first occurrence wins per field, values kept
+# verbatim (trimming is the caller's presentation decision, so the
+# assembler's legacy fallbacks stay byte-identical). The field set covers
+# every template header field plus the two legacy forms the dashboard
+# falls back to (the "# Task:" title and the decorative "*Created:.*"
+# line); a caller not needing a field simply never reads it. Self-contained:
+# the fragment defines its own whitespace classes with the same values as
+# AWK_ROW_HELPERS', so concatenating both fragments is order-independent.
+readonly AWK_HEADER_FIELDS='		BEGIN {
+			wsp = " \t\r\v\f"
+			ws = "[" wsp "]+"
+		}
+		function hdr_reset(    k) {
+			for (k in FLD) delete FLD[k]
+			for (k in HAVE) delete HAVE[k]
+		}
+		function hdr_feed(line) {
+			if (!("Title" in HAVE) && match(line, "^# Task:" ws)) { FLD["Title"] = substr(line, RSTART + RLENGTH); HAVE["Title"] = 1 }
+			if (!("Status" in HAVE) && match(line, "^\\*\\*Status:\\*\\*" ws)) { FLD["Status"] = substr(line, RSTART + RLENGTH); HAVE["Status"] = 1 }
+			if (!("Priority" in HAVE) && match(line, "^\\*\\*Priority:\\*\\*" ws)) { FLD["Priority"] = substr(line, RSTART + RLENGTH); HAVE["Priority"] = 1 }
+			if (!("Progress" in HAVE) && match(line, "^\\*\\*Progress:\\*\\*" ws)) { FLD["Progress"] = substr(line, RSTART + RLENGTH); HAVE["Progress"] = 1 }
+			if (!("Created" in HAVE) && match(line, "^\\*\\*Created:\\*\\*" ws)) { FLD["Created"] = substr(line, RSTART + RLENGTH); HAVE["Created"] = 1 }
+			if (!("DecoCreated" in HAVE) && match(line, "^\\*Created:" ws)) { FLD["DecoCreated"] = substr(line, RSTART + RLENGTH); sub(/\*.*/, "", FLD["DecoCreated"]); HAVE["DecoCreated"] = 1 }
+			if (!("Updated" in HAVE) && match(line, "^\\*\\*Updated:\\*\\*" ws)) { FLD["Updated"] = substr(line, RSTART + RLENGTH); HAVE["Updated"] = 1 }
+			if (!("Completed" in HAVE) && match(line, "^\\*\\*Completed:\\*\\*" ws)) { FLD["Completed"] = substr(line, RSTART + RLENGTH); HAVE["Completed"] = 1 }
+			if (!("Duration" in HAVE) && match(line, "^\\*\\*Duration:\\*\\*" ws)) { FLD["Duration"] = substr(line, RSTART + RLENGTH); HAVE["Duration"] = 1 }
+			if (!("Status Reason" in HAVE) && match(line, "^\\*\\*Status Reason:\\*\\*" ws)) { FLD["Status Reason"] = substr(line, RSTART + RLENGTH); HAVE["Status Reason"] = 1 }
+			if (!("Owner" in HAVE) && match(line, "^\\*\\*Owner:\\*\\*" ws)) { FLD["Owner"] = substr(line, RSTART + RLENGTH); HAVE["Owner"] = 1 }
+			if (!("Checkpoint Gating" in HAVE) && match(line, "^\\*\\*Checkpoint Gating:\\*\\*" ws)) { FLD["Checkpoint Gating"] = substr(line, RSTART + RLENGTH); HAVE["Checkpoint Gating"] = 1 }
+			if (!("Latest Update" in HAVE) && match(line, "^\\*\\*Latest Update:\\*\\*" ws)) { FLD["Latest Update"] = substr(line, RSTART + RLENGTH); HAVE["Latest Update"] = 1 }
+		}
+'
+
 readonly DEFAULT_PRIORITY="Medium"
 readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly DEFAULT_FROM="Manager"
@@ -213,6 +376,17 @@ readonly HEADER_FIELDS="$(_header_fields_list "${TEMPLATE_HEADER_FIELDS[@]}")"
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
 
+# Reader-surface failures carry a stable machine-readable code in trailing
+# parentheses: consumers of the versioned JSON readers match the code, not
+# the prose. The shared dies below sit on both reader and writer paths, so
+# writers gain the suffix too; it is additive text after the pinned message.
+readonly CODE_NO_BOARD="NO_BOARD"
+readonly CODE_TASK_NOT_FOUND="TASK_NOT_FOUND"
+readonly CODE_BOARD_ROOT_ESCAPE="BOARD_ROOT_ESCAPE"
+readonly CODE_SECTION_NOT_FOUND="SECTION_NOT_FOUND"
+readonly CODE_USAGE="USAGE"
+diec() { local code="$1"; shift; err "$* (code: $code)"; exit 1; }
+
 # The CLI clock. Test harnesses may pin it by exporting TASKS_TEST_CLOCK
 # ("YYYY-MM-DD HH:MM") together with TASKS_DIR: every derived timestamp
 # (header stamps, report and log entries, the new-task filename stamp)
@@ -228,6 +402,35 @@ if [[ -n "${TASKS_TEST_CLOCK:-}" ]]; then
 	fi
 	[[ -n "${TASKS_DIR:-}" ]] || die "TASKS_TEST_CLOCK is honored only when TASKS_DIR is also exported (test boards set both)"
 	TEST_CLOCK="$TASKS_TEST_CLOCK"
+fi
+
+# Test-only lock-hold seam: with TASKS_TEST_LOCK_HOLD_MS set (alongside
+# TASKS_DIR, same co-gate as the clock), every writer holds the board lock
+# for that many milliseconds after acquiring it, so a second writer
+# provably blocks on the flock instead of serializing by scheduler luck
+# and the concurrency battery's no-lost-update assertion becomes a
+# serialization proof. Unset: no-op.
+LOCK_HOLD_SECS=""
+if [[ -n "${TASKS_TEST_LOCK_HOLD_MS:-}" ]]; then
+	if [[ ! "$TASKS_TEST_LOCK_HOLD_MS" =~ ^[1-9][0-9]*$ ]]; then
+		die "TASKS_TEST_LOCK_HOLD_MS must be a positive integer of milliseconds, got: $TASKS_TEST_LOCK_HOLD_MS"
+	fi
+	[[ -n "${TASKS_DIR:-}" ]] || die "TASKS_TEST_LOCK_HOLD_MS is honored only when TASKS_DIR is also exported (test boards set both)"
+	LOCK_HOLD_SECS="$(awk -v ms="$TASKS_TEST_LOCK_HOLD_MS" 'BEGIN { printf "%.3f", ms / 1000 }')"
+fi
+
+# Test-only crash-window seam: with TASKS_TEST_CRASH_POINT set (same
+# co-gate), the edit section-write path pauses that many seconds between
+# staging the new body and committing it with mv, so the crash battery can
+# SIGKILL inside the real window (staged tmp written, commit not yet made)
+# and exercise the old-or-new invariant deterministically. Unset: no-op.
+CRASH_POINT_SECS=""
+if [[ -n "${TASKS_TEST_CRASH_POINT:-}" ]]; then
+	if [[ ! "$TASKS_TEST_CRASH_POINT" =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]]; then
+		die "TASKS_TEST_CRASH_POINT must be a positive number of seconds, got: $TASKS_TEST_CRASH_POINT"
+	fi
+	[[ -n "${TASKS_DIR:-}" ]] || die "TASKS_TEST_CRASH_POINT is honored only when TASKS_DIR is also exported (test boards set both)"
+	CRASH_POINT_SECS="$TASKS_TEST_CRASH_POINT"
 fi
 
 now() {
@@ -313,13 +516,43 @@ Commands:
                                        Replace or append a section body from
                                        <file> or stdin, refresh Updated, render
                                        (locked).
-  show [--dir DIR] <taskfile> [--tail N]
+  show [--dir DIR] <taskfile> [--tail N] [--json] [--section HEADING] [--raw]
                                        Print header fields, Latest Update, and
                                        the last N Work Log entries (default 10).
+                                       --json prints the schema_version 1
+                                       snapshot (every header field, complete
+                                       section bodies, structured Work Log);
+                                       --section prints one section's canonical
+                                       body (the edit write model's span, so
+                                       read and write round-trip); --raw prints
+                                       the whole file byte-exact.
+  list [--dir DIR] [--json] [--lane NAME] [--limit N] [--offset N]
+                                       Read-only board listing in dashboard lane
+                                       order. --json emits the schema_version 1
+                                       payload (logical fields, owner and claim
+                                       restrictions included); --lane filters one
+                                       lane; --limit/--offset page the sorted set.
+  reports [--dir DIR] <taskfile> [--json] [--include-body] [--limit N] [--offset N]
+                                       Read-only report index for one task with
+                                       Work Log provenance (stamp, from, digest).
+                                       --include-body adds report bodies (--json
+                                       only); --limit/--offset page by sequence.
+  export [--dir DIR] [--format jsonl] [--include-reports]
+                                       Lossless JSONL export of the board's task
+                                       files (reports added by --include-reports):
+                                       raw content plus a final_newline flag
+                                       reconstruct every file byte-exactly.
   lint [--dir DIR] [--verbose]         Read-only board lint (sections, header shape, reason
                                        coupling, dead report links, checkbox drift, claim/archive
                                        hygiene, commit reachability); exits 1 on hard
                                        findings. --verbose lists every advisory.
+  doctor [--dir DIR] [--json] [--all]  Read-only diagnostics for the eight stable problem-code
+                                       classes (DUPLICATE_ID, FILE_NAMING, STATUS_REASON,
+                                       STALE_CLAIM, MISSING_DEP, DEP_CYCLE, DEAD_REPORT_LINK,
+                                       DASHBOARD_DIVERGENCE), grandfathered to fire only on
+                                       the live working set; --all also lists the findings
+                                       grandfathered away under a GRANDFATHERED marker with
+                                       their own count; always exits 0 (lint enforces).
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
   release <taskfile>                   Release a claim and clear Owner, render. A claim
                                        owned by another session warns with both
@@ -428,16 +661,16 @@ resolve_task_file() {
 	if [[ -f "$arg" ]]; then cand="$arg"
 	elif [[ -f "$tasks_dir/$CURRENT_DIR/$arg" ]]; then cand="$tasks_dir/$CURRENT_DIR/$arg"
 	elif [[ -f "$tasks_dir/$ARCHIVE_DIR/$arg" ]]; then cand="$tasks_dir/$ARCHIVE_DIR/$arg"
-	else die "task file not found: $arg"
+	else diec "$CODE_TASK_NOT_FOUND" "task file not found: $arg"
 	fi
-	local real; real="$(readlink -f "$cand")" || die "task file not found: $arg"
+	local real; real="$(readlink -f "$cand")" || diec "$CODE_TASK_NOT_FOUND" "task file not found: $arg"
 	# Literal prefix strip, not a "==" glob: a board root containing glob
 	# metacharacters must not let a sibling path match the pattern and slip
 	# past containment. under == real means the prefix did not match; under
 	# lacking its leading slash means real is the root itself or a sibling.
 	local under="${real#"$board"}"
 	[[ "$under" != "$real" && "$under" == /* ]] \
-		|| die "task file escapes the board root: $arg resolves to $real, outside the board at $board"
+		|| diec "$CODE_BOARD_ROOT_ESCAPE" "task file escapes the board root: $arg resolves to $real, outside the board at $board"
 	printf '%s' "$cand"
 }
 
@@ -475,59 +708,9 @@ assemble_rows() {
 		AWK_READY="$STATUS_READY" AWK_IN_PROGRESS="$STATUS_IN_PROGRESS" \
 		AWK_BLOCKED="$STATUS_BLOCKED" AWK_CANCELLED="$STATUS_CANCELLED" \
 		AWK_COMPLETED="$STATUS_COMPLETED" \
-		awk '
-		function mdescape(s) {
-			gsub(/\\/, "&&", s)
-			gsub(/\n/, " ", s)
-			gsub(/\r/, " ", s)
-			gsub(/\|/, "\\|", s)
-			gsub(/\[/, "\\[", s)
-			gsub(/\]/, "\\]", s)
-			return s
-		}
-		function normprog(p) {
-			sub(/%$/, "", p)
-			gsub("[" wsp "]", "", p)
-			if (p == "") p = "0"
-			return p "%"
-		}
-		# The Task ID mirrors the greedy capture of the bash render regex
-		# with backtracking: walk the filename numeric -N segments from the
-		# rightmost backward; the ID is the longest segment-terminated
-		# prefix whose remainder is exactly ".md" or matches the stamp form
-		# "-YYYYMMDD-HHMM" plus an optional slug, so a numeric-only slug
-		# segment (TASK-5-20260101-1200-12-factor.md -> TASK-5) lands in
-		# the stamp role only when nothing right of it qualifies. Empty
-		# when no segment boundary qualifies.
-		function taskid(fb,  p, rest, segend, cand, remainder) {
-			for (p = length(fb) - 1; p > 1; p--) {
-				if (substr(fb, p, 1) != "-") continue
-				rest = substr(fb, p)
-				if (!match(rest, "^-[0-9]+")) continue
-				segend = p + RLENGTH
-				cand = substr(fb, 1, segend - 1)
-				if (cand !~ segmentre) continue
-				remainder = substr(fb, segend)
-				if (remainder == ".md" || remainder ~ stampre) return cand
-			}
-			return ""
-		}
-		function idkeyof(id,  rest, key, seg) {
-			rest = id
-			sub(/^[A-Za-z]+/, "", rest)
-			key = ""
-			while (match(rest, /^-[0-9]+/)) {
-				seg = substr(rest, 2, RLENGTH - 1) + 0
-				key = key "-" sprintf("%0" idw "d", seg)
-				rest = substr(rest, RLENGTH + 1)
-			}
-			sub(/^-/, "", key)
-			return key
-		}
+		awk "$AWK_ROW_HELPERS$AWK_HEADER_FIELDS"'
 		BEGIN {
 			sep = "\034"
-			wsp = " \t\r\v\f"
-			ws = "[" wsp "]+"
 			na = ENVIRON["AWK_NA"]
 			dp = ENVIRON["AWK_DEFAULT_PRIORITY"]
 			undated = ENVIRON["AWK_UNDATED"]
@@ -540,10 +723,6 @@ assemble_rows() {
 			st_blocked = ENVIRON["AWK_BLOCKED"]
 			st_cancelled = ENVIRON["AWK_CANCELLED"]
 			st_completed = ENVIRON["AWK_COMPLETED"]
-			d8 = "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]"
-			d4 = "[0-9][0-9][0-9][0-9]"
-			segmentre = "^[A-Za-z]+(-[0-9]+)+$"
-			stampre = "^-" d8 "-" d4 "(-.*)?\\.md$"
 			newest_acc = ""
 			for (argi = 1; argi < ARGC; argi++) {
 				file = ARGV[argi]
@@ -557,23 +736,15 @@ assemble_rows() {
 					subdir = ad
 					arch = 1
 				}
-				name = status = priority = progress = ""
-				created = updated = completed = duration = deco = ""
-				have_name = have_status = have_priority = have_progress = 0
-				have_created = have_deco = have_updated = have_completed = have_duration = 0
+				hdr_reset()
 				while ((getline line < (td file)) > 0) {
 					if (line ~ /^## /) break
-					if (!have_name && match(line, "^# Task:" ws)) { name = substr(line, RSTART + RLENGTH); have_name = 1 }
-					if (!have_status && match(line, "^\\*\\*Status:\\*\\*" ws)) { status = substr(line, RSTART + RLENGTH); have_status = 1 }
-					if (!have_priority && match(line, "^\\*\\*Priority:\\*\\*" ws)) { priority = substr(line, RSTART + RLENGTH); have_priority = 1 }
-					if (!have_progress && match(line, "^\\*\\*Progress:\\*\\*" ws)) { progress = substr(line, RSTART + RLENGTH); have_progress = 1 }
-					if (!have_created && match(line, "^\\*\\*Created:\\*\\*" ws)) { created = substr(line, RSTART + RLENGTH); have_created = 1 }
-					if (!have_deco && match(line, "^\\*Created:" ws)) { deco = substr(line, RSTART + RLENGTH); sub(/\*.*/, "", deco); have_deco = 1 }
-					if (!have_updated && match(line, "^\\*\\*Updated:\\*\\*" ws)) { updated = substr(line, RSTART + RLENGTH); have_updated = 1 }
-					if (!have_completed && match(line, "^\\*\\*Completed:\\*\\*" ws)) { completed = substr(line, RSTART + RLENGTH); have_completed = 1 }
-					if (!have_duration && match(line, "^\\*\\*Duration:\\*\\*" ws)) { duration = substr(line, RSTART + RLENGTH); have_duration = 1 }
+					hdr_feed(line)
 				}
 				close(td file)
+				name = FLD["Title"]; status = FLD["Status"]; priority = FLD["Priority"]
+				progress = FLD["Progress"]; created = FLD["Created"]; deco = FLD["DecoCreated"]
+				updated = FLD["Updated"]; completed = FLD["Completed"]; duration = FLD["Duration"]
 				if (created == "") created = deco
 				if (created == "") created = na
 				nb = fb
@@ -624,62 +795,26 @@ slugify() {
 
 # --- rendering -------------------------------------------------------------
 
-# Rebuild dashboard.md from all task files. Pure function of the files on disk:
-# same inputs produce byte-identical output, including the derived "Last updated"
-# line (the newest Updated timestamp, not wall-clock).
-render_unlocked() {
-	local tasks_dir="$1"
-	# A relative tasks_dir with a leading dash or tilde option-poisons or
-	# tilde-expands the utilities the render spawns and the re-parsed trap
-	# string; "./" defuses both.
-	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
-	local dash="$tasks_dir/$DASHBOARD_NAME"
-	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
-	# Both render temps die with the render span: an EXIT trap carrying
-	# the concrete temp paths (printf %q keeps arbitrary board paths
-	# byte-safe) runs on every abort set -e produces, where scattered rm
-	# calls never execute. Paths are baked in at set time because the
-	# trap fires after the function frame is gone; the script sets no
-	# other EXIT trap, so clearing it here restores the previous state.
-	# Cleared after the dashboard commit, when cleanup is moot, so the
-	# trap never spans other subcommands. That clear is also why the
-	# render span must never nest: the commit's trap - EXIT discards any
-	# outer render span's cleanup with it, so no code path may run one
-	# render span inside another (none does).
-	local render_cleanup; render_cleanup="rm -f -- $(printf '%q' "$tmp")"
-	trap "$render_cleanup" EXIT
-
-	local -a files=()
-	local subdir file
-	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
-		[[ -d "$tasks_dir/$subdir" ]] || continue
-		for file in "$tasks_dir/$subdir"/*.md; do
-			[[ -e "$file" ]] || continue
-			files+=("${file#"$tasks_dir/"}")
-		done
-	done
-
+# Print the dashboard content for a board from the given sorted row-records
+# file (assemble_rows output after one LC_ALL=C sort): the pure printer half
+# of the render. Same inputs produce byte-identical output, including the
+# derived "Last updated" line (the newest Updated timestamp, not
+# wall-clock). Strictly read-only; the doctor's divergence check consumes
+# this output against the on-disk dashboard without ever writing the board.
+board_walk() {
+	local rows_file="$1"
+	local -a sorted=()
+	# Reading a regular file rather than a pipe: bash's mapfile consumes
+	# pipes with per-byte reads (the read builtin cannot push back surplus
+	# bytes), which at board size costs more in syscall churn than the
+	# caller-side temp file; reading a regular file is buffered.
+	mapfile -t sorted <"$rows_file"
 	local newest="" lane_entry ordinal key_row
 	local prev_lane=0 lane_i
-	# The assembled rows route through a temp file rather than a pipe:
-	# bash's mapfile consumes pipes with per-byte reads (the read builtin
-	# cannot push back surplus bytes), which at board size costs more in
-	# syscall churn than the extra mktemp and rm; reading a regular file
-	# is buffered. One LC_ALL=C sort orders every row at once: the leading
-	# lane ordinal groups the lanes in board order, the sort keys order
-	# rows within a lane, and byte order keeps ties deterministic. The
-	# walk then prints each lane's header exactly where the old per-lane
+	# The walk prints each lane's header exactly where the old per-lane
 	# printf block put it, including the header of a lane with no rows
 	# (printed when the stream jumps across it, or all of them on an
 	# empty board).
-	local -a sorted=()
-	local rows_file; rows_file="$(mktemp "$dash.XXXXXX")"
-	render_cleanup+=" $(printf '%q' "$rows_file")"
-	trap "$render_cleanup" EXIT
-	assemble_rows "${files[@]+"${files[@]}"}" >"$rows_file"
-	LC_ALL=C sort -o "$rows_file" "$rows_file"
-	mapfile -t sorted <"$rows_file"
-	rm -f "$rows_file"
 	{
 		printf '# Task Board Dashboard\n\n'
 		printf '*Jira-style task management board. Auto-generated by `tasks render`; do not edit by hand.*\n\n'
@@ -707,7 +842,61 @@ render_unlocked() {
 			(( lane_i += 1 ))
 		done
 		printf '\n---\n\n*Last updated: %s*\n' "${newest:-$NA}"
-	} >"$tmp"
+	}
+}
+
+# Collect a board's task-file paths (current/ then archive/, basename
+# order), relative to the board root. Shared by every board-wide pass:
+# render, lint, and the doctor's divergence check read the same file set.
+board_files() { # <tasks_dir> <array-name>
+	local tasks_dir="$1" subdir file
+	local -n out_files="$2"
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md; do
+			[[ -e "$file" ]] || continue
+			out_files+=("${file#"$tasks_dir/"}")
+		done
+	done
+}
+
+# Rebuild dashboard.md from all task files under the board lock (callers
+# pre-lock via render; direct callers must hold the lock themselves).
+render_unlocked() {
+	local tasks_dir="$1"
+	# A relative tasks_dir with a leading dash or tilde option-poisons or
+	# tilde-expands the utilities the render spawns and the re-parsed trap
+	# string; "./" defuses both.
+	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
+	local dash="$tasks_dir/$DASHBOARD_NAME"
+	local tmp; tmp="$(mktemp "$dash.XXXXXX")"
+	# Both render temps die with the render span: the EXIT trap runs on
+	# every abort set -e produces, where scattered rm calls never
+	# execute. The script sets no other EXIT trap, so clearing it here
+	# restores the previous state. Cleared after the dashboard commit,
+	# when cleanup is moot, so the trap never spans other subcommands.
+	# That clear is also why the render span must never nest: the
+	# commit's trap - EXIT discards any outer render span's cleanup with
+	# it, so no code path may run one render span inside another (none
+	# does).
+	arm_tmp_cleanup_trap "$tmp"
+
+	local -a files=()
+	board_files "$tasks_dir" files
+
+	# The assembled rows route through a temp file rather than a pipe:
+	# bash's mapfile consumes pipes with per-byte reads (the read builtin
+	# cannot push back surplus bytes), which at board size costs more in
+	# syscall churn than the extra mktemp and rm; reading a regular file
+	# is buffered. One LC_ALL=C sort orders every row at once: the leading
+	# lane ordinal groups the lanes in board order, the sort keys order
+	# rows within a lane, and byte order keeps ties deterministic.
+	local rows_file; rows_file="$(mktemp "$dash.XXXXXX")"
+	arm_tmp_cleanup_trap "$tmp" "$rows_file"
+	assemble_rows "${files[@]+"${files[@]}"}" >"$rows_file"
+	LC_ALL=C sort -o "$rows_file" "$rows_file"
+	board_walk "$rows_file" >"$tmp"
+	rm -f "$rows_file"
 
 	mv -f "$tmp" "$dash"
 	trap - EXIT
@@ -715,7 +904,7 @@ render_unlocked() {
 
 # Fail unless the .tasks directory exists.
 require_tasks_dir() {
-	[[ -d "$1" ]] || die "no .tasks directory at $1 (run 'tasks init')"
+	[[ -d "$1" ]] || diec "$CODE_NO_BOARD" "no .tasks directory at $1 (run 'tasks init')"
 }
 
 # Acquire the board lock on fd 9 for this process. The lock is released
@@ -725,6 +914,33 @@ require_tasks_dir() {
 acquire_board_lock() {
 	exec 9>"$1/$LOCK_NAME"
 	flock 9
+	if [[ -n "$LOCK_HOLD_SECS" ]]; then sleep "$LOCK_HOLD_SECS" 9>&-; fi
+}
+
+# The crash-window seam pause for the edit section-write path: sleeps only
+# when the battery arms TASKS_TEST_CRASH_POINT, so a SIGKILL timed against
+# the staged temp lands with the tmp written and the mv not yet made.
+crash_point_pause() {
+	[[ -n "$CRASH_POINT_SECS" ]] || return 0
+	# 9>&-: forked children inherit the lock fd, so an un-closed sleep would
+	# keep the board lock alive for the whole pause even after its writer is
+	# SIGKILLed; the live writer holds the lock itself, so the child needs
+	# no reference and a dead writer must release immediately.
+	sleep "$CRASH_POINT_SECS" 9>&- || true
+}
+
+# Arm the process EXIT trap to remove the given temp files: every path is
+# %-q-escaped into the trap string at set time (printf %q keeps arbitrary
+# board and TMPDIR paths byte-safe), so the escapes re-parse as code when
+# the trap fires, after the setting frame is gone. %-q run again on the
+# fired string would double-escape under a metacharacter TMPDIR and rm
+# would receive literal backslashes, leaking the temps. Every staged-temp
+# cleanup site funnels through here so this discipline exists in exactly
+# one place.
+arm_tmp_cleanup_trap() {
+	local cleanup="rm -f --" f
+	for f in "$@"; do cleanup+=" $(printf '%q' "$f")"; done
+	trap "$cleanup" EXIT
 }
 
 # Acquire the board lock, then rebuild dashboard.md.
@@ -998,6 +1214,7 @@ insert_section_body() {
 			if (!inserted) exit 1
 		}
 	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	crash_point_pause
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
@@ -1078,6 +1295,7 @@ replace_section_body() {
 			}
 		}
 	' "$file" >"$tmp" || { rm -f "$tmp"; return 1; }
+	crash_point_pause
 	mv -f "$tmp" "$file" || { rm -f "$tmp"; return 1; }
 }
 
@@ -2682,6 +2900,417 @@ cmd_lint() {
 	((hard_count == 0)) || exit 1
 }
 
+# The doctor's live-set test: a task is live when its file is non-archived
+# and its status is not terminal. The doctor fires its problem codes only
+# on this working set, so archived and legacy shapes stay grandfathered
+# quiet and legacy-conformant boards pin at zero problems.
+doctor_live() { # <status> <archbit>
+	[[ "$2" == "0" ]] || return 1
+	! is_terminal_status "$1"
+}
+
+# Bounded DFS for doctor_dependency_cycles: seek a simple path from cur
+# back to target; on success DOCTOR_CYCLE carries the path members (the
+# cycle through target, without the repeating target). State lives in the
+# caller's locals (DOCTOR_WALK_PATH/ONPATH/DEPTH/SUCC/CYCLE), resolved
+# through bash dynamic scoping; the only callers are
+# doctor_dependency_cycles and this function itself.
+doctor_cycle_walk() { # <target> <cur>
+	local target="$1" cur="$2" s
+	((DOCTOR_WALK_DEPTH < 1000)) || return 1
+	for s in ${DOCTOR_WALK_SUCC[$cur]:-}; do
+		if [[ "$s" == "$target" ]]; then
+			DOCTOR_CYCLE=("${DOCTOR_WALK_PATH[@]}")
+			return 0
+		fi
+		[[ -n "${DOCTOR_WALK_ONPATH[$s]+x}" ]] && continue
+		DOCTOR_WALK_ONPATH["$s"]=1
+		DOCTOR_WALK_PATH+=("$s")
+		((DOCTOR_WALK_DEPTH += 1))
+		if doctor_cycle_walk "$target" "$s"; then
+			((DOCTOR_WALK_DEPTH -= 1))
+			return 0
+		fi
+		((DOCTOR_WALK_DEPTH -= 1))
+		unset "DOCTOR_WALK_ONPATH[$s]"
+		unset "DOCTOR_WALK_PATH[$(( ${#DOCTOR_WALK_PATH[@]} - 1 ))]"
+	done
+	return 1
+}
+
+# Distinct dependency cycles over the doctor's ID-level successor map
+# (assoc "id" -> space-joined successor IDs), printed one space-joined
+# member line per cycle, rotated so the lexicographically smallest member
+# leads (the canonical form the dedupe and the record emission key on).
+# Kahn-style trimming first strips every node with no successor or
+# predecessor chain into a cycle, so the bounded per-node DFS only walks
+# the cycle-bearing core; a node on two distinct cycles yields the first
+# cycle its sorted traversal reaches (any finding prompts a repair that
+# dissolves the tangle, so one representative per node suffices). The
+# trim is O(V+E); the DFS worst case is O(core * core) on board-sized
+# graphs and depth-capped against pathological input.
+doctor_dependency_cycles() { # <succ-array-name>
+	local -n succ="$1"
+	local -A pred=() live_in=() live_out=() DOCTOR_WALK_SUCC
+	local n s p changed
+	for n in "${!succ[@]}"; do
+		DOCTOR_WALK_SUCC["$n"]="${succ[$n]:-}"
+		[[ -n "${live_out[$n]+x}" ]] || { live_in["$n"]=0; live_out["$n"]=0; }
+		for s in ${succ[$n]:-}; do
+			[[ -n "${live_out[$s]+x}" ]] || { live_in["$s"]=0; live_out["$s"]=0; }
+			pred["$s"]+="$n "
+			(( live_out[$n] += 1 ))
+		done
+	done
+	changed=1
+	while ((changed)); do
+		changed=0
+		for n in "${!live_out[@]}"; do
+			if (( live_out[$n] == 0 )); then
+				changed=1
+				for p in ${pred[$n]:-}; do
+					[[ -n "${live_out[$p]+x}" ]] && (( live_out[$p] -= 1 ))
+				done
+				unset "live_in[$n]" "live_out[$n]"
+				continue
+			fi
+			if (( live_in[$n] == 0 )); then
+				changed=1
+				for s in ${succ[$n]:-}; do
+					[[ -n "${live_in[$s]+x}" ]] && (( live_in[$s] -= 1 ))
+				done
+				unset "live_in[$n]" "live_out[$n]"
+			fi
+		done
+	done
+	local -a core=()
+	for n in "${!live_out[@]}"; do core+=("$n"); done
+	((${#core[@]} > 0)) || return 0
+	mapfile -t core < <(printf '%s\n' "${core[@]}" | LC_ALL=C sort)
+	local -A DOCTOR_WALK_ONPATH cycle_seen
+	local -a DOCTOR_WALK_PATH DOCTOR_CYCLE mem rot
+	local DOCTOR_WALK_DEPTH min_i i key
+	for n in "${core[@]}"; do
+		DOCTOR_WALK_PATH=("$n")
+		DOCTOR_WALK_ONPATH=()
+		DOCTOR_WALK_ONPATH["$n"]=1
+		DOCTOR_WALK_DEPTH=0
+		DOCTOR_CYCLE=()
+		doctor_cycle_walk "$n" "$n" || continue
+		mem=("${DOCTOR_CYCLE[@]}")
+		min_i=0
+		for ((i = 1; i < ${#mem[@]}; i++)); do
+			[[ "${mem[$i]}" < "${mem[$min_i]}" ]] && min_i=$i
+		done
+		rot=()
+		for ((i = 0; i < ${#mem[@]}; i++)); do
+			rot+=("${mem[$(( (min_i + i) % ${#mem[@]} ))]}")
+		done
+		key="$(IFS='+'; printf '%s' "${rot[*]}")"
+		[[ -n "${cycle_seen[$key]+x}" ]] && continue
+		cycle_seen["$key"]=1
+		printf '%s\n' "${rot[*]}"
+	done
+}
+
+# Read-only board doctor: the eight stable problem-code classes as pure
+# diagnostics. Always exits 0; lint stays the enforcement arm. The classes
+# the task protocol pins by name:
+#
+#   DUPLICATE_ID        a Task ID shared by 2+ board files where some member
+#                       is live (dup groups wholly outside the live set are
+#                       grandfathered)
+#   FILE_NAMING         a live file whose basename misses the CLI naming
+#                       convention (ID, optional stamp, lowercase slug
+#                       segments, optional retry suffix)
+#   STATUS_REASON       a non-archived Blocked/Cancelled task with no Status
+#                       Reason (the header contract's coupling)
+#   STALE_CLAIM         a claim sidecar with no task file, or on a live
+#                       terminal-status task (archived-task sidecars are
+#                       grandfathered)
+#   MISSING_DEP         a dependency token on a dedicated surface (the
+#                       closure gate's grammar) of a live In Progress or
+#                       Blocked task that names no board file (Ready files
+#                       declaring future children are grandfathered)
+#   DEP_CYCLE           a dependency cycle with at least one live member
+#                       (all-archived cycles are grandfathered)
+#   DEAD_REPORT_LINK    a ../reports/ link on a live task whose target is
+#                       missing (archived files are grandfathered)
+#   DASHBOARD_DIVERGENCE dashboard.md missing or differing from the
+#                       board_walk assembly (global check, no grandfathering)
+#
+# --all additionally evaluates the findings grandfathering suppresses and
+# emits them as a separate GRANDFATHERED list with their own count (the
+# --json envelope gains grandfathered_total plus a grandfathered records
+# array); the default view, the totals, and the always-exit-0 contract are
+# unchanged.
+#
+# Substrate reuse: lint_scan_files feeds status/archive/reason/dead-link
+# data, closure_gate_scan feeds the dependency-surface tokens, board_walk
+# plus assemble_rows feed the divergence check, so the doctor can never
+# drift from the surfaces it diagnoses. Strictly read-only: no lock, no
+# render, no header bump.
+cmd_doctor() {
+	local dir="" json=0 all=0
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "doctor: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			--all) all=1; shift ;;
+			*) diec "$CODE_USAGE" "doctor: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+
+	local -a problems=() # "code\tfile\tdetail" records, sorted before emission
+	local -a gf_problems=() # the grandfathered equivalents, emitted only under --all
+	local -a DOCTOR_CODES=(DUPLICATE_ID FILE_NAMING STATUS_REASON STALE_CLAIM MISSING_DEP DEP_CYCLE DEAD_REPORT_LINK DASHBOARD_DIVERGENCE)
+
+	local -a files=()
+	board_files "$tasks_dir" files
+	local -a sorted_files=()
+	((${#files[@]} > 0)) && mapfile -t sorted_files < <(printf '%s\n' "${files[@]}" | LC_ALL=C sort)
+
+	# ---- pass 1: shared lint scan (status, archive bit, reason, link candidates)
+	local -A status_of arch_of reason_of link_targets_of
+	local rec tag rel a b c st arch
+	if ((${#files[@]} > 0)); then
+		local -a scan_recs=()
+		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
+		for rec in "${scan_recs[@]}"; do
+			IFS=$'\t' read -r tag rel a b c <<<"$rec"
+			case "$tag" in
+				S) status_of["$rel"]="$a"; arch_of["$rel"]="$b" ;;
+				R) reason_of["$rel"]="$a" ;;
+				L) link_targets_of["$rel"]+="$a"$'\t'"$b"$'\n' ;;
+			esac
+		done
+	fi
+
+	# ---- pass 2: naming + Task ID groups
+	local -A id_rels_of # id -> space-joined board-relative files
+	local base bid namere
+	namere='^[A-Za-z]+(-[0-9]+)+(-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9](-[a-z0-9]+)*(-[0-9]+)?)?\.md$'
+	for rel in "${sorted_files[@]}"; do
+		base="${rel##*/}"
+		bid="$(task_id_of_basename "$base")"
+		if [[ ! "$base" =~ $namere ]]; then
+			if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then
+				problems+=("FILE_NAMING"$'\t'"$rel"$'\t'"file name misses the CLI convention (ID-stamp-slug.md): $base")
+			else
+				gf_problems+=("FILE_NAMING"$'\t'"$rel"$'\t'"file name misses the CLI convention (ID-stamp-slug.md): $base")
+			fi
+		fi
+		[[ -n "$bid" ]] && id_rels_of["$bid"]+="$rel "
+	done
+
+	# ---- pass 3: dependency tokens (dedicated surfaces), missing deps, edges
+	local -A tokens_of succ_of
+	local own tok
+	for rel in "${sorted_files[@]}"; do
+		local -a toks=()
+		while IFS=$'\t' read -r tag tok; do
+			[[ "$tag" == "I" ]] && toks+=("$tok")
+		done < <(closure_gate_scan "$tasks_dir/$rel")
+		((${#toks[@]} > 0)) && tokens_of["$rel"]="$(printf '%s\n' "${toks[@]}" | LC_ALL=C sort -u | tr '\n' ' ')"
+		own="$(task_id_of_basename "${rel##*/}")"
+		st="${status_of[$rel]:-}"; arch="${arch_of[$rel]:-0}"
+		for tok in ${tokens_of[$rel]:-}; do
+			[[ "$tok" == "$own" ]] && continue
+			if [[ -z "${id_rels_of[$tok]+x}" ]]; then
+				if [[ "$arch" == "0" && ( "$st" == "$STATUS_IN_PROGRESS" || "$st" == "$STATUS_BLOCKED" ) ]]; then
+					problems+=("MISSING_DEP"$'\t'"$rel"$'\t'"dependency token '$tok' names no board file")
+				else
+					gf_problems+=("MISSING_DEP"$'\t'"$rel"$'\t'"dependency token '$tok' names no board file")
+				fi
+				continue
+			fi
+			[[ -n "$own" ]] && succ_of["$own"]+="$tok "
+		done
+	done
+
+	# ---- pass 4: duplicate ID groups needing a live member
+	local open_member
+	local -a members=()
+	for bid in "${!id_rels_of[@]}"; do
+		read -r -a members <<<"${id_rels_of[$bid]}"
+		(( ${#members[@]} >= 2 )) || continue
+		open_member=""
+		for rel in "${members[@]}"; do
+			if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then open_member="$rel"; break; fi
+		done
+		if [[ -n "$open_member" ]]; then
+			problems+=("DUPLICATE_ID"$'\t'"$open_member"$'\t'"Task ID $bid shared by: ${id_rels_of[$bid]% }")
+		else
+			gf_problems+=("DUPLICATE_ID"$'\t'"${members[0]}"$'\t'"Task ID $bid shared by: ${id_rels_of[$bid]% }")
+		fi
+	done
+
+	# ---- pass 5: status-reason coupling on live files
+	for rel in "${sorted_files[@]}"; do
+		st="${status_of[$rel]:-}"; arch="${arch_of[$rel]:-0}"
+		if [[ "$st" == "$STATUS_BLOCKED" || "$st" == "$STATUS_CANCELLED" ]] \
+			&& [[ -z "${reason_of[$rel]:-}" ]]; then
+			if [[ "$arch" == "0" ]]; then
+				problems+=("STATUS_REASON"$'\t'"$rel"$'\t'"Status $st requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)")
+			else
+				gf_problems+=("STATUS_REASON"$'\t'"$rel"$'\t'"Status $st requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)")
+			fi
+		fi
+	done
+
+	# ---- pass 6: dependency cycles needing a live member
+	local cid found chain i arrow_s
+	local -a cyc
+	while read -r chain; do
+		read -r -a cyc <<<"$chain"
+		found=""
+		for cid in "${cyc[@]}"; do
+			for rel in ${id_rels_of[$cid]}; do
+				if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then found="$rel"; break 2; fi
+			done
+		done
+		arrow_s="${cyc[0]}"
+		for ((i = 1; i < ${#cyc[@]}; i++)); do arrow_s+=" -> ${cyc[$i]}"; done
+		arrow_s+=" -> ${cyc[0]}"
+		if [[ -n "$found" ]]; then
+			problems+=("DEP_CYCLE"$'\t'"$found"$'\t'"dependency cycle: $arrow_s (open: $found)")
+		else
+			gf_problems+=("DEP_CYCLE"$'\t'"${id_rels_of[${cyc[0]}]%% *}"$'\t'"dependency cycle: $arrow_s")
+		fi
+	done < <(doctor_dependency_cycles succ_of)
+
+	# ---- pass 7: dead report links on live files
+	local ln tgt
+	for rel in "${sorted_files[@]}"; do
+		while IFS=$'\t' read -r ln tgt; do
+			[[ -n "$ln" ]] || continue
+			[[ -e "$tasks_dir/$REPORTS_DIR/${tgt#../reports/}" ]] && continue
+			if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then
+				problems+=("DEAD_REPORT_LINK"$'\t'"$rel"$'\t'"dead report link (line $ln): $tgt")
+			else
+				gf_problems+=("DEAD_REPORT_LINK"$'\t'"$rel"$'\t'"dead report link (line $ln): $tgt")
+			fi
+		done < <(printf '%s' "${link_targets_of[$rel]:-}")
+	done
+
+	# ---- pass 8: claim-sidecar staleness (archived-task sidecars grandfathered)
+	local -a claims=()
+	local subdir file claim_rel task_rel
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md.claim; do
+			[[ -e "$file" ]] || continue
+			claims+=("${file#"$tasks_dir/"}")
+		done
+	done
+	for file in "$tasks_dir"/*.md.claim; do
+		[[ -e "$file" ]] || continue
+		claims+=("${file#"$tasks_dir/"}")
+	done
+	local -a sorted_claims=()
+	((${#claims[@]} > 0)) && mapfile -t sorted_claims < <(printf '%s\n' "${claims[@]}" | LC_ALL=C sort)
+	for claim_rel in "${sorted_claims[@]}"; do
+		task_rel="${claim_rel%.claim}"
+		if [[ ! -f "$tasks_dir/$task_rel" ]]; then
+			problems+=("STALE_CLAIM"$'\t'"$claim_rel"$'\t'"claim sidecar with no task file")
+			continue
+		fi
+		arch="${arch_of[$task_rel]:-0}"
+		if [[ "$arch" == "1" ]]; then
+			gf_problems+=("STALE_CLAIM"$'\t'"$claim_rel"$'\t'"claim sidecar on archived task")
+			continue
+		fi
+		st="${status_of[$task_rel]:-}"
+		is_terminal_status "$st" \
+			&& problems+=("STALE_CLAIM"$'\t'"$claim_rel"$'\t'"stale claim sidecar on $st task")
+	done
+
+	# ---- pass 9: dashboard divergence (global)
+	local dash="$tasks_dir/$DASHBOARD_NAME"
+	if ! (( ${#files[@]} == 0 )) || [[ -e "$dash" ]]; then
+		local rows_file out_file
+		rows_file="$(mktemp "${TMPDIR:-/tmp}/tasks-doctor.XXXXXX")"
+		out_file="$(mktemp "${TMPDIR:-/tmp}/tasks-doctor.XXXXXX")"
+		arm_tmp_cleanup_trap "$rows_file" "$out_file"
+		if ((${#files[@]} > 0)); then
+			assemble_rows "${files[@]}" >"$rows_file"
+			LC_ALL=C sort -o "$rows_file" "$rows_file"
+		fi
+		board_walk "$rows_file" >"$out_file"
+		if [[ ! -e "$dash" ]]; then
+			problems+=("DASHBOARD_DIVERGENCE"$'\t'"dashboard.md"$'\t'"dashboard.md is missing (render would create it)")
+		elif ! cmp -s "$out_file" "$dash"; then
+			problems+=("DASHBOARD_DIVERGENCE"$'\t'"dashboard.md"$'\t'"dashboard.md differs from the assembled board")
+		fi
+		trap - EXIT
+		rm -f "$rows_file" "$out_file"
+	fi
+
+	# ---- emission: sorted records, fixed-order counts, exit 0 always
+	local -a sorted_problems=()
+	((${#problems[@]} > 0)) && mapfile -t sorted_problems < <(printf '%s\n' "${problems[@]}" | LC_ALL=C sort -u)
+	local -A code_count=()
+	local code file detail p out
+	for p in "${sorted_problems[@]+${sorted_problems[@]}}"; do
+		code="${p%%$'\t'*}"
+		code_count["$code"]=$(( ${code_count[$code]:-0} + 1 ))
+	done
+	local -a sorted_gf=()
+	((all == 1)) && ((${#gf_problems[@]} > 0)) && mapfile -t sorted_gf < <(printf '%s\n' "${gf_problems[@]}" | LC_ALL=C sort -u)
+	if ((json == 1)); then
+		out="{\"schema_version\":$SCHEMA_VERSION,\"type\":\"doctor\",\"total\":${#sorted_problems[@]},\"counts\":{"
+		for code in "${DOCTOR_CODES[@]}"; do
+			out+="\"$code\":${code_count[$code]:-0},"
+		done
+		out="${out%,}},\"problems\":["
+		for p in "${sorted_problems[@]+${sorted_problems[@]}}"; do
+			code="${p%%$'\t'*}"
+			detail="${p#*$'\t'}"
+			file="${detail%%$'\t'*}"
+			detail="${detail#*$'\t'}"
+			out+="{\"code\":$(jqstr_bash "$code"),\"file\":$(jqstr_bash "$file"),\"detail\":$(jqstr_bash "$detail")},"
+		done
+		if ((all == 1)); then
+			out="${out%,}],\"grandfathered_total\":${#sorted_gf[@]},\"grandfathered\":["
+			for p in "${sorted_gf[@]+${sorted_gf[@]}}"; do
+				code="${p%%$'\t'*}"
+				detail="${p#*$'\t'}"
+				file="${detail%%$'\t'*}"
+				detail="${detail#*$'\t'}"
+				out+="{\"code\":$(jqstr_bash "$code"),\"file\":$(jqstr_bash "$file"),\"detail\":$(jqstr_bash "$detail")},"
+			done
+			out="${out%,}]}"
+		else
+			out="${out%,}]}"
+		fi
+		printf '%s\n' "$out"
+	else
+		for p in "${sorted_problems[@]+${sorted_problems[@]}}"; do
+			code="${p%%$'\t'*}"
+			detail="${p#*$'\t'}"
+			file="${detail%%$'\t'*}"
+			detail="${detail#*$'\t'}"
+			printf '%s %s: %s\n' "$code" "$file" "$detail"
+		done
+		if ((all == 1)); then
+			for p in "${sorted_gf[@]+${sorted_gf[@]}}"; do
+				code="${p%%$'\t'*}"
+				detail="${p#*$'\t'}"
+				file="${detail%%$'\t'*}"
+				detail="${detail#*$'\t'}"
+				printf 'GRANDFATHERED %s %s: %s\n' "$code" "$file" "$detail"
+			done
+			printf 'doctor: %d problem(s), %d grandfathered across %d task files\n' "${#sorted_problems[@]}" "${#sorted_gf[@]}" "${#files[@]}"
+		else
+			printf 'doctor: %d problem(s) across %d task files\n' "${#sorted_problems[@]}" "${#files[@]}"
+		fi
+	fi
+}
+
 # Print the final N entries of a task's Work Log section, verbatim, from a
 # snapshot supplied on stdin. Entries start at each "### " heading; the tail
 # begins at the Nth-from-last heading and runs to the end of the section
@@ -2705,19 +3334,205 @@ work_log_tail() {
 	'
 }
 
+# Print one section's canonical body from a task file: the exact span the
+# edit write model defines (the first heading matching the name at level
+# 2..6, body through the line before the next heading of the same or higher
+# level, the structural blank line under the heading consumed, trailing
+# blank lines trimmed), so read and write agree byte-for-byte and
+# `tasks show --section | tasks edit --section` round-trips. Deeper nested
+# headings are addressable by name exactly like edit's own --section; the
+# level-1 document title is not a section. --json wraps the same canonical
+# body in the schema_version 1 envelope instead of printing it as text.
+# Strictly read-only; exit 1 with SECTION_NOT_FOUND when nothing matches.
+show_section() {
+	local file="$1" section="$2" rel="$3" json="$4"
+	local out rc=0
+	out="$(AWK_SECTION="$section" AWK_JSON_MODE="$json" AWK_FILE="$rel" AWK_SCHEMA_VERSION="$SCHEMA_VERSION" \
+		awk "$AWK_HEADING_LEVEL$AWK_JSON_ESCAPE"'
+			function emit_body(    i, s) {
+				while (nbuf > 0 && buf[nbuf] == "") nbuf--
+				if (ENVIRON["AWK_JSON_MODE"] == "1") {
+					s = ""
+					for (i = 1; i <= nbuf; i++) s = s (i > 1 ? "\n" : "") buf[i]
+					printf "%s\n", ("{\"schema_version\":" ENVIRON["AWK_SCHEMA_VERSION"] ",\"type\":\"section\",\"file\":" jq(ENVIRON["AWK_FILE"]) ",\"heading\":" jq(section) ",\"level\":" sec_level ",\"body\":" jq(s) "}")
+				} else {
+					for (i = 1; i <= nbuf; i++) print buf[i]
+				}
+			}
+			BEGIN {
+				section = ENVIRON["AWK_SECTION"]
+				found = 0; state = 0; nbuf = 0; fresh = 0; sec_level = 0
+			}
+			{
+				if (state == 2) next
+				level = heading_level($0)
+				if (state == 0) {
+					if (level >= 2 && HTEXT == section) {
+						found = 1; sec_level = level; state = 1; fresh = 1
+					}
+					next
+				}
+				if (fresh) { fresh = 0; if ($0 == "") next }
+				if (level && level <= sec_level) { emit_body(); state = 2; next }
+				buf[++nbuf] = $0
+			}
+			END {
+				if (state == 1) emit_body()
+				exit found ? 0 : 1
+			}
+		' "$file")" || rc=$?
+	((rc != 0)) && diec "$CODE_SECTION_NOT_FOUND" "show: no section '$section' in $(basename "$file")"
+	[[ -n "$out" ]] && printf '%s\n' "$out"
+	return 0
+}
+
+# Print the schema_version 1 JSON snapshot of one task file: every logical
+# header field (template keys in canonical order, values verbatim apart
+# from trailing-whitespace trim, absent fields as empty strings), every
+# section body complete in file order (top-level units with nested headings
+# carried verbatim inside the body, canonical trailing-blank trim matching
+# the write model), and the Work Log additionally structured into entries
+# by its CLI-stamped "### " anchors. One awk pass over the file: a
+# concurrent mutation publishes via atomic mv, so the pass sees complete
+# old-or-new content. Strictly read-only.
+show_json() {
+	local file="$1" rel="$2" arch=0
+	[[ "$rel" == "$ARCHIVE_DIR"/* ]] && arch=1
+	AWK_FILE="$rel" AWK_ARCHIVED="$arch" AWK_ID_KEY_WIDTH="$ID_KEY_SEGMENT_WIDTH" \
+		AWK_HDR_ORDER="$(printf '%s\034' "Task" "${TEMPLATE_HEADER_FIELDS[@]}")" \
+		AWK_SCHEMA_VERSION="$SCHEMA_VERSION" \
+		awk "$AWK_HEADING_LEVEL$AWK_ROW_HELPERS$AWK_HEADER_FIELDS$AWK_JSON_ESCAPE"'
+			function trimws(s) { sub(/[ \t\r]+$/, "", s); return s }
+			function body_tail_trim(s) {
+				while (s != "" && substr(s, length(s)) == "\n") s = substr(s, 1, length(s) - 1)
+				return s
+			}
+			function push_unit(heading, lvl) {
+				nunits++
+				top = nunits
+				SEC_H[nunits] = heading; SEC_LVL[nunits] = lvl
+				SEC_B[nunits] = ""; SEC_FRESH[nunits] = 1
+			}
+			function append_body(line) {
+				if (SEC_FRESH[top]) {
+					SEC_FRESH[top] = 0
+					if (line == "") return
+				}
+				SEC_B[top] = SEC_B[top] (SEC_B[top] == "" ? "" : "\n") line
+			}
+			function close_entry() {
+				if (!in_entry) return
+				E_B = body_tail_trim(E_B)
+				nent++
+				EN_STAMP[nent] = E_STAMP; EN_TITLE[nent] = E_TITLE; EN_BODY[nent] = E_B
+				in_entry = 0
+			}
+			function open_entry(heading) {
+				close_entry()
+				in_entry = 1; E_STAMP = ""; E_TITLE = ""; E_B = ""; E_FRESH = 1
+				if (match(heading, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]/)) {
+					E_STAMP = substr(heading, 1, 16)
+					if (substr(heading, 17, 2) == ": ") E_TITLE = substr(heading, 19)
+				} else {
+					E_TITLE = heading
+				}
+			}
+			function append_entry_body(line) {
+				if (E_FRESH) {
+					E_FRESH = 0
+					if (line == "") return
+				}
+				E_B = E_B (E_B == "" ? "" : "\n") line
+			}
+			BEGIN {
+				nunits = 0; top = 0; nent = 0; inhdr = 1; in_entry = 0
+				file = ENVIRON["AWK_FILE"]
+				nhdr = split(ENVIRON["AWK_HDR_ORDER"], hdrkeys, "\034")
+				idw = ENVIRON["AWK_ID_KEY_WIDTH"]
+			}
+			{
+				if (inhdr) {
+					if (heading_level($0) >= 2) { inhdr = 0; push_unit(HTEXT, heading_level($0)) }
+					else hdr_feed($0)
+					next
+				}
+				level = heading_level($0)
+				inwork = (top > 0 && SEC_LVL[top] == 2 && SEC_H[top] == "Work Log")
+				if (level >= 2) {
+					popped = 0
+					while (top > 0 && level <= SEC_LVL[top]) { top--; popped = 1 }
+					if (popped || top == 0) { close_entry(); push_unit(HTEXT, level) }
+					else {
+						append_body($0)
+						if (inwork && level == 3) open_entry(HTEXT)
+						else if (inwork && in_entry) append_entry_body($0)
+					}
+					next
+				}
+				if (top == 0) next
+				if (inwork && in_entry) append_entry_body($0)
+				append_body($0)
+			}
+			END {
+				close_entry()
+				fb = file; sub(/.*\//, "", fb)
+				out = "{\"schema_version\":" ENVIRON["AWK_SCHEMA_VERSION"] ",\"type\":\"task\",\"id\":" jq(taskid(fb))
+				out = out ",\"file\":" jq(file) ",\"archived\":" (ENVIRON["AWK_ARCHIVED"] == "1" ? "true" : "false")
+				out = out ",\"header\":{"
+				for (k = 1; k <= nhdr; k++) {
+					key = hdrkeys[k]
+					if (key == "") continue
+					v = (key == "Task") ? FLD["Title"] : ((key in FLD) ? FLD[key] : "")
+					out = out ((k > 1) ? "," : "") jq(key) ":" jq(trimws(v))
+				}
+				out = out "}"
+				out = out ",\"sections\":["
+				for (i = 1; i <= nunits; i++) {
+					out = out ((i > 1) ? "," : "") "{\"heading\":" jq(SEC_H[i]) ",\"level\":" SEC_LVL[i] ",\"body\":" jq(body_tail_trim(SEC_B[i])) "}"
+				}
+				out = out "]"
+				out = out ",\"work_log\":{\"entries\":["
+				for (i = 1; i <= nent; i++) {
+					out = out ((i > 1) ? "," : "") "{\"stamp\":" jq(EN_STAMP[i]) ",\"title\":" jq(EN_TITLE[i]) ",\"body\":" jq(EN_BODY[i]) "}"
+				}
+				out = out "]}}"
+				print out
+			}
+		' "$file"
+}
+
 cmd_show() {
-	local dir="" tail="$DEFAULT_TAIL" args=()
+	local dir="" tail="$DEFAULT_TAIL" tail_given=0 json=0 raw=0 section="" args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "show: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
-			--tail) [[ $# -ge 2 && "$2" != --* ]] || die "show: --tail requires a value"; tail="$2"; shift 2 ;;
-			--tail=*) tail="${1#*=}"; shift ;;
+			--tail) [[ $# -ge 2 && "$2" != --* ]] || die "show: --tail requires a value"; tail="$2"; tail_given=1; shift 2 ;;
+			--tail=*) tail="${1#*=}"; tail_given=1; shift ;;
+			--json) json=1; shift ;;
+			--raw) raw=1; shift ;;
+			--section) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "show: --section requires a value"; section="$2"; shift 2 ;;
+			--section=*) section="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "show: usage: tasks show <taskfile> [--tail N]"
-	[[ "$tail" =~ ^[1-9][0-9]*$ ]] || die "show: --tail expects a positive integer, got: $tail"
+	((${#args[@]} == 1)) || diec "$CODE_USAGE" "show: usage: tasks show <taskfile> [--tail N] [--json] [--section HEADING] [--raw]"
+	[[ "$tail" =~ ^[1-9][0-9]*$ ]] || diec "$CODE_USAGE" "show: --tail expects a positive integer, got: $tail"
+	# One output mode per call: the human view (optionally tailed), the
+	# versioned JSON snapshot, the raw whole-file hatch, or one section's
+	# canonical body (--json narrows it to the envelope). --tail only shapes
+	# the human Work Log tail; the JSON snapshot always carries the complete
+	# history, so combining it with --tail would silently lie about scope.
+	((json == 1 && tail_given == 1)) \
+		&& diec "$CODE_USAGE" "show: --tail applies to the human view only; --json carries the complete history"
+	((raw == 1 && json == 1)) \
+		&& diec "$CODE_USAGE" "show: --raw and --json are exclusive output modes"
+	((raw == 1 && tail_given == 1)) \
+		&& diec "$CODE_USAGE" "show: --tail applies to the human view only; --raw prints the whole file"
+	[[ -n "$section" && $raw == 1 ]] \
+		&& diec "$CODE_USAGE" "show: --raw prints the whole file; --section alone prints one section's body"
+	((tail_given == 1)) && [[ -n "$section" ]] \
+		&& diec "$CODE_USAGE" "show: --tail applies to the human view only; --section prints one section's body"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	warn_fallback_tasks_dir "$tasks_dir"
@@ -2726,15 +3541,490 @@ cmd_show() {
 
 	# Strictly read-only: no board lock, no render, no header bump. Task
 	# mutations publish via atomic mv, so a lock-free reader sees complete
-	# old-or-new content either way. The file is read ONCE into a snapshot
-	# and both the header and the tail are extracted from that single
-	# image, so a concurrent mutation can never yield a torn composite of
-	# an old header with a new tail.
+	# old-or-new content either way. The human view reads ONCE into a
+	# snapshot and both the header and the tail are extracted from that
+	# single image, so a concurrent mutation can never yield a torn composite
+	# of an old header with a new tail; the JSON and raw views read through
+	# the same single open (one awk pass, one cat).
+	if ((raw == 1)); then
+		cat "$file"
+		return
+	fi
+	local rel file_r board_r
+	file_r="$(readlink -f "$file")"
+	board_r="$(readlink -f "$tasks_dir")"
+	rel="${file_r#"$board_r"/}"
+	if [[ -n "$section" ]]; then
+		show_section "$file" "$section" "$rel" "$json"
+		return
+	fi
+	if ((json == 1)); then
+		show_json "$file" "$rel"
+		return
+	fi
 	local snapshot
 	snapshot="$(cat "$file")"
 	header_of <<<"$snapshot"
 	printf '\n## Work Log (last %s entries)\n\n' "$tail"
 	work_log_tail "$tail" <<<"$snapshot"
+}
+
+# Read-only board listing in dashboard lane order: the same SORT_SEP record
+# discipline the render rides (lane ordinal, then the lane's sort key, then
+# the segment-numeric ID key) with the shared header reader feeding the
+# logical fields, so the listing can never drift from the dashboard's row
+# source. --json wraps the selected rows in the schema_version 1 envelope;
+# the human view prints one tab-separated line per task. --lane filters to
+# one dashboard lane, --limit/--offset page the filtered set in sort order
+# (limit 0 and offset 0 mean unbounded). Strictly read-only.
+cmd_list() {
+	local dir="" json=0 lane="" limit=0 offset=0 args=()
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "list: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			--lane) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "list: --lane requires a value"; lane="$2"; shift 2 ;;
+			--lane=*) lane="${1#*=}"; shift ;;
+			--limit) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "list: --limit requires a value"; limit="$2"; shift 2 ;;
+			--limit=*) limit="${1#*=}"; shift ;;
+			--offset) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "list: --offset requires a value"; offset="$2"; shift 2 ;;
+			--offset=*) offset="${1#*=}"; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 0)) || diec "$CODE_USAGE" "list: usage: tasks list [--json] [--lane NAME] [--limit N] [--offset N]"
+	[[ "$limit" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "list: --limit expects a non-negative integer, got: $limit"
+	[[ "$offset" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "list: --offset expects a non-negative integer, got: $offset"
+	local -A lane_ord=([Triage]=1 [Ready]=2 ["In Progress"]=3 ["Blocked/Cancelled"]=4 [Completed]=5 [Archive]=6)
+	[[ -z "$lane" || -n "${lane_ord[$lane]+x}" ]] \
+		|| diec "$CODE_USAGE" "list: unknown lane: $lane (valid: Triage, Ready, In Progress, Blocked/Cancelled, Completed, Archive)"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+
+	local -a files=()
+	board_files "$tasks_dir" files
+	if ((${#files[@]} == 0)); then
+		((json == 1)) && printf '{"schema_version":%d,"type":"list","total":0,"count":0,"offset":%d,"limit":%d,"tasks":[]}\n' \
+			"$SCHEMA_VERSION" "$offset" "$limit"
+		((json == 0)) && printf 'no tasks\n'
+		return 0
+	fi
+
+	local rows_file
+	rows_file="$(mktemp "${TMPDIR:-/tmp}/tasks-list.XXXXXX")"
+	arm_tmp_cleanup_trap "$rows_file"
+	AWK_TASKS_DIR="$tasks_dir" AWK_ID_KEY_WIDTH="$ID_KEY_SEGMENT_WIDTH" \
+		AWK_NA="$NA" AWK_DEFAULT_PRIORITY="$DEFAULT_PRIORITY" AWK_UNDATED="$UNDATED_SORT_KEY" \
+		AWK_CURRENT_DIR="$CURRENT_DIR" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
+		AWK_READY="$STATUS_READY" AWK_IN_PROGRESS="$STATUS_IN_PROGRESS" \
+		AWK_BLOCKED="$STATUS_BLOCKED" AWK_CANCELLED="$STATUS_CANCELLED" \
+		AWK_COMPLETED="$STATUS_COMPLETED" \
+		AWK_LIST_JSON="$json" AWK_SCHEMA_VERSION="$SCHEMA_VERSION" \
+		awk "$AWK_ROW_HELPERS$AWK_HEADER_FIELDS$AWK_JSON_ESCAPE"'
+			function trimws(s) { sub(/[ \t\r]+$/, "", s); return s }
+			function emit_row(rel, fb, subdir, ord, lane, sortkey,    nb, id, status, created, claim, sc, obj) {
+				id = taskid(fb)
+				status = trimws(FLD["Status"])
+				created = trimws(FLD["Created"])
+				if (created == "") created = trimws(FLD["DecoCreated"])
+				if (created == "") created = na
+				claim = ""
+				while ((getline sc < (td rel ".claim")) > 0) { claim = trimws(sc); break }
+				close(td rel ".claim")
+				if (jmode) {
+					nb = fb; sub(/\.md$/, "", nb)
+					obj = "{\"schema_version\":" schema ",\"type\":\"task_row\",\"id\":" jq(id)
+					obj = obj ",\"name\":" jq((trimws(FLD["Title"]) == "" ? nb : trimws(FLD["Title"])))
+					obj = obj ",\"file\":" jq(rel) ",\"subdir\":" jq(subdir) ",\"lane\":" jq(lane)
+					obj = obj ",\"status\":" jq(status)
+					obj = obj ",\"priority\":" jq((trimws(FLD["Priority"]) == "" ? dp : trimws(FLD["Priority"])))
+					obj = obj ",\"progress\":" jq(trimws(FLD["Progress"]))
+					obj = obj ",\"created\":" jq(created)
+					obj = obj ",\"updated\":" jq(trimws(FLD["Updated"]))
+					obj = obj ",\"completed\":" jq(trimws(FLD["Completed"]))
+					obj = obj ",\"duration\":" jq(trimws(FLD["Duration"]))
+					obj = obj ",\"owner\":" jq(trimws(FLD["Owner"]))
+					obj = obj ",\"claim_owner\":" jq(claim) "}"
+				} else {
+					obj = id "\t" lane "\t" ((status == "") ? "-" : status) "\t" rel
+				}
+				print ord sep sortkey sep idkeyof(id) sep obj
+			}
+			BEGIN {
+				sep = "\034"
+				td = ENVIRON["AWK_TASKS_DIR"] "/"
+				idw = ENVIRON["AWK_ID_KEY_WIDTH"]
+				na = ENVIRON["AWK_NA"]; dp = ENVIRON["AWK_DEFAULT_PRIORITY"]
+				undated = ENVIRON["AWK_UNDATED"]
+				cd = ENVIRON["AWK_CURRENT_DIR"]; ad = ENVIRON["AWK_ARCHIVE_DIR"]
+				st_ready = ENVIRON["AWK_READY"]; st_ip = ENVIRON["AWK_IN_PROGRESS"]
+				st_blocked = ENVIRON["AWK_BLOCKED"]; st_cancelled = ENVIRON["AWK_CANCELLED"]
+				st_completed = ENVIRON["AWK_COMPLETED"]
+				jmode = ENVIRON["AWK_LIST_JSON"] == "1"
+				schema = ENVIRON["AWK_SCHEMA_VERSION"]
+				for (argi = 1; argi < ARGC; argi++) {
+					file = ARGV[argi]
+					fb = file; sub(/.*\//, "", fb)
+					subdir = file; arch = 0
+					if (index(subdir, cd "/") == 1) subdir = cd
+					else if (index(subdir, ad "/") == 1) { subdir = ad; arch = 1 }
+					hdr_reset()
+					while ((getline line < (td file)) > 0) {
+						if (line ~ /^## /) break
+						hdr_feed(line)
+					}
+					close(td file)
+					status = trimws(FLD["Status"])
+					completed = trimws(FLD["Completed"])
+					created = trimws(FLD["Created"])
+					if (created == "") created = trimws(FLD["DecoCreated"])
+					if (created == "") created = na
+					if (arch) emit_row(file, fb, subdir, 6, "Archive", (completed == "" ? undated : completed))
+					else if (status == st_ready) emit_row(file, fb, subdir, 2, "Ready", (created == na ? undated : created))
+					else if (status == st_ip) emit_row(file, fb, subdir, 3, "In Progress", (created == na ? undated : created))
+					else if (status == st_blocked || status == st_cancelled) emit_row(file, fb, subdir, 4, "Blocked/Cancelled", (created == na ? undated : created))
+					else if (status == st_completed) emit_row(file, fb, subdir, 5, "Completed", (completed == "" ? undated : completed))
+					else emit_row(file, fb, subdir, 1, "Triage", (created == na ? undated : created))
+				}
+				exit
+			}
+		' "${files[@]}" >"$rows_file"
+	LC_ALL=C sort -o "$rows_file" "$rows_file"
+
+	local -a selected=()
+	local rec ordinal payload total=0
+	while IFS= read -r rec; do
+		ordinal="${rec%%"$SORT_SEP"*}"
+		payload="${rec#*"$SORT_SEP"}"
+		payload="${payload#*"$SORT_SEP"}"
+		payload="${payload#*"$SORT_SEP"}"
+		[[ -z "$lane" || "$ordinal" == "${lane_ord[$lane]}" ]] || continue
+		((total += 1))
+		((total > offset)) || continue
+		((limit == 0 || total <= offset + limit)) || continue
+		selected+=("$payload")
+	done <"$rows_file"
+	trap - EXIT
+	rm -f "$rows_file"
+
+	if ((json == 1)); then
+		local joined="" p
+		for p in "${selected[@]+${selected[@]}}"; do joined+="$p,"; done
+		joined="${joined%,}"
+		printf '{"schema_version":%d,"type":"list","total":%d,"count":%d,"offset":%d,"limit":%d,"tasks":[%s]}\n' \
+			"$SCHEMA_VERSION" "$total" "${#selected[@]}" "$offset" "$limit" "$joined"
+	else
+		local p
+		for p in "${selected[@]+${selected[@]}}"; do printf '%s\n' "$p"; done
+	fi
+}
+
+# Read-only report index for one task: every deposit under
+# reports/<taskfile>/ with its Work Log provenance (the depositing entry's
+# stamp, attribution, and digest, matched by the entry's
+# **Report:** [name](../reports/...) link; on-disk files no entry links
+# carry linked:false and empty provenance). --json wraps the selected
+# records in the schema_version 1 envelope; --include-body adds each
+# report's complete content (--json only). --limit/--offset page the
+# sequence-ordered set. Strictly read-only.
+cmd_reports() {
+	local dir="" json=0 incbody=0 limit=0 offset=0 args=()
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "reports: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			--include-body) incbody=1; shift ;;
+			--limit) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "reports: --limit requires a value"; limit="$2"; shift 2 ;;
+			--limit=*) limit="${1#*=}"; shift ;;
+			--offset) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "reports: --offset requires a value"; offset="$2"; shift 2 ;;
+			--offset=*) offset="${1#*=}"; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 1)) || diec "$CODE_USAGE" "reports: usage: tasks reports <taskfile> [--json] [--include-body] [--limit N] [--offset N]"
+	((incbody == 1 && json == 0)) \
+		&& diec "$CODE_USAGE" "reports: --include-body applies to --json only"
+	[[ "$limit" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "reports: --limit expects a non-negative integer, got: $limit"
+	[[ "$offset" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "reports: --offset expects a non-negative integer, got: $offset"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	local rel file_r board_r
+	file_r="$(readlink -f "$file")"
+	board_r="$(readlink -f "$tasks_dir")"
+	rel="${file_r#"$board_r"/}"
+	local base="${file##*/}"
+	local report_dir="$tasks_dir/$REPORTS_DIR/$base"
+
+	# Sequence-ordered report file list (seq extracted from the NN- prefix;
+	# files without one sort after, in name order).
+	local -a pairs=() rpt_rels=() rpt_paths=()
+	local f fb seq
+	for f in "$report_dir"/*.md; do
+		[[ -e "$f" ]] || continue
+		fb="${f##*/}"
+		seq=999999
+		[[ "$fb" =~ ^([0-9]+)- ]] && seq=$((10#${BASH_REMATCH[1]}))
+		pairs+=("$(printf '%d\t%s' "$seq" "$fb")")
+	done
+	if ((${#pairs[@]} > 0)); then
+		local -a sorted_pairs=()
+		mapfile -t sorted_pairs < <(printf '%s\n' "${pairs[@]}" | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2)
+		for f in "${sorted_pairs[@]}"; do
+			rpt_rels+=("$REPORTS_DIR/$base/${f#*$'\t'}")
+			rpt_paths+=("$tasks_dir/$REPORTS_DIR/$base/${f#*$'\t'}")
+		done
+	fi
+
+	# final-newline map: awk cannot see the file's last byte, so the bash
+	# side records it per report path. tail -c 1 of a newline-terminated file
+	# is stripped by command substitution, so an empty capture means the file
+	# ends with its newline (the normal case) and a non-empty capture means
+	# the last byte is content.
+	local map_file
+	map_file="$(mktemp "${TMPDIR:-/tmp}/tasks-reports.XXXXXX")"
+	{
+		local i
+		for ((i = 0; i < ${#rpt_paths[@]}; i++)); do
+			fnl=0
+			[[ -s "${rpt_paths[$i]}" ]] && { path="$(tail -c 1 "${rpt_paths[$i]}" 2>/dev/null || true)"; [[ -z "$path" ]] && fnl=1; }
+			printf '%s\t%d\n' "${rpt_rels[$i]}" "$fnl"
+		done
+	} >"$map_file"
+	arm_tmp_cleanup_trap "$map_file"
+
+	local -a recs=()
+	if ((${#rpt_paths[@]} > 0)); then
+		mapfile -t recs < <(AWK_TASKS_DIR="$tasks_dir" AWK_TASK_FILE="$file" AWK_MAP_FILE="$map_file" \
+			AWK_ID_KEY_WIDTH="$ID_KEY_SEGMENT_WIDTH" \
+			AWK_LIST_JSON="$json" AWK_INC_BODY="$incbody" AWK_SCHEMA_VERSION="$SCHEMA_VERSION" \
+			awk "$AWK_HEADING_LEVEL$AWK_ROW_HELPERS$AWK_HEADER_FIELDS$AWK_JSON_ESCAPE"'
+				function trimws(s) { sub(/[ \t\r]+$/, "", s); return s }
+				function rel_of(path) { return (index(path, td) == 1) ? substr(path, length(td) + 1) : path }
+				function emit_report(rel,    fb, sq, linked, obj) {
+					fb = rel; sub(/.*\//, "", fb)
+					sq = 0
+					if (match(fb, /^[0-9]+/)) sq = substr(fb, RSTART, RLENGTH) + 0
+					linked = (fb in PRV_SEEN) ? 1 : 0
+					if (jmode) {
+						obj = "{\"schema_version\":" schema ",\"type\":\"report_record\",\"seq\":" sq
+						obj = obj ",\"name\":" jq(fb) ",\"file\":" jq(rel)
+						obj = obj ",\"linked\":" ((linked) ? "true" : "false")
+						obj = obj ",\"stamp\":" jq((linked ? PRV_STAMP[fb] : ""))
+						obj = obj ",\"from\":" jq((linked ? PRV_FROM[fb] : ""))
+						obj = obj ",\"digest\":" jq((linked ? PRV_DIGEST[fb] : ""))
+						obj = obj ",\"final_newline\":" ((FNL[rel] == "1") ? "true" : "false")
+						if (incbody) obj = obj ",\"body\":" jq(content)
+						obj = obj "}"
+					} else {
+						obj = fb "\t" (((linked) && PRV_DIGEST[fb] != "") ? PRV_DIGEST[fb] : "-")
+					}
+					print sq sep obj
+				}
+				BEGIN {
+					sep = "\034"
+					td = ENVIRON["AWK_TASKS_DIR"] "/"
+					idw = ENVIRON["AWK_ID_KEY_WIDTH"]
+					tf = ENVIRON["AWK_TASK_FILE"]
+					jmode = ENVIRON["AWK_LIST_JSON"] == "1"
+					incbody = ENVIRON["AWK_INC_BODY"] == "1"
+					schema = ENVIRON["AWK_SCHEMA_VERSION"]
+					mapfile = ARGV[1]; taskfile = ARGV[2]
+					while ((getline ml < mapfile) > 0) {
+						split(ml, mp, "\t"); FNL[mp[1]] = mp[2]
+					}
+					close(mapfile)
+					cur_stamp = ""; cur_from = ""; pending_base = ""
+					while ((getline line < taskfile) > 0) {
+						if (heading_level(line) == 2) {
+							inwl = (HTEXT == "Work Log")
+							if (inwl) { cur_stamp = ""; cur_from = ""; pending_base = "" }
+							continue
+						}
+						if (!inwl) continue
+						if (line ~ /^### /) {
+							cur_stamp = ""; cur_from = ""; pending_base = ""
+							h = substr(line, 5)
+							if (match(h, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]/)) {
+								cur_stamp = substr(h, 1, 16)
+								rest = (substr(h, 17, 2) == ": ") ? substr(h, 19) : ""
+								cur_from = rest; sub(/: .*$/, "", cur_from)
+							}
+						} else if (match(line, /^\*\*Report:\*\* \[/)) {
+							rest = substr(line, RSTART + RLENGTH)
+							name = rest; sub(/\]\(.*/, "", name)
+							target = substr(rest, length(name) + 3)
+							sub(/\).*/, "", target)
+							base = target; sub(/.*\//, "", base)
+							PRV_SEEN[base] = 1
+							PRV_STAMP[base] = cur_stamp; PRV_FROM[base] = cur_from
+							pending_base = base
+						} else if (match(line, /^\*\*Digest:\*\*/)) {
+							dg = substr(line, RSTART + RLENGTH)
+							sub(/^[ \t]*/, "", dg)
+							if (pending_base != "") PRV_DIGEST[pending_base] = dg
+						}
+					}
+					close(taskfile)
+					for (argi = 3; argi < ARGC; argi++) {
+						rpath = ARGV[argi]
+						content = ""
+						while ((getline rline < rpath) > 0) content = content (content == "" ? "" : "\n") rline
+						close(rpath)
+						emit_report(rel_of(rpath))
+					}
+					exit
+				}
+			' "$map_file" "$file" "${rpt_paths[@]}")
+	fi
+	trap - EXIT
+	rm -f "$map_file"
+
+	local -a selected=()
+	local rec sq payload total=0
+	for rec in "${recs[@]+${recs[@]}}"; do
+		sq="${rec%%"$SORT_SEP"*}"
+		payload="${rec#*"$SORT_SEP"}"
+		((total += 1))
+		((total > offset)) || continue
+		((limit == 0 || total <= offset + limit)) || continue
+		selected+=("$payload")
+	done
+	if ((json == 1)); then
+		local joined="" p
+		for p in "${selected[@]+${selected[@]}}"; do joined+="$p,"; done
+		joined="${joined%,}"
+		printf '{"schema_version":%d,"type":"reports","file":%s,"id":%s,"total":%d,"count":%d,"offset":%d,"limit":%d,"reports":[%s]}\n' \
+			"$SCHEMA_VERSION" "$(jqstr_bash "$rel")" "$(jqstr_bash "$(task_id_of_basename "$base")")" \
+			"$total" "${#selected[@]}" "$offset" "$limit" "$joined"
+	else
+		local p
+		for p in "${selected[@]+${selected[@]}}"; do printf '%s\n' "$p"; done
+	fi
+}
+
+# Bash-side JSON string escaper for the envelope fields the commands build
+# outside awk (task file path, Task ID, doctor record fields): it runs the
+# same AWK_JSON_ESCAPE fragment every awk-side emitter uses, so the CLI has
+# one escaping implementation and a bash-side reduced copy cannot drift
+# from it (the previous copy escaped only backslash and quote, so a
+# control character in a filename would have emitted invalid JSON).
+jqstr_bash() {
+	AWK_JSON_VALUE="$1" awk "$AWK_JSON_ESCAPE"'BEGIN { printf "%s", jq(ENVIRON["AWK_JSON_VALUE"]) }'
+}
+
+# Lossless JSONL export: one schema_version 1 record per exported file with
+# its board-relative path, Task ID, complete raw content (JSON-escaped),
+# and a final_newline flag (the one byte awk cannot see), so concatenating
+# content plus the flag reconstructs every file byte-exactly. Task files
+# from current/ and archive/ export by default; --include-reports adds the
+# reports tree; the derived dashboard and the transient lock and claim
+# sidecars are not board content and never export. --format jsonl is the
+# only format today and the default. Strictly read-only.
+cmd_export() {
+	local dir="" format="jsonl" include_reports=0 args=()
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "export: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--format) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "export: --format requires a value"; format="$2"; shift 2 ;;
+			--format=*) format="${1#*=}"; shift ;;
+			--include-reports) include_reports=1; shift ;;
+			*) args+=("$1"); shift ;;
+		esac
+	done
+	((${#args[@]} == 0)) || diec "$CODE_USAGE" "export: usage: tasks export [--format jsonl] [--include-reports]"
+	[[ "$format" == "jsonl" ]] || diec "$CODE_USAGE" "export: unsupported format: $format (supported: jsonl)"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+
+	local -a files=() all_rels=() all_paths=()
+	local f rel base
+	board_files "$tasks_dir" files
+	for f in "${files[@]+${files[@]}}"; do
+		all_rels+=("$f")
+		all_paths+=("$tasks_dir/$f")
+	done
+	if ((include_reports == 1)); then
+		for f in "$tasks_dir/$REPORTS_DIR"/*/*.md; do
+			[[ -e "$f" ]] || continue
+			rel="${f#"$tasks_dir"/}"
+			all_rels+=("$rel")
+			all_paths+=("$f")
+		done
+	fi
+	((${#all_rels[@]} > 0)) || return 0
+
+	local map_file
+	map_file="$(mktemp "${TMPDIR:-/tmp}/tasks-export.XXXXXX")"
+	{
+		local i fnl lastbyte
+		for ((i = 0; i < ${#all_paths[@]}; i++)); do
+			fnl=0
+			[[ -s "${all_paths[$i]}" ]] && { lastbyte="$(tail -c 1 "${all_paths[$i]}" 2>/dev/null || true)"; [[ -z "$lastbyte" ]] && fnl=1; }
+			printf '%s\t%d\n' "${all_rels[$i]}" "$fnl"
+		done
+	} >"$map_file"
+	arm_tmp_cleanup_trap "$map_file"
+
+	AWK_TASKS_DIR="$tasks_dir" AWK_ID_KEY_WIDTH="$ID_KEY_SEGMENT_WIDTH" \
+		AWK_CURRENT_DIR="$CURRENT_DIR" AWK_ARCHIVE_DIR="$ARCHIVE_DIR" \
+		AWK_REPORTS_DIR="$REPORTS_DIR" AWK_MAP_FILE="$map_file" \
+		AWK_SCHEMA_VERSION="$SCHEMA_VERSION" \
+		awk "$AWK_ROW_HELPERS$AWK_HEADER_FIELDS$AWK_JSON_ESCAPE"'
+			function rel_of(path) { return (index(path, td) == 1) ? substr(path, length(td) + 1) : path }
+			function type_of(rel) {
+				if (index(rel, cd "/") == 1 || index(rel, ad "/") == 1) return "task"
+				return "report"
+			}
+			function emit_record(rel, content,    fb, typ, id, ddir, obj) {
+				typ = type_of(rel)
+				fb = rel; sub(/.*\//, "", fb)
+				id = ""
+				if (typ == "task") {
+					id = taskid(fb)
+				} else {
+					ddir = rel; sub("/" fb "$", "", ddir)
+					fb = ddir; sub(/.*\//, "", fb)
+					id = taskid(fb)
+				}
+				obj = "{\"schema_version\":" schema ",\"type\":\"" typ "\",\"file\":" jq(rel) ",\"id\":" jq(id)
+				if (typ == "report") obj = obj ",\"dir\":" jq(ddir)
+				obj = obj ",\"content\":" jq(content)
+				obj = obj ",\"final_newline\":" ((FNL[rel] == "1") ? "true" : "false") "}"
+				print obj
+			}
+			BEGIN {
+				td = ENVIRON["AWK_TASKS_DIR"] "/"
+				cd = ENVIRON["AWK_CURRENT_DIR"]; ad = ENVIRON["AWK_ARCHIVE_DIR"]
+				schema = ENVIRON["AWK_SCHEMA_VERSION"]
+				mapfile = ARGV[1]
+				while ((getline ml < mapfile) > 0) {
+					split(ml, mp, "\t"); FNL[mp[1]] = mp[2]
+				}
+				close(mapfile)
+				for (argi = 2; argi < ARGC; argi++) {
+					path = ARGV[argi]
+					rel = rel_of(path)
+					content = ""
+					while ((getline line < path) > 0) content = content (content == "" ? "" : "\n") line
+					close(path)
+					emit_record(rel, content)
+				}
+				exit
+			}
+		' "$map_file" "${all_paths[@]}"
+	trap - EXIT
+	rm -f "$map_file"
 }
 
 main() {
@@ -2754,7 +4044,11 @@ main() {
 		log) cmd_log "$@" ;;
 		edit) cmd_edit "$@" ;;
 		lint) cmd_lint "$@" ;;
+		doctor) cmd_doctor "$@" ;;
 		show) cmd_show "$@" ;;
+		list) cmd_list "$@" ;;
+		reports) cmd_reports "$@" ;;
+		export) cmd_export "$@" ;;
 		help | -h | --help) usage ;;
 		*) err "unknown command: $cmd"; usage; exit 2 ;;
 	esac

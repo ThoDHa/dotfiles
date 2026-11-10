@@ -2588,5 +2588,1104 @@ t show "$TASKS_DIR/current/../archive/$(basename "$f_ctn2")" >/dev/null \
 rm -f "$f_ctn" "$TASKS_DIR/archive/$(basename "$f_ctn2")"
 t render >/dev/null
 
-print_result
+# --- versioned JSON readers (ORCH-4-4-2) -----------------------------------
+
+# Test-local JSON string decoder for the emitters' own escape set (the
+# reverse of the CLI's json_escape: backslash escapes, named controls, and
+# \u00XX). Keeps the round-trip proofs self-contained so a decoder bug
+# cannot fail silently; the one place an independent parser is required is
+# the live-shape parse gate below, which pipes a full payload through
+# python3 or jq exactly because the local decoder shares the emitters'
+# escape set and could mirror an emitter bug.
+readonly RDR_HEX="0123456789abcdef"
+rdr_unesc() { # JSON-escaped string content on stdin; prints the raw text
+	awk -v hexd="$RDR_HEX" '
+		function hexv(c) { return index(hexd, tolower(c)) - 1 }
+		{
+			s = $0; out = ""; n = length(s)
+			for (i = 1; i <= n; i++) {
+				c = substr(s, i, 1)
+				if (c != "\\") { out = out c; continue }
+				i++; c = substr(s, i, 1)
+				if (c == "n") out = out "\n"
+				else if (c == "r") out = out "\r"
+				else if (c == "t") out = out "\t"
+				else if (c == "b") out = out "\b"
+				else if (c == "f") out = out "\f"
+				else if (c == "u") {
+					code = hexv(substr(s, i + 1, 1)) * 4096 + hexv(substr(s, i + 2, 1)) * 256 \
+						+ hexv(substr(s, i + 3, 1)) * 16 + hexv(substr(s, i + 4, 1))
+					out = out sprintf("%c", code)
+					i += 4
+				}
+				else out = out c
+			}
+			printf "%s", out
+		}
+	'
+}
+# Extract one top-level or nested string field ("key":"...") from a compact
+# JSON line, honoring backslash escapes; prints the ESCAPED content. The
+# payload rides the environment, not awk -v: -v escape-processes backslash
+# sequences and would corrupt the very bytes this scanner decodes.
+rdr_jfield() { # line key
+	line="$1" key="$2" awk '
+		BEGIN {
+			line = ENVIRON["line"]; key = ENVIRON["key"]
+			pre = "\"" key "\":\""
+			pos = index(line, pre)
+			if (pos == 0) { print "@MISSING@"; exit }
+			rest = substr(line, pos + length(pre))
+			n = length(rest)
+			for (i = 1; i <= n; i++) {
+				c = substr(rest, i, 1)
+				if (c == "\\") { out = out c substr(rest, i + 1, 1); i++; continue }
+				if (c == "\"") { print out; exit }
+				out = out c
+			}
+			print "@UNTERMINATED@"
+		}
+	'
+}
+# List the top-level keys of a compact JSON object line, in order. Same
+# environment transport as rdr_jfield, and bracket-aware: nested objects and
+# arrays (and commas inside strings) must never surface as keys.
+rdr_topkeys() { # line
+	line="$1" awk '
+		BEGIN {
+			line = ENVIRON["line"]
+			depth = 0; inq = 0; esc = 0; buf = ""; nk = 0; keydone = 0
+			n = length(line)
+			for (i = 1; i <= n; i++) {
+				c = substr(line, i, 1)
+				if (esc) { esc = 0; if (!keydone && depth == 1) buf = buf c; continue }
+				if (inq) {
+					if (c == "\\") { esc = 1; if (!keydone && depth == 1) buf = buf c; continue }
+					if (c == "\"") inq = 0
+					if (!keydone && depth == 1) buf = buf c
+					continue
+				}
+				if (c == "\"") { inq = 1; if (!keydone && depth == 1) buf = buf c; continue }
+				if (c == "{" || c == "[") { depth++; continue }
+				if (c == "}" || c == "]") { depth--; if (depth == 0) break; continue }
+				if (depth == 1 && c == ":" && !keydone) { keys[++nk] = buf; keydone = 1; continue }
+				if (depth == 1 && c == ",") { buf = ""; keydone = 0; continue }
+				if (!keydone && depth == 1) buf = buf c
+			}
+			for (i = 1; i <= nk; i++) print keys[i]
+		}
+	'
+}
+
+echo "== show: --json schema pin and read completeness =="
+# Dedicated board: the pinned fixture corpus carries the shapes read
+# completeness must survive (nested deeper headings, fenced marker text
+# inside a body, an unknown section, verdict markers, quote/backslash/unicode
+# values, an archived task, a claim sidecar). The corpus itself is written
+# directly: the readers are the subject under test, not the write path.
+rdr_dir="$ROOT/rdr/.tasks"
+t init --dir "$rdr_dir" >/dev/null
+rdr_board="$rdr_dir/dashboard.md"
+cat >"$rdr_dir/current/FIX-1-20260615-1200-reader-fixture.md" <<'FIXEOF'
+# Task: Reader Fixture
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** High
+**Progress:** 40%
+**Owner:** fixture-owner
+**Updated:** 2026-06-15 12:30
+**Latest Update:** [2026-06-15 12:30] fixture digest
+
+## Table of Contents
+
+- [Objective](#objective)
+
+---
+
+## Objective
+
+Top objective text with "quotes" and \backslash and cafe-lambda unicode
+
+### Sub approach
+
+nested content under a deeper heading
+more nested text
+
+## Success Criteria
+
+- [x] landed criterion
+- [ ] open criterion
+- ~ [ ] superseded note
+
+```
+- [ ] fenced box counts nowhere
+### fenced deep heading stays body
+```
+
+## Mystery Section
+
+unknown section body
+line two with "quoted pipes"
+
+## Work Log
+
+### 2026-06-15 12:00: planner: created fixture
+
+entry body with
+"quote" and \backslash
+
+### 2026-06-15 12:30: worker: second entry
+
+second body
+
+## Execution Log
+
+- 2026-06-15 12:00 - fixture created
+FIXEOF
+cat >"$rdr_dir/archive/FIX-2-20260615-0900-archived-fixture.md" <<'FIXEOF'
+# Task: Archived Fixture
+
+**Created:** 2026-06-15 09:00
+**Status:** Completed
+**Priority:** Low
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 10:00
+**Completed:** 2026-06-15 10:00
+**Duration:** 1h
+
+## Objective
+
+archived body
+
+## Success Criteria
+
+- [x] done
+
+## Work Log
+
+## Execution Log
+
+- 2026-06-15 10:00 - archived
+FIXEOF
+f_rdr1="$rdr_dir/current/FIX-1-20260615-1200-reader-fixture.md"
+TASKS_SESSION=sess-fix t claim --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md >/dev/null
+rdr_json="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json)"
+assert_contains "show --json carries the schema_version 1 marker" "$rdr_json" '{"schema_version":1,'
+assert_eq "show --json top-level keys are exactly the documented set" \
+	'"schema_version" "type" "id" "file" "archived" "header" "sections" "work_log"' \
+	"$(rdr_topkeys "$rdr_json" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "show --json pins the task id from the filename" "FIX-1" "$(rdr_jfield "$rdr_json" id)"
+assert_eq "show --json pins the board-relative file" "current/FIX-1-20260615-1200-reader-fixture.md" "$(rdr_jfield "$rdr_json" file)"
+assert_contains "show --json header carries the logical Status" "$rdr_json" '"Status":"In Progress"'
+assert_contains "show --json header carries Progress verbatim" "$rdr_json" '"Progress":"40%"'
+assert_contains "show --json header carries the claim Owner" "$rdr_json" '"Owner":"sess-fix"'
+assert_contains "show --json header carries an absent field as empty" "$rdr_json" '"Checkpoint Gating":""'
+rdr_headings="$(printf '%s' "$rdr_json" | grep -o '"heading":"[^"]*"' | tr '\n' ' ')"
+rdr_headings="${rdr_headings% }"
+assert_contains "show --json carries every section in file order" "$rdr_headings" \
+	"$(printf '"heading":"Table of Contents" "heading":"Objective" "heading":"Success Criteria" "heading":"Mystery Section" "heading":"Work Log" "heading":"Execution Log"')"
+assert_contains "show --json body carries the nested deeper heading" "$rdr_json" '### Sub approach\n\nnested content'
+assert_contains "show --json body carries the fenced deep heading as body" "$rdr_json" '### fenced deep heading stays body'
+assert_contains "show --json body carries the unknown section" "$rdr_json" 'unknown section body'
+assert_contains "show --json escapes quotes in body text" "$rdr_json" 'with \"quotes\" and'
+assert_contains "show --json escapes backslashes in body text" "$rdr_json" '\\backslash'
+assert_contains "show --json passes unicode through byte-for-byte" "$rdr_json" 'cafe-lambda unicode'
+assert_contains "show --json structures work log entries" "$rdr_json" '"stamp":"2026-06-15 12:00","title":"planner: created fixture"'
+assert_contains "show --json structures the newest entry last" "$rdr_json" '"stamp":"2026-06-15 12:30","title":"worker: second entry"'
+assert_eq "show --json pins the entry count" "2" "$(printf '%s' "$rdr_json" | grep -o '"stamp":"' | wc -l)"
+rdr_arch="$(t show --dir "$rdr_dir" FIX-2-20260615-0900-archived-fixture.md --json)"
+assert_contains "show --json marks archived tasks" "$rdr_arch" '"archived":true'
+rdr_json2="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json)"
+assert_eq "show --json is byte-stable across runs" "$rdr_json" "$rdr_json2"
+
+# Independent-parser gate over the full current fixture: json.load refuses
+# trailing data, so the verifier's live-file class (one complete value
+# followed by an unmatched closing brace) fails here even though the local
+# decoder above tolerates it. python3 first, jq fallback, and neither
+# parser present is a failed check, not a skip: the gate must run.
+rdr_live="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json)"
+if command -v python3 >/dev/null 2>&1; then
+	if printf '%s\n' "$rdr_live" | python3 -c 'import json, sys; json.load(sys.stdin)' 2>/dev/null; then
+		ok "show --json parses as one complete JSON document (python3)"
+	else
+		bad "show --json parses as one complete JSON document (python3)"
+	fi
+elif command -v jq >/dev/null 2>&1; then
+	if printf '%s\n' "$rdr_live" | jq -e . >/dev/null 2>&1; then
+		ok "show --json parses as one complete JSON document (jq)"
+	else
+		bad "show --json parses as one complete JSON document (jq)"
+	fi
+else
+	bad "no independent JSON parser on the host (python3 nor jq)"
+fi
+
+echo "== show: --section canonical body and --raw hatch =="
+rdr_sec="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective)"
+assert_eq "show --section prints the canonical body byte-exact" \
+	"$(printf 'Top objective text with "quotes" and \\backslash and cafe-lambda unicode\n\n### Sub approach\n\nnested content under a deeper heading\nmore nested text')" \
+	"$rdr_sec"
+assert_eq "show --section addresses a deeper heading like edit" \
+	"$(printf 'nested content under a deeper heading\nmore nested text')" \
+	"$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section 'Sub approach')"
+refuse "show --section refuses an unknown section" show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Nope
+rdr_sec_err="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Nope 2>&1 >/dev/null || true)"
+assert_contains "the section refusal carries SECTION_NOT_FOUND" "$rdr_sec_err" "(code: SECTION_NOT_FOUND)"
+rdr_secjson="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective --json)"
+assert_contains "show --json --section wraps the canonical body" "$rdr_secjson" '{"schema_version":1,"type":"section","file":"current/FIX-1'
+assert_contains "show --json --section pins the heading and level" "$rdr_secjson" '"heading":"Objective","level":2'
+assert_eq "show --json --section body equals the text mode" \
+	"$rdr_sec" "$(rdr_jfield "$rdr_secjson" body | rdr_unesc)"
+refuse "show refuses --json with --tail" show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json --tail 3
+refuse "show refuses --raw with --json" show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --raw --json
+refuse "show refuses --raw with --section" show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --raw --section Objective
+refuse "show refuses --raw with --tail" show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --raw --tail 3
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --raw >"$ROOT/rdr-raw.md"
+cmp -s "$ROOT/rdr-raw.md" "$f_rdr1" \
+	&& ok "show --raw is byte-exact against the file" || bad "show --raw is byte-exact against the file"
+# Read == write agreement: the canonical body piped back through edit leaves
+# the whole file byte-identical (the pinned clock keeps the Updated stamp).
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective \
+	| t edit --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective - >/dev/null
+cmp -s "$ROOT/rdr-raw.md" "$f_rdr1" \
+	&& ok "show --section pipes back through edit byte-identically" || bad "show --section pipes back through edit byte-identically"
+
+echo "== list: --json rows, lanes, and pagination =="
+rdr_lst="$(t list --dir "$rdr_dir" --json)"
+assert_contains "list --json carries the schema_version 1 marker" "$rdr_lst" '{"schema_version":1,'
+assert_contains "list --json counts the board" "$rdr_lst" '"total":2,"count":2'
+assert_contains "list --json places the fixture in In Progress" "$rdr_lst" '"lane":"In Progress"'
+assert_contains "list --json places the archived task in Archive" "$rdr_lst" '"lane":"Archive"'
+assert_contains "list --json carries the claim restriction" "$rdr_lst" '"claim_owner":"sess-fix"'
+assert_contains "list --json carries the header owner" "$rdr_lst" '"owner":"sess-fix"'
+assert_eq "list --json orders dashboard-lanes first" "In Progress" \
+	"$(rdr_jfield "$(printf '%s' "$rdr_lst" | grep -o '{"schema_version":1,"type":"task_row"[^}]*}' | head -1)" lane)"
+rdr_lane="$(t list --dir "$rdr_dir" --json --lane Archive)"
+assert_contains "list --lane filters one lane" "$rdr_lane" '"total":1,"count":1'
+assert_contains "list --lane drops the other lane" \
+	"$(rdr_jfield "$(printf '%s' "$rdr_lane" | grep -o '{"schema_version":1,"type":"task_row"[^}]*}' | head -1)" id)" \
+	"FIX-2"
+rdr_page="$(t list --dir "$rdr_dir" --json --limit 1 --offset 1)"
+assert_contains "list --limit/--offset pages the sorted set" "$rdr_page" '"total":2,"count":1,"offset":1,"limit":1'
+refuse "list refuses an unknown lane" list --dir "$rdr_dir" --lane Bogus
+refuse "list refuses a non-numeric limit" list --dir "$rdr_dir" --limit abc
+refuse "list refuses a negative offset" list --dir "$rdr_dir" --offset -1
+rdr_lst_err="$(t list --dir "$rdr_dir" --lane Bogus 2>&1 >/dev/null || true)"
+assert_contains "the lane refusal carries USAGE" "$rdr_lst_err" "(code: USAGE)"
+rdr_human="$(t list --dir "$rdr_dir")"
+assert_contains "list human view prints tab-separated rows" "$rdr_human" \
+	"$(printf 'FIX-1\tIn Progress\tIn Progress\tcurrent/FIX-1-20260615-1200-reader-fixture.md')"
+
+echo "== reports: --json provenance and bodies =="
+printf 'deposit one body\n' | t report --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --slug one --digest "first digest" >/dev/null
+printf 'deposit two\n' | t report --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --slug two --digest "second digest" --from sess-fix >/dev/null
+printf 'ghost report never linked\n' >"$rdr_dir/reports/FIX-1-20260615-1200-reader-fixture.md/05-ghost.md"
+rdr_rpt="$(t reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json)"
+assert_contains "reports --json carries the schema_version 1 marker" "$rdr_rpt" '{"schema_version":1,"type":"reports"'
+assert_contains "reports --json counts the deposits" "$rdr_rpt" '"total":3,"count":3'
+assert_contains "reports --json pins the linked provenance" "$rdr_rpt" '"seq":1,"name":"01-one.md","file":"reports/FIX-1-20260615-1200-reader-fixture.md/01-one.md","linked":true,"stamp":"2026-06-15 12:00","from":"Manager","digest":"first digest"'
+assert_contains "reports --json carries the second attribution" "$rdr_rpt" '"from":"sess-fix","digest":"second digest"'
+assert_contains "reports --json marks an unlinked on-disk report" "$rdr_rpt" '"seq":5,"name":"05-ghost.md","file":"reports/FIX-1-20260615-1200-reader-fixture.md/05-ghost.md","linked":false'
+# rdr_jfield grabs the first occurrence, so --limit 1 pins the decode target.
+rdr_rpt_lim="$(t reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json --include-body --limit 1)"
+rdr_rpt_body_decoded="$(printf '%s\n' "$rdr_rpt_lim" | rdr_jfield "$rdr_rpt_lim" body | rdr_unesc; echo)"
+assert_eq "reports --include-body reconstructs the deposit byte-exact" \
+	"$(printf 'deposit one body\n')" "$rdr_rpt_body_decoded"
+assert_contains "reports human view prints name and digest" "$(t reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md)" \
+	"$(printf '01-one.md\tfirst digest')"
+rdr_rpt_page="$(t reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json --limit 1 --offset 1)"
+assert_contains "reports --limit/--offset page by sequence" "$rdr_rpt_page" '"total":3,"count":1,"offset":1,"limit":1'
+assert_contains "the paged report is the second deposit" "$rdr_rpt_page" '"digest":"second digest"'
+refuse "reports refuses --include-body without --json" reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --include-body
+rdr_empty="$(t reports --dir "$rdr_dir" FIX-2-20260615-0900-archived-fixture.md --json)"
+assert_contains "reports on a task without deposits is an empty success" "$rdr_empty" '"total":0,"count":0,"offset":0,"limit":0,"reports":[]'
+
+echo "== export: lossless JSONL round-trip =="
+rdr_export="$ROOT/rdr-export.jsonl"
+t export --dir "$rdr_dir" --include-reports >"$rdr_export"
+rdr_export_lines="$(wc -l <"$rdr_export")"
+rdr_export_expected="$(( $(find "$rdr_dir/current" "$rdr_dir/archive" -type f -name '*.md' | wc -l) + $(find "$rdr_dir/reports" -type f -name '*.md' 2>/dev/null | wc -l) ))"
+assert_eq "export emits one record per board file" "$rdr_export_expected" "$rdr_export_lines"
+rt_fail=0
+rt_root="$ROOT/rdr-roundtrip"
+mkdir -p "$rt_root"
+while IFS= read -r line; do
+	[[ "$line" == '{"schema_version":1,'* ]] || { rt_fail=$((rt_fail + 1)); continue; }
+	rf="$(rdr_jfield "$line" file)"
+	rc="$(rdr_jfield "$line" content)"
+	rc_dec="$(printf '%s' "$rc" | rdr_unesc)"
+	[[ "$line" == *'"final_newline":true'* ]] && rc_dec+=$'\n'
+	rt_path="$rdr_dir/$rf"
+	mkdir -p "$(dirname "$rt_root/$rf")"
+	printf '%s' "$rc_dec" >"$rt_root/$rf"
+	cmp -s "$rt_root/$rf" "$rt_path" || rt_fail=$((rt_fail + 1))
+done <"$rdr_export"
+assert_eq "exported records reconstruct every file byte-exactly" "0" "$rt_fail"
+assert_contains "export includes the archived task" "$(cat "$rdr_export")" '"file":"archive/FIX-2-20260615-0900-archived-fixture.md"'
+assert_contains "export includes report bodies under --include-reports" "$(cat "$rdr_export")" '"file":"reports/FIX-1-20260615-1200-reader-fixture.md/01-one.md"'
+assert_eq "export --format jsonl is the explicit default" \
+	"$(t export --dir "$rdr_dir" --include-reports --format jsonl)" "$(cat "$rdr_export")"
+refuse "export refuses an unsupported format" export --dir "$rdr_dir" --format yaml
+
+echo "== show/edit: fenced level-2 headings are sections on both sides =="
+# The heading model is fence-blind repo-wide (lint scanner, closure gate,
+# edit, readers), and the skill documents the phantom-section hazard that
+# follows: a heading-looking line inside a fenced block is a real section
+# boundary. This pin makes the documented semantics contract rather than
+# accident, on both sides of the read==write invariant: the fenced level-2
+# line is addressable by show --section (read) and by edit --section
+# (write), and the fence splits the enclosing section identically for both.
+cat >"$rdr_dir/current/FIX-3-20260615-1100-fenced-probe.md" <<'FIXEOF'
+# Task: Fenced Probe
+
+**Created:** 2026-06-15 11:00
+**Status:** Triage
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 11:00
+
+## Objective
+
+fenced probe objective
+
+## Testing Strategy
+
+body before the fence
+
+```
+fenced line one
+## Fenced Demo
+still fenced body
+```
+
+tail after the fence
+FIXEOF
+assert_eq "a fenced level-2 heading reads as a section" \
+	"$(printf 'still fenced body\n```\n\ntail after the fence')" \
+	"$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo')"
+rdr_fencejson="$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo' --json)"
+assert_contains "the fenced heading pins as level 2 in the section envelope" \
+	"$rdr_fencejson" '"heading":"Fenced Demo","level":2'
+assert_eq "the enclosing section ends at the fenced heading like edit" \
+	"$(printf 'body before the fence\n\n```\nfenced line one')" \
+	"$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Testing Strategy')"
+printf 'appended inside the phantom section\n' \
+	| t edit --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo' --append - >/dev/null
+assert_eq "edit --append lands inside the fenced section like read" \
+	"$(printf 'still fenced body\n```\n\ntail after the fence\n\nappended inside the phantom section')" \
+	"$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo')"
+t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo' \
+	| t edit --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo' - >/dev/null
+assert_eq "the fenced section round-trips through edit byte-exact" \
+	"$(printf 'still fenced body\n```\n\ntail after the fence\n\nappended inside the phantom section')" \
+	"$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo')"
+
+echo "== readers: read-only guarantee =="
+# Every reader run over the fixture board must leave the whole tree
+# untouched: no lock, no render, no Updated bump, no sidecar, no temp.
+rdr_tree_before="$(find "$rdr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md >/dev/null
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json >/dev/null
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective >/dev/null
+t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --raw >/dev/null
+t list --dir "$rdr_dir" --json >/dev/null
+t list --dir "$rdr_dir" >/dev/null
+t reports --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --json --include-body >/dev/null
+t export --dir "$rdr_dir" --include-reports >/dev/null
+rdr_tree_after="$(find "$rdr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+assert_eq "the reader surface leaves the board tree untouched" "$rdr_tree_before" "$rdr_tree_after"
+
+echo "== reader error codes =="
+rdr_nf_err="$(t show --dir "$rdr_dir" NOPE-9.md 2>&1 >/dev/null || true)"
+assert_contains "show on a missing file carries TASK_NOT_FOUND" "$rdr_nf_err" "(code: TASK_NOT_FOUND)"
+printf 'outside\n' >"$ROOT/outside-rdr.md"
+rdr_esc_err="$(t show --dir "$rdr_dir" "$ROOT/outside-rdr.md" 2>&1 >/dev/null || true)"
+assert_contains "show outside the board root carries BOARD_ROOT_ESCAPE" "$rdr_esc_err" "(code: BOARD_ROOT_ESCAPE)"
+rm -f "$ROOT/outside-rdr.md"
+rdr_nb_err="$(t show --dir "$ROOT/no-such-board" x.md 2>&1 >/dev/null || true)"
+assert_contains "show on a missing board carries NO_BOARD" "$rdr_nb_err" "(code: NO_BOARD)"
+rdr_usage_err="$(t show 2>&1 >/dev/null || true)"
+assert_contains "show usage failure carries USAGE" "$rdr_usage_err" "(code: USAGE)"
+rdr_nb_board="$ROOT/rdr-noboard"
+mkdir -p "$rdr_nb_board"
+rdr_list_empty="$(t list --dir "$rdr_nb_board" --json)"
+assert_contains "list on an empty root prints the empty payload" "$rdr_list_empty" '{"schema_version":1,"type":"list","total":0,"count":0,"offset":0,"limit":0,"tasks":[]}'
+assert_eq "list on an empty root prints the no-tasks line" "no tasks" "$(t list --dir "$rdr_nb_board")"
+
+echo "== readers: EXIT-trap cleanup under metacharacter TMPDIR =="
+# The readers stage their row maps through mktemp in ${TMPDIR:-/tmp} and
+# hand cleanup to an EXIT trap carrying %-q-escaped paths baked in at set
+# time (the render_unlocked discipline). Under a TMPDIR holding spaces and
+# quotes, the old fired-string form re-ran %-q inside double quotes at
+# trap time, so rm received the literal backslashes and silently leaked
+# the temp. SIGHUP is the one untrapped signal bash services through the
+# EXIT trap, so each probe round launches list under the metacharacter
+# TMPDIR and HUPs only once the staged temp provably exists AND the process
+# has a live awk/sort child: bash is then blocked waiting on that child, so
+# the queued signal is processed while the trap is still armed and can
+# never land in the post-clear boundary window where the explicit rm has
+# not run yet. The catch assertion keeps a probe that never entered the
+# armed window from passing vacuously.
+rdr_meta_root="$ROOT/rdr-meta tmp'dir"
+mkdir -p "$rdr_meta_root/.tasks/current"
+for fmn in $(seq -w 1 120); do
+	cat >"$rdr_meta_root/.tasks/current/META-$fmn-20260615-1200-meta-filler.md" <<EOF
+# Task: Meta Filler $fmn
+
+**Created:** 2026-06-15 12:00
+**Status:** Triage
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+filler $fmn body
+
+## Work Log
+
+## Execution Log
+EOF
+done
+rdr_meta_caught=0
+rdr_meta_leak=0
+for rdr_round in 1 2 3; do
+	TMPDIR="$rdr_meta_root" "$TASKS_BIN" list --dir "$rdr_meta_root/.tasks" >/dev/null 2>&1 &
+	rdr_meta_pid=$!
+	rdr_meta_hit=0
+	for rdr_poll in $(seq 1 300); do
+		if compgen -G "$rdr_meta_root/tasks-list.*" >/dev/null 2>&1 \
+			&& [[ -n "$(ps --ppid "$rdr_meta_pid" -o pid= 2>/dev/null)" ]]; then
+			rdr_meta_hit=1
+			break
+		fi
+		sleep 0.01
+	done
+	kill -HUP "$rdr_meta_pid" 2>/dev/null
+	wait "$rdr_meta_pid" 2>/dev/null
+	if ((rdr_meta_hit == 1)); then
+		rdr_meta_caught=$((rdr_meta_caught + 1))
+		[[ -z "$(compgen -G "$rdr_meta_root/tasks-list.*" 2>/dev/null)" ]] || rdr_meta_leak=$((rdr_meta_leak + 1))
+	fi
+done
+((rdr_meta_caught >= 1)) \
+	&& ok "the metacharacter-TMPDIR probe catches the trap's armed window" \
+	|| bad "the metacharacter-TMPDIR probe catches the trap's armed window"
+assert_eq "no temp leaks through the EXIT trap under metacharacter TMPDIR" "0" "$rdr_meta_leak"
+rm -rf "$rdr_meta_root"
+
+# --- expanded doctor (ORCH-4-4-2) -------------------------------------------
+
+echo "== doctor: grandfathering pins a legacy-shaped board at zero =="
+# Dedicated fixture board carrying every grandfathered shape the live board
+# probe recorded (archived dup IDs, all-archived cycles, Ready-file future
+# children, archived claim sidecars, archived dead links) plus healthy live
+# shapes, so the doctor pins at zero before any live problem is introduced.
+doc_dir="$ROOT/doc/.tasks"
+t init --dir "$doc_dir" >/dev/null
+mkdir -p "$doc_dir/archive"
+cat >"$doc_dir/current/CY-1-20260615-1200-cycle-a.md" <<'EOF'
+# Task: Cycle A
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+cycle a body
+
+## Dependencies
+
+- CY-2
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/CY-2-20260615-1200-cycle-b.md" <<'EOF'
+# Task: Cycle B
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+cycle b body
+
+## Dependencies
+
+- CY-1
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/DEP-1-20260615-1200-missing-dep.md" <<'EOF'
+# Task: Missing Dep
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+dep body
+
+## Dependencies
+
+- GHOST-9
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/FUT-1-20260615-1200-future-child.md" <<'EOF'
+# Task: Future Child
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+future child body
+
+## Dependencies
+
+- FUTURE-7
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/REASON-1-20260615-1200-no-reason.md" <<'EOF'
+# Task: No Reason
+
+**Created:** 2026-06-15 12:00
+**Status:** Blocked
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+blocked without a reason body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/REASON-2-20260615-1200-with-reason.md" <<'EOF'
+# Task: With Reason
+
+**Created:** 2026-06-15 12:00
+**Status:** Blocked
+**Status Reason:** waiting on an external review
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+blocked with a reason body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/REASON-3-20260615-1200-archived-no-reason.md" <<'EOF'
+# Task: Archived No Reason
+
+**Created:** 2026-06-15 09:00
+**Status:** Blocked
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 09:30
+
+## Objective
+
+archived blocked body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/DUP-1-20260615-1200-one.md" <<'EOF'
+# Task: Dup One
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** Medium
+**Progress:** 10%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+dup one body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/DUP-1-20260615-1300-two.md" <<'EOF'
+# Task: Dup Two
+
+**Created:** 2026-06-15 13:00
+**Status:** Triage
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 13:00
+
+## Objective
+
+dup two body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/DUP-2-20260601-0900-one.md" <<'EOF'
+# Task: Archived Dup One
+
+**Created:** 2026-06-01 09:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+archived dup one body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/DUP-2-20260601-0930-two.md" <<'EOF'
+# Task: Archived Dup Two
+
+**Created:** 2026-06-01 09:30
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+archived dup two body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/ACY-1-20260601-0900-archived-cycle-a.md" <<'EOF'
+# Task: Archived Cycle A
+
+**Created:** 2026-06-01 09:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+archived cycle a body
+
+## Dependencies
+
+- ACY-2
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/ACY-2-20260601-0930-archived-cycle-b.md" <<'EOF'
+# Task: Archived Cycle B
+
+**Created:** 2026-06-01 09:30
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+archived cycle b body
+
+## Dependencies
+
+- ACY-1
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/LINK-1-20260615-1200-dead-link.md" <<'EOF'
+# Task: Dead Link
+
+**Created:** 2026-06-15 12:00
+**Status:** Triage
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+context [report](../reports/GHOST-9-20260615-1200-x/99-missing.md) body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/archive/LINK-2-20260601-0900-archived-dead-link.md" <<'EOF'
+# Task: Archived Dead Link
+
+**Created:** 2026-06-01 09:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+context [report](../reports/GHOST-9-20260615-1200-x/99-missing.md) body
+
+## Work Log
+
+## Execution Log
+EOF
+cat >"$doc_dir/current/CLAIM-1-20260615-1200-claimed.md" <<'EOF'
+# Task: Claimed
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** Medium
+**Progress:** 40%
+**Owner:** sess-doc
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+claimed body
+
+## Work Log
+
+## Execution Log
+EOF
+printf 'sess-doc\n' >"$doc_dir/current/CLAIM-1-20260615-1200-claimed.md.claim"
+cat >"$doc_dir/current/CLAIM-2-20260615-1200-done-with-claim.md" <<'EOF'
+# Task: Done With Claim
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:** sess-doc
+**Updated:** 2026-06-15 12:30
+**Completed:** 2026-06-15 12:30
+
+## Objective
+
+done with claim body
+
+## Work Log
+
+## Execution Log
+EOF
+printf 'sess-doc\n' >"$doc_dir/current/CLAIM-2-20260615-1200-done-with-claim.md.claim"
+cat >"$doc_dir/archive/CLAIM-3-20260601-0900-archived-with-claim.md" <<'EOF'
+# Task: Archived With Claim
+
+**Created:** 2026-06-01 09:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-01 10:00
+**Completed:** 2026-06-01 10:00
+
+## Objective
+
+archived with claim body
+
+## Work Log
+
+## Execution Log
+EOF
+printf 'sess-old\n' >"$doc_dir/archive/CLAIM-3-20260601-0900-archived-with-claim.md.claim"
+printf 'ghost\n' >"$doc_dir/ORPHAN-9-20260615-1200-gone.md.claim"
+cat >"$doc_dir/current/broken-name.md" <<'EOF'
+# Task: Broken Name
+
+**Created:** 2026-06-15 12:00
+**Status:** Triage
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+broken name body
+
+## Work Log
+
+## Execution Log
+EOF
+# Render syncs the dashboard with the fixture board, so divergence starts quiet.
+t render --dir "$doc_dir" >/dev/null
+doc_out="$(t doctor --dir "$doc_dir")"
+doc_expected="$(printf 'DEAD_REPORT_LINK %s: dead report link (line 12): ../reports/GHOST-9-20260615-1200-x/99-missing.md\nDEP_CYCLE %s: dependency cycle: CY-1 -> CY-2 -> CY-1 (open: %s)\nDUPLICATE_ID %s: Task ID DUP-1 shared by: %s %s\nFILE_NAMING %s: file name misses the CLI convention (ID-stamp-slug.md): broken-name.md\nMISSING_DEP %s: dependency token '\''GHOST-9'\'' names no board file\nSTALE_CLAIM %s: claim sidecar with no task file\nSTALE_CLAIM %s: stale claim sidecar on Completed task\nSTATUS_REASON %s: Status Blocked requires a Status Reason (the header contract ties it to Blocked/Cancelled)\ndoctor: 8 problem(s) across 19 task files' \
+	"current/LINK-1-20260615-1200-dead-link.md" \
+	"current/CY-1-20260615-1200-cycle-a.md" "current/CY-1-20260615-1200-cycle-a.md" \
+	"current/DUP-1-20260615-1200-one.md" \
+	"current/DUP-1-20260615-1200-one.md" "current/DUP-1-20260615-1300-two.md" \
+	"current/broken-name.md" \
+	"current/DEP-1-20260615-1200-missing-dep.md" \
+	"ORPHAN-9-20260615-1200-gone.md.claim" \
+	"current/CLAIM-2-20260615-1200-done-with-claim.md.claim" \
+	"current/REASON-1-20260615-1200-no-reason.md")"
+assert_eq "doctor fires exactly the live-set problems" "$doc_expected" "$doc_out"
+doc_rc=0; t doctor --dir "$doc_dir" >/dev/null 2>&1 || doc_rc=1
+assert_eq "doctor exits 0 even with problems" "0" "$doc_rc"
+assert_not_contains "doctor grandfathers the archived dup group" "$doc_out" "DUP-2"
+assert_not_contains "doctor grandfathers the all-archived cycle" "$doc_out" "ACY"
+assert_not_contains "doctor grandfathers the archived no-reason file" "$doc_out" "REASON-3"
+assert_not_contains "doctor grandfathers the Ready future-child token" "$doc_out" "FUTURE-7"
+assert_not_contains "doctor grandfathers the archived dead link" "$doc_out" "LINK-2"
+assert_not_contains "doctor grandfathers the archived claim sidecar" "$doc_out" "CLAIM-3"
+assert_not_contains "doctor stays quiet on the healthy claim" "$doc_out" "CLAIM-1"
+assert_not_contains "doctor stays quiet on the reasoned Blocked file" "$doc_out" "REASON-2"
+assert_not_contains "doctor stays quiet when a cycle token resolves" "$doc_out" "DEP-1-20260615-1200-missing-dep.md: dependency token 'CY-2'"
+
+echo "== doctor: --json envelope =="
+doc_json="$(t doctor --dir "$doc_dir" --json)"
+assert_contains "doctor --json carries the schema_version 1 marker" "$doc_json" '{"schema_version":1,"type":"doctor"'
+assert_eq "doctor --json counts all eight codes in fixed order" \
+	'"counts":{"DUPLICATE_ID":1,"FILE_NAMING":1,"STATUS_REASON":1,"STALE_CLAIM":2,"MISSING_DEP":1,"DEP_CYCLE":1,"DEAD_REPORT_LINK":1,"DASHBOARD_DIVERGENCE":0}' \
+	"$(printf '%s' "$doc_json" | grep -o '"counts":{[^}]*}')"
+assert_eq "doctor --json pins the total" '"total":8' "$(printf '%s' "$doc_json" | grep -o '"total":[0-9]*')"
+assert_contains "doctor --json records carry code, file, and detail" "$doc_json" \
+	'{"code":"DEP_CYCLE","file":"current/CY-1-20260615-1200-cycle-a.md","detail":"dependency cycle: CY-1 -> CY-2 -> CY-1 (open: current/CY-1-20260615-1200-cycle-a.md)"}'
+doc_json_err="$(t doctor --dir "$doc_dir" --bogus 2>&1 >/dev/null || true)"
+assert_contains "doctor refuses an unknown argument with USAGE" "$doc_json_err" "(code: USAGE)"
+
+echo "== doctor: --all surfaces the grandfathered findings =="
+doc_all="$(t doctor --dir "$doc_dir" --all)"
+doc_all_expected="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\ndoctor: 8 problem(s), 6 grandfathered across 19 task files' \
+	'DEAD_REPORT_LINK current/LINK-1-20260615-1200-dead-link.md: dead report link (line 12): ../reports/GHOST-9-20260615-1200-x/99-missing.md' \
+	'DEP_CYCLE current/CY-1-20260615-1200-cycle-a.md: dependency cycle: CY-1 -> CY-2 -> CY-1 (open: current/CY-1-20260615-1200-cycle-a.md)' \
+	'DUPLICATE_ID current/DUP-1-20260615-1200-one.md: Task ID DUP-1 shared by: current/DUP-1-20260615-1200-one.md current/DUP-1-20260615-1300-two.md' \
+	'FILE_NAMING current/broken-name.md: file name misses the CLI convention (ID-stamp-slug.md): broken-name.md' \
+	'MISSING_DEP current/DEP-1-20260615-1200-missing-dep.md: dependency token '\''GHOST-9'\'' names no board file' \
+	'STALE_CLAIM ORPHAN-9-20260615-1200-gone.md.claim: claim sidecar with no task file' \
+	'STALE_CLAIM current/CLAIM-2-20260615-1200-done-with-claim.md.claim: stale claim sidecar on Completed task' \
+	'STATUS_REASON current/REASON-1-20260615-1200-no-reason.md: Status Blocked requires a Status Reason (the header contract ties it to Blocked/Cancelled)' \
+	'DEAD_REPORT_LINK archive/LINK-2-20260601-0900-archived-dead-link.md: dead report link (line 13): ../reports/GHOST-9-20260615-1200-x/99-missing.md' \
+	'DEP_CYCLE archive/ACY-1-20260601-0900-archived-cycle-a.md: dependency cycle: ACY-1 -> ACY-2 -> ACY-1' \
+	'DUPLICATE_ID archive/DUP-2-20260601-0900-one.md: Task ID DUP-2 shared by: archive/DUP-2-20260601-0900-one.md archive/DUP-2-20260601-0930-two.md' \
+	'MISSING_DEP current/FUT-1-20260615-1200-future-child.md: dependency token '\''FUTURE-7'\'' names no board file' \
+	'STALE_CLAIM archive/CLAIM-3-20260601-0900-archived-with-claim.md.claim: claim sidecar on archived task' \
+	'STATUS_REASON archive/REASON-3-20260615-1200-archived-no-reason.md: Status Blocked requires a Status Reason (the header contract ties it to Blocked/Cancelled)')"
+assert_eq "doctor --all lists grandfathered findings under their own marker and count" "$doc_all_expected" "$doc_all"
+assert_not_contains "doctor without --all stays silent on the grandfathered findings" "$doc_out" "GRANDFATHERED"
+assert_not_contains "doctor --json default carries no grandfathered fields" "$doc_json" "grandfathered"
+doc_all_json="$(t doctor --dir "$doc_dir" --all --json)"
+assert_eq "doctor --all --json pins the grandfathered total" '"grandfathered_total":6' "$(printf '%s' "$doc_all_json" | grep -o '"grandfathered_total":[0-9]*')"
+assert_contains "doctor --all --json carries the grandfathered records" "$doc_all_json" \
+	'{"code":"DEP_CYCLE","file":"archive/ACY-1-20260601-0900-archived-cycle-a.md","detail":"dependency cycle: ACY-1 -> ACY-2 -> ACY-1"}'
+assert_eq "doctor --all --json keeps the live totals" '"total":8' "$(printf '%s' "$doc_all_json" | grep -o '"total":[0-9]*')"
+# The --all envelope extends the base object, so the same independent-parser
+# gate that pins the readers' single-document shape guards it too: json.load
+# refuses trailing data, which is exactly how the --all extension first
+# landed outside the closing brace.
+if command -v python3 >/dev/null 2>&1; then
+	if printf '%s\n' "$doc_all_json" | python3 -c 'import json, sys; json.load(sys.stdin)' 2>/dev/null; then
+		ok "doctor --all --json parses as one complete JSON document (python3)"
+	else
+		bad "doctor --all --json parses as one complete JSON document (python3)"
+	fi
+elif command -v jq >/dev/null 2>&1; then
+	if printf '%s\n' "$doc_all_json" | jq -e . >/dev/null 2>&1; then
+		ok "doctor --all --json parses as one complete JSON document (jq)"
+	else
+		bad "doctor --all --json parses as one complete JSON document (jq)"
+	fi
+else
+	bad "no independent JSON parser on the host (python3 nor jq)"
+fi
+doc_all_rc=0; t doctor --dir "$doc_dir" --all >/dev/null 2>&1 || doc_all_rc=1
+assert_eq "doctor --all keeps the always-exit-0 contract" "0" "$doc_all_rc"
+
+echo "== doctor: dashboard divergence =="
+printf '\nstray line\n' >>"$doc_dir/dashboard.md"
+doc_div="$(t doctor --dir "$doc_dir")"
+assert_contains "doctor reports a diverged dashboard" "$doc_div" 'DASHBOARD_DIVERGENCE dashboard.md: dashboard.md differs from the assembled board'
+t render --dir "$doc_dir" >/dev/null
+assert_not_contains "doctor clears the divergence after render" "$(t doctor --dir "$doc_dir")" "DASHBOARD_DIVERGENCE"
+rm -f "$doc_dir/dashboard.md"
+assert_contains "doctor reports a missing dashboard" "$(t doctor --dir "$doc_dir")" 'DASHBOARD_DIVERGENCE dashboard.md: dashboard.md is missing (render would create it)'
+t render --dir "$doc_dir" >/dev/null
+
+echo "== doctor: read-only guarantee =="
+doc_tree_before="$(find "$doc_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+t doctor --dir "$doc_dir" >/dev/null
+t doctor --dir "$doc_dir" --json >/dev/null
+t doctor --dir "$doc_dir" --all >/dev/null
+t doctor --dir "$doc_dir" --all --json >/dev/null
+doc_tree_after="$(find "$doc_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+assert_eq "the doctor leaves the board tree untouched" "$doc_tree_before" "$doc_tree_after"
+
+# --- AC-06 write parity (ORCH-4-4-2) ----------------------------------------
+
+echo "== write parity: every permitted mutation has an authorized CLI path =="
+# The AC-06 inventory walk: each permitted mutation class performs through
+# its one authorized command on a scaffolded fixture, with a read-back so
+# the read surface proves the landing. Lifecycle transitions (claim,
+# release, close, archive) keep their dedicated commands and close the walk.
+wp_dir="$ROOT/wp/.tasks"
+t init --dir "$wp_dir" >/dev/null
+f_wp="$(t new --dir "$wp_dir" --id WP-1 --name "Write Parity Fixture")"
+t set --dir "$wp_dir" "$(basename "$f_wp")" Priority=High >/dev/null
+assert_contains "header mutations ride tasks set" "$(grep -oP '^\*\*Priority:\*\*\s+\K.*' "$f_wp")" "High"
+printf -- '- [x] landed criterion\n' | t edit --dir "$wp_dir" "$(basename "$f_wp")" --section "Success Criteria" - >/dev/null
+assert_eq "criteria changes ride tasks edit and read back byte-exact" \
+	"$(printf -- '- [x] landed criterion')" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wp")" --section "Success Criteria")"
+printf 'planning prose\n\n### Decision Log\n\nnested planner note\n' | t edit --dir "$wp_dir" "$(basename "$f_wp")" --section "Technical Approach" - >/dev/null
+assert_contains "planner nested edits keep deeper headings" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wp")" --section "Technical Approach")" "### Decision Log"
+printf 'appended prose\n' | t edit --dir "$wp_dir" "$(basename "$f_wp")" --section "Technical Approach" --append - >/dev/null
+assert_contains "cumulative appends grow the section" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wp")" --section "Technical Approach")" "appended prose"
+printf 'open question: does the gate accept this?\n' | t edit --dir "$wp_dir" "$(basename "$f_wp")" --section "Questions" --append - >/dev/null
+printf -- '- evidence: [01-evi.md](../reports/%s/01-evi.md)\n' "$(basename "$f_wp")" | t edit --dir "$wp_dir" "$(basename "$f_wp")" --section "Evidence" --append - >/dev/null
+printf 'evidence deposit\n' | t report --dir "$wp_dir" "$(basename "$f_wp")" --slug evi --digest "evidence deposit" >/dev/null
+wp_order="$(grep '^## ' "$f_wp" | sed 's/^## //' | tr '\n' '|')"
+assert_contains "question updates create Questions at the canonical slot" "$wp_order" "|Success Criteria|Technical Approach|Questions|Evidence|Work Log|"
+assert_eq "evidence links create Evidence between Questions and Work Log" \
+	"Table of Contents|Objective|Success Criteria|Technical Approach|Questions|Evidence|Work Log|Execution Log|" "$wp_order"
+assert_contains "the created sections ride the versioned snapshot" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wp")" --json)" '"heading":"Questions"'
+assert_contains "evidence links name a real deposit" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wp")" --section Evidence)" "../reports/$(basename "$f_wp")/01-evi.md"
+t log --dir "$wp_dir" "$(basename "$f_wp")" "inventory walk entry" >/dev/null
+assert_contains "work log entries ride tasks log" "$(t show --dir "$wp_dir" "$(basename "$f_wp")" --tail 1)" "inventory walk entry"
+wp_lint_rc=0; t lint --dir "$wp_dir" >/dev/null 2>&1 || wp_lint_rc=1
+assert_eq "the fixture board stays lint-clean after the walk" "0" "$wp_lint_rc"
+t close --dir "$wp_dir" "$(basename "$f_wp")" >/dev/null
+t archive --dir "$wp_dir" "$(basename "$f_wp")" >/dev/null
+[[ -f "$wp_dir/archive/$(basename "$f_wp")" ]] \
+	&& ok "terminal transitions ride close and archive" || bad "terminal transitions ride close and archive"
+
+echo "== write parity: concurrent edit --append serializes (no lost append) =="
+# Without a seam, whether two writers' lock windows overlap is scheduler
+# luck and the assertion can pass with the lock removed whenever the
+# processes serialize naturally. Both writers carry the test-only
+# TASKS_TEST_LOCK_HOLD_MS seam (validated under the same TASKS_DIR co-gate
+# as the clock): the second writer provably blocks on the flock, the
+# round's wall clock proves the serialization (two serialized 600ms holds
+# plus startup and render cannot finish under 1100ms, while the lockless
+# parallel shape runs both holds concurrently around 800ms and a red
+# scratch run of exactly that shape lost an update outright), and the
+# no-lost-update assertion rides on a race that actually ran.
+f_wpc="$(t new --dir "$wp_dir" --id WP-2 --name "Append Concurrency Fixture")"
+wpdir="$(mktemp -d)"
+wpfail=0
+for wp_round in 1 2 3 4 5 6; do
+	wp_t0="$EPOCHREALTIME"
+	printf 'alpha round %s\n' "$wp_round" | TASKS_TEST_LOCK_HOLD_MS=600 t edit --dir "$wp_dir" "$(basename "$f_wpc")" --section "Risk Assessment" --append - >"$wpdir/a.out" 2>&1 &
+	a_pid=$!
+	printf 'beta round %s\n' "$wp_round" | TASKS_TEST_LOCK_HOLD_MS=600 t edit --dir "$wp_dir" "$(basename "$f_wpc")" --section "Risk Assessment" --append - >"$wpdir/b.out" 2>&1 &
+	b_pid=$!
+	wait "$a_pid"; a_code=$?
+	wait "$b_pid"; b_code=$?
+	wp_t1="$EPOCHREALTIME"
+	wp_ms="$(awk -v a="$wp_t0" -v b="$wp_t1" 'BEGIN { printf "%d", (b - a) * 1000 }')"
+	[[ "$a_code" == 0 && "$b_code" == 0 ]] || wpfail=$((wpfail + 1))
+	((wp_ms >= 1100)) || wpfail=$((wpfail + 1))
+	wp_sec="$(t show --dir "$wp_dir" "$(basename "$f_wpc")" --section "Risk Assessment")"
+	[[ "$wp_sec" == *"alpha round $wp_round"* ]] || wpfail=$((wpfail + 1))
+	[[ "$wp_sec" == *"beta round $wp_round"* ]] || wpfail=$((wpfail + 1))
+	[[ "$wp_sec" == *"alpha round 1"* ]] || wpfail=$((wpfail + 1))
+done
+assert_eq "concurrent appends serialize under the lock-hold seam and lose no update" "0" "$wpfail"
+rm -rf "$wpdir"
+
+echo "== write parity: crash safety (kill inside the commit window never tears the file) =="
+# A fixed post-launch sleep kills during bash startup, before the staging
+# write, so the interesting window (staged tmp written, mv not yet) never
+# ran and the invariant's substance stayed untested. Each round arms the
+# test-only TASKS_TEST_CRASH_POINT seam (same TASKS_DIR co-gate as the
+# clock), which pauses the edit write path between the staged awk write
+# and the committing mv, and kills only after the staged temp provably
+# exists, so every round exercises the old-or-new invariant inside the
+# real window.
+f_wpk="$(t new --dir "$wp_dir" --id WP-3 --name "Crash Safety Fixture")"
+printf 'baseline body\n' | t edit --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy" - >/dev/null
+wpk_big="$(awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "filler %d\n", i }')"
+printf '%s\n' "$wpk_big" | t edit --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy" --append - >/dev/null
+wpk_fail=0
+for wp_round in 1 2 3 4 5 6 7 8; do
+	wpk_pre="$(t show --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy")"
+	find "$wp_dir/current" -name '*.md.??????' -delete
+	# The binary is launched directly, not through the t wrapper: a
+	# backgrounded function call forks a subshell the kill would hit
+	# instead of the CLI, leaving the seam-paused process alive holding
+	# the board lock and starving the next round's writer.
+	printf 'marker round %s\n' "$wp_round" | TASKS_TEST_CRASH_POINT=5 "$TASKS_BIN" edit --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy" --append - >/dev/null 2>&1 &
+	wpk_pid=$!
+	wpk_staged=0
+	for wpk_poll in $(seq 1 100); do
+		[[ -n "$(find "$wp_dir/current" -name '*.md.??????' -print -quit)" ]] && { wpk_staged=1; break; }
+		sleep 0.02
+	done
+	kill -9 "$wpk_pid" 2>/dev/null
+	wait "$wpk_pid" 2>/dev/null
+	((wpk_staged == 1)) || wpk_fail=$((wpk_fail + 1))
+	wpk_post="$(t show --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy")"
+	[[ "$wpk_post" == "$wpk_pre" \
+		|| "$wpk_post" == "$wpk_pre"$'\n\n'marker\ round\ $wp_round ]] || wpk_fail=$((wpk_fail + 1))
+done
+assert_eq "killed appends provably enter the commit window and leave old-or-new state" "0" "$wpk_fail"
+find "$wp_dir/current" -name '*.md.??????' -delete
+printf 'after-crash marker\n' | t edit --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy" --append - >/dev/null
+assert_contains "a normal append lands after the crash rounds" \
+	"$(t show --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy")" "after-crash marker"
+
+ print_result
 ((fail == 0)) || exit 1
