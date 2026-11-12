@@ -52,7 +52,7 @@ const BODY_SIDECAR = "manager-body.md";
 // manager-body.sha256); the sync test pins this file's embedded copy of
 // the digest against that pin, and activation re-derives the sidecar's
 // digest against it.
-const PINNED_BODY_DIGEST = "c1fe644220e79c6992c83decce90b9a3649884813ca717a8bd2fdf393e0577a6";
+const PINNED_BODY_DIGEST = "656f33edd141d424aea46872b18fed8276d9af68094e36e4867bec60752b6739";
 const DEACTIVATE_ARGS = new Set(["off", "stand down", "solo"]);
 
 interface ModeState {

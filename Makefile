@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-pi lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -381,7 +381,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+test: lint-corpus test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "All tests passed!"
 
@@ -395,7 +395,7 @@ check: test
 # runner script and make stops at the first nonzero exit, so no aggregate
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
-verify-inner: lint-corpus test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -483,6 +483,13 @@ endif
 lint-corpus:
 	@echo "Linting the corpus..."
 	@bash tests/corpus/lint-corpus.sh
+
+# Smoke-harness validate mode: hermetic scenario shape, registry, fixture,
+# and grader checks for the manager routing smoke set (no model calls;
+# the live runner tests/smoke/run-smoke.sh is explicit-invocation only).
+test-smoke:
+	@echo "Testing the smoke harness instrument..."
+	@bash tests/smoke/run-smoke.sh --validate
 
 # Test the tasks board tool (render, atomic claim, lane placement)
 test-tasks:
@@ -618,6 +625,7 @@ help:
 	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
 	@echo "  make test-pi-extensions - Verify deployed pi extensions match the repo source and the body pin"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
+	@echo "  make test-smoke  - Validate the smoke harness instrument (scenarios, registry, grader self-test)"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
