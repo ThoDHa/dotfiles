@@ -76,8 +76,11 @@ readonly CLAIM_TTL_MINUTES_VAR="TASKS_CLAIM_TTL_MINUTES"
 # line, appended under the board lock at the sanctioned lifecycle points
 # only - recovery (claim.acquired/released/expired/recovered/migrated),
 # audit (attempt.started/completed with the worker, branch, base SHA,
-# checkpoint, and report-link provenance; attempt_id and outcome are
-# optional pairing fields, and released_by names the releasing session),
+# checkpoint, and report-link provenance; attempt_id is an optional
+# pairing field, the completed outcome validates against the execution
+# taxonomy pass/fail/not-run/error/cancelled with pre-taxonomy
+# released/completed still read, and released_by names the releasing
+# session),
 # and the telemetry reservation cost.sample, which this CLI never emits
 # but every read validates. Not a
 # chatter channel: there is no generic emit verb, so the ledger grows only
@@ -131,6 +134,23 @@ readonly STATUS_COMPLETED="Completed"
 # task-files skill's Task File Template); set refuses the no-space variant
 # and every other misspelling via the canonical-key whitelist.
 readonly STATUS_REASON_KEY="Status Reason"
+
+# The execution-outcome taxonomy: the execution layer of the two-layer
+# verdict taxonomy (claims classify verified/refuted/unverifiable on
+# criteria marker lines; attempts classify here). It is the locked
+# vocabulary of the attempt.completed outcome field: the completion arms
+# emit pass, the cancellation arms cancelled, a plain release not-run;
+# fail and error ride the one manager-mediated surface, release
+# --outcome (a failed or errored fix round is recorded at the manager's
+# release decision, the only actor that can truthfully name it). The
+# ledger validator hard-fails any other value except the pre-taxonomy
+# released/completed pair it still reads (grandfathered records, never
+# rewritten).
+readonly OUTCOME_PASS="pass"
+readonly OUTCOME_FAIL="fail"
+readonly OUTCOME_NOT_RUN="not-run"
+readonly OUTCOME_ERROR="error"
+readonly OUTCOME_CANCELLED="cancelled"
 
 # The sections the task-files skill's Task File Template defines, in the
 # order they must appear. tasks edit creates a missing section from this
@@ -209,6 +229,19 @@ readonly AWK_HEADING_LEVEL='		function heading_level(text,    h) {
 # or on a line without a criteria marker prefix, so verdict-shaped prose
 # elsewhere in a file classifies as nothing. criteria_claim_line is the
 # shared prologue both verdict readers guard with.
+#
+# The evidence dimension rides the same marker lines as a third
+# orthogonal classification: criteria_evidence returns every ../reports/
+# target the line cites, tab-joined in match order - both the
+# (evidence: ../reports/<path>) tag and the markdown
+# [text](../reports/<path>) form a `tasks report` deposit entry links -
+# and "" when the line cites none, under the same prologue guard as the
+# verdict readers. The closure gate validates every returned target live
+# at close (a dead or reports-escaping pointer refuses unless the same
+# line documents an exception, the exact shape the unverifiable verdict
+# rides), and the lint/doctor link scanner recognizes the same two forms
+# so evidence links ride the DEAD_REPORT_LINK class; files predating
+# evidence links carry none and classify exactly as before.
 readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 			lvl = heading_level(line)
 			if (lvl != 2) { SECNAME = ""; return }
@@ -233,6 +266,18 @@ readonly AWK_CRITERIA_COUNTER='		function track_criteria_section(line,    lvl) {
 				return substr(line, RSTART + 10, RLENGTH - 11)
 			}
 			return ""
+		}
+		function criteria_evidence(line,    ev, rest, tgt) {
+			if (!criteria_claim_line(line)) return ""
+			ev = ""
+			rest = line
+			while (match(rest, /\((\.\.\/reports\/|evidence: \.\.\/reports\/)[^)]+\)/)) {
+				tgt = substr(rest, RSTART + 1, RLENGTH - 2)
+				if (tgt ~ /^evidence: /) tgt = substr(tgt, 11)
+				ev = ev ((ev == "") ? "" : "\t") tgt
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+			return ev
 		}
 		function criteria_excepted(line) {
 			if (!criteria_claim_line(line)) return 0
@@ -372,11 +417,15 @@ readonly AWK_JSON_ESCAPE='		function json_escape(s,  out, i, n, c, code, hexd) {
 # conforms, else the reason. Optional fields carry a shape check when
 # present (attempt_id/outcome/released_by are non-empty strings on the
 # attempt types, released_by on claim.released) and are tolerated absent,
-# so pre-field ledgers read unchanged; the outcome vocabulary (released/
-# completed/cancelled so far) is left to its first real consumer to lock.
-# ev_unq strips quotes and unescapes the common
-# escapes for the human row (display only). Requires AWK_JSON_ESCAPE-
-# compatible plain awk only (no interval expressions, no gawk-isms).
+# so pre-field ledgers read unchanged; on attempt.completed the outcome
+# additionally validates against the locked execution taxonomy
+# (pass/fail/not-run/error/cancelled), with the pre-taxonomy
+# released/completed pair still admitted so ledgers written before the
+# lock read unchanged, and any other value failing the read (the same
+# hard-fail-unknown policy the event types ride). ev_unq strips quotes
+# and unescapes the common escapes for the human row (display only).
+# Requires AWK_JSON_ESCAPE-compatible plain awk only (no interval
+# expressions, no gawk-isms).
 readonly AWK_EVENT_VALIDATE='		function ev_parse(line,    inner, n, i, c, inq, esc, seg, col, i2, c2, k, v) {
 			for (k in EV) delete EV[k]
 			for (k in EVT) delete EVT[k]
@@ -432,7 +481,12 @@ readonly AWK_EVENT_VALIDATE='		function ev_parse(line,    inner, n, i, c, inq, e
 			if (typ == "cost.sample") return "model"
 			return ""
 		}
-		function ev_valid(line,    cls, typ, req, arr, i, f) {
+		function ev_outcome_known(ov) {
+			return ov == "pass" || ov == "fail" || ov == "not-run" \
+				|| ov == "error" || ov == "cancelled" \
+				|| ov == "released" || ov == "completed"
+		}
+		function ev_valid(line,    cls, typ, req, arr, i, f, ov) {
 			if (!ev_parse(line)) return "not a flat JSON object of scalar fields"
 			if (!("\"schema_version\"" in EV) || EVT["\"schema_version\""] != "number" || EV["\"schema_version\""] != "1") return "unsupported schema_version"
 			if (!("\"class\"" in EV) || EVT["\"class\""] != "string") return "class must be a string"
@@ -451,7 +505,13 @@ readonly AWK_EVENT_VALIDATE='		function ev_parse(line,    inner, n, i, c, inq, e
 			}
 			if (typ == "attempt.started" || typ == "attempt.completed") {
 				if (("\"attempt_id\"" in EV) && length(EV["\"attempt_id\""]) <= 2) return "attempt_id must be non-empty on " typ
-				if (("\"outcome\"" in EV) && length(EV["\"outcome\""]) <= 2) return "outcome must be non-empty on " typ
+				if ("\"outcome\"" in EV) {
+					if (length(EV["\"outcome\""]) <= 2) return "outcome must be non-empty on " typ
+					if (typ == "attempt.completed") {
+						ov = ev_unq(EV["\"outcome\""])
+						if (!ev_outcome_known(ov)) return "unknown outcome on " typ ": " ov " (the execution taxonomy is pass, fail, not-run, error, cancelled; pre-taxonomy released and completed still read)"
+					}
+				}
 				if (("\"released_by\"" in EV) && length(EV["\"released_by\""]) <= 2) return "released_by must be non-empty on " typ
 			}
 			if (typ == "claim.released" && ("\"released_by\"" in EV) && length(EV["\"released_by\""]) <= 2) return "released_by must be non-empty on " typ
@@ -951,13 +1011,17 @@ Commands:
                                        generation token), render. A live foreign claim
                                        refuses; an expired one routes recovery to the
                                        manager surface (claims/reclaim).
-  release <taskfile> --generation T    Release the caller's own claim and clear Owner, render.
+  release <taskfile> --generation T [--outcome fail|error]
+                                       Release the caller's own claim and clear Owner, render.
                                        T is required on a generation-token claim (the ABA
                                        guard: identity strings replay, so a tokenless
                                        release is refused even for the recorded owner; a
                                        lost token routes through manager reclaim); a
                                        foreign release is refused - recovery is
-                                       manager-owned (claims, reclaim).
+                                       manager-owned (claims, reclaim). --outcome records
+                                       a failed or errored attempt (fail|error only; a
+                                       plain release stays not-run), so a failed fix
+                                       round reads outcome=fail in the events reader.
   claims [--dir DIR] [--json]          Read-only claim sweep for recovery: every sidecar with
                                        owner, generation, created stamp, and state (fresh,
                                        expired, legacy, orphan, terminal) plus a summary;
@@ -969,8 +1033,12 @@ Commands:
                                        released, expired, recovered, migrated) and of
                                        attempt provenance (attempt.started, completed;
                                        worker, branch, base SHA, checkpoint, report
-                                       link; attempt_id and outcome are optional
-                                       pairing fields, released_by names the
+                                       link; attempt_id is the optional pairing
+                                       field, the completed outcome validates
+                                       against the execution taxonomy
+                                       pass/fail/not-run/error/cancelled with
+                                       pre-taxonomy released/completed still read,
+                                       released_by names the
                                        releasing session). cost.sample is the telemetry reservation,
                                        validated on read. Invalid records fail the read
                                        with EVENT_CORRUPT.
@@ -994,7 +1062,10 @@ Commands:
                                        resolved for the gate, listed in the close Work
                                        Log entry), a criterion carries
                                        (verdict: unverifiable) without a documented
-                                       (exception: ...) on the same line, or a child
+                                       (exception: ...) on the same line, a criterion's
+                                       (evidence: ../reports/...) pointer names a
+                                       missing target without a documented exception
+                                       on the same line, or a child
                                        named on a dedicated dependency surface is
                                        unfinished; --force closes anyway and records
                                        the override in the Work Log.
@@ -2076,9 +2147,9 @@ cmd_set() {
 	fi
 	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
 	if ((release_claim == 1)); then
-		# The outcome names the status the transition landed: the only
-		# terminal statuses are Completed and Cancelled.
-		release_claim "$file" "$tasks_dir" "$file" "${target_status,,}"
+		# The outcome is the execution verdict of the landed status: the
+		# only terminal statuses are Completed and Cancelled.
+		release_claim "$file" "$tasks_dir" "$file" "$(attempt_outcome_for_status "$target_status")"
 	fi
 	render_unlocked "$tasks_dir"
 }
@@ -2145,17 +2216,24 @@ cmd_claim() {
 }
 
 cmd_release() {
-	local dir="" target="" generation=""
+	local dir="" target="" generation="" outcome="$OUTCOME_NOT_RUN"
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "release: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
 			--generation) [[ $# -ge 2 && "$2" != --* ]] || die "release: --generation requires a value"; generation="$2"; shift 2 ;;
 			--generation=*) generation="${1#*=}"; shift ;;
+			--outcome)
+				[[ $# -ge 2 && "$2" != --* ]] || die "release: --outcome requires a value"
+				[[ "$2" == "$OUTCOME_FAIL" || "$2" == "$OUTCOME_ERROR" ]] || die "release: --outcome accepts fail or error only; a plain release stays not-run"
+				outcome="$2"; shift 2 ;;
+			--outcome=*)
+				[[ "${1#*=}" == "$OUTCOME_FAIL" || "${1#*=}" == "$OUTCOME_ERROR" ]] || die "release: --outcome accepts fail or error only; a plain release stays not-run"
+				outcome="${1#*=}"; shift ;;
 			*) target="$1"; shift ;;
 		esac
 	done
-	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile> [--generation TOKEN]"
+	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile> [--generation TOKEN] [--outcome fail|error]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
@@ -2183,7 +2261,7 @@ cmd_release() {
 	# sessions make that window real), so treat the window as closed on
 	# fleet-wide convergence, not on a timer.
 	verify_release_claim "$file" "$tasks_dir" "release" "$generation"
-	release_claim "$file" "$tasks_dir" "$file" "released"
+	release_claim "$file" "$tasks_dir" "$file" "$outcome"
 	write_header_fields "$file" \
 		"$CLAIM_RELEASE_WRITE" \
 		"Updated"$'\034'"**Updated:** $(now)"
@@ -2352,6 +2430,18 @@ verify_release_claim() { # file tasks_dir verb generation
 	fi
 }
 
+# The execution outcome a terminal status maps to: the terminal arms
+# (terminal set, archive, close) emit from the locked taxonomy rather
+# than the raw status word, so the ledger carries pass/cancelled where
+# the header carries Completed/Cancelled.
+attempt_outcome_for_status() { # <Status>
+	case "$1" in
+		"$STATUS_COMPLETED") printf '%s\n' "$OUTCOME_PASS" ;;
+		"$STATUS_CANCELLED") printf '%s\n' "$OUTCOME_CANCELLED" ;;
+		*) return 1 ;;
+	esac
+}
+
 # Drop a released task's claim sidecar: the rm half of the terminal claim
 # release (CLAIM_RELEASE_WRITE carries the blank Owner line, which rides
 # the caller's locked header rewrite and commits before this runs). The
@@ -2365,14 +2455,23 @@ verify_release_claim() { # file tasks_dir verb generation
 # self-describing), while worker names the attempt's owner. Every release
 # arm verifies ownership plus the claim's generation before calling
 # (verify_release_claim), so the two attributions differ only when a
-# future manager-mediated release path arrives. outcome records how the
-# attempt ended (released, completed, cancelled); attempt_id pairs with
-# the task's last attempt.started record in the ledger tail and is
+# future manager-mediated release path arrives. outcome is the attempt's
+# execution verdict from the locked taxonomy: pass on the completion arms
+# (terminal set to Completed, archive of a Completed file, close),
+# cancelled on the cancellation arms (close --cancelled, terminal set to
+# Cancelled, archive of a Cancelled file), not-run on a plain release
+# (the attempt ended without completing its work), and fail or error
+# only through release --outcome (the manager-mediated release path: a
+# failed or errored fix round is recorded at the manager's release
+# decision, the only actor that can truthfully name it, so a failed
+# round stays distinguishable from an unstarted one); attempt_id pairs
+# with the task's last attempt.started record in the ledger tail and is
 # emitted only when that record carries one, so absence means unpaired
 # (an attempt opened before the ledger, a migrated or reclaimed claim)
 # and an empty value never rides the ledger.
-release_claim() { # file tasks_dir [content-file] [outcome]
-	local file="$1" tasks_dir="$2" content_file="${3:-$1}" outcome="${4:-released}"
+release_claim() { # file tasks_dir content-file outcome
+	local file="$1" tasks_dir="$2" content_file="${3:-$1}" outcome="${4:-}"
+	[[ -n "$outcome" ]] || die "release_claim: outcome is required (pass, cancelled, not-run, fail, or error from the locked taxonomy; no silent default)"
 	local claim="$file$CLAIM_SUFFIX"
 	[[ -e "$claim" ]] || { rm -f "$claim"; return 0; }
 	claim_sidecar_read "$claim"
@@ -2609,9 +2708,10 @@ cmd_archive() {
 	# file is terminal, so its claim is released with the move; the Owner
 	# blank already rode the closure write that made it terminal.
 	mv "$file" "$dest" || die "archive: cannot move $(basename "$file") into $ARCHIVE_DIR (check permissions)"
-	# The archived task is terminal, so the outcome names its landed
-	# status - the attempt ended when the task closed, not here.
-	release_claim "$file" "$tasks_dir" "$dest" "${status,,}"
+	# The archived task is terminal, so the outcome is the execution
+	# verdict of its landed status - the attempt ended when the task
+	# closed, not here.
+	release_claim "$file" "$tasks_dir" "$dest" "$(attempt_outcome_for_status "$status")"
 	render_unlocked "$tasks_dir"
 	printf 'archived %s\n' "${dest##*/}"
 }
@@ -2639,6 +2739,22 @@ task_id_of_basename() {
 	return 0
 }
 
+# The one liveness verdict for a ../reports/ link target: zero when the
+# target names an existing file inside the reports namespace, non-zero
+# otherwise. The guard refuses a post-strip remainder carrying "..": a
+# target like ../reports/../current/x.md stays dead even though the
+# traversed path exists, so an evidence pointer can prove itself only
+# with a file inside reports/, never with any tree file (its own task
+# file included). Gate (closure_gate_findings), lint (the L-record
+# consumer), and doctor (the DEAD_REPORT_LINK pass) resolve through this
+# one function: agreement by shared code, not by three duplicated
+# expressions the one-liveness-verdict contract exists to prevent.
+report_target_live() { # <tasks_dir> <target>
+	local tgt="${2#../reports/}"
+	[[ "$tgt" != *..* ]] || return 1
+	[[ -e "$1/$REPORTS_DIR/$tgt" ]]
+}
+
 # One awk pass over a task file, emitting the closure gate's records:
 # "U<TAB>n" (unticked Success Criteria boxes, counted by the shared
 # criteria counter AWK_CRITERIA_COUNTER, the exact code the board lint's
@@ -2646,7 +2762,13 @@ task_id_of_basename() {
 # file order, one "V<TAB>text" per criterion carrying an unverifiable
 # verdict without a documented (exception: ...) on the same line (the
 # mandatory-unverifiable class: a claim closure cannot treat as
-# established, admitted only by the recorded exception), and one
+# established, admitted only by the recorded exception), one
+# "E<TAB>target<TAB>excepted<TAB>text" per ../reports/ citation a
+# criterion line carries, evidence tag or markdown link alike, one
+# record per match in match order so a dead second citation cannot hide
+# behind a live first (the liveness verdict is the findings pass's job:
+# it resolves each target through the shared report_target_live guard
+# exactly as the doctor's DEAD_REPORT_LINK class does), and one
 # "I<TAB>token" per task-ID-shaped token carried by a
 # dedicated dependency surface. The dedicated surfaces are the ##
 # Dependencies section body, the template's **Dependencies:** field
@@ -2673,6 +2795,16 @@ closure_gate_scan() { # <file>
 				sub(/^- ~ \[ \] /, "", vtext)
 				sub(/[ \t\r]+$/, "", vtext)
 				print "V\t" vtext
+			}
+			ev = criteria_evidence($0)
+			if (ev != "") {
+				vtext = $0
+				sub(/^- \[[xX ]\] /, "", vtext)
+				sub(/^- ~ \[ \] /, "", vtext)
+				sub(/[ \t\r]+$/, "", vtext)
+				nev = split(ev, evs, "\t")
+				for (evi = 1; evi <= nev; evi++)
+					print "E\t" evs[evi] "\t" criteria_excepted($0) "\t" vtext
 			}
 			if (indeps || (!inwork && ($0 ~ /^[ \t]*\*\*Dependencies:\*\*/ || $0 ~ /^[ \t]*\*\*[Cc]hild [Tt]asks?:\*\*/))) {
 				rest = $0
@@ -2718,11 +2850,20 @@ superseded_note() { # <array-name>
 # Closure gate findings for a task about to be completed: every refusal
 # finding, appended to the named findings array (an empty array means the
 # closure may proceed), plus the file's superseded criteria appended to
-# the named superseded array for the closure note. Three finding classes:
+# the named superseded array for the closure note. Four finding classes:
 # the unticked Success Criteria boxes count, every criterion carrying an
 # unverifiable verdict without a documented exception (see the scan's V
-# records; the finding lists the criteria in file order), and every child
-# task declared on a dedicated dependency surface (see closure_gate_scan)
+# records; the finding lists the criteria in file order), every criterion
+# whose evidence pointer names a missing target under the reports
+# namespace, or one escaping it through a ".." path segment, without a
+# documented exception on the same line (see the scan's E records; the
+# ../reports/ target resolves through the one shared report_target_live
+# guard exactly as the doctor's DEAD_REPORT_LINK class and lint's
+# advisory resolve it, so the three consumers cannot disagree on
+# resolution - their detection grammars differ by design: the gate
+# classifies criteria claim lines, lint scans every non-fenced line
+# outside code spans), and every child task declared on a
+# dedicated dependency surface (see closure_gate_scan)
 # that is still open. A declared child is matched when the token resolves
 # to a board file whose leading Task ID equals the token; the file's own ID and
 # tokens naming no board file are ignored, and a child blocks unless its
@@ -2735,13 +2876,19 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 	local -n gate_findings="$1"
 	local -n gate_superseded="$2"
 	local tasks_dir="$3" file="$4"
-	local rec tag unticked=0
-	local -a child_tokens=() unverifiable=()
+	local rec tag unticked=0 tgt exc etext
+	local -a child_tokens=() unverifiable=() dead_evidence=()
 	while IFS=$'\t' read -r tag rec; do
 		case "$tag" in
 			U) unticked="$rec" ;;
 			S) gate_superseded+=("$rec") ;;
 			V) unverifiable+=("$rec") ;;
+			E)
+				IFS=$'\t' read -r tgt exc etext <<<"$rec"
+				if [[ "$exc" != "1" ]] && ! report_target_live "$tasks_dir" "$tgt"; then
+					dead_evidence+=("$tgt ($etext)")
+				fi
+				;;
 			I) child_tokens+=("$rec") ;;
 		esac
 	done < <(closure_gate_scan "$file")
@@ -2750,6 +2897,11 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 		local joined_verdicts
 		joined_verdicts="$(IFS=';'; printf '%s' "${unverifiable[*]}")"
 		gate_findings+=("unverifiable Success Criteria verdict(s) without a documented exception: $joined_verdicts")
+	fi
+	if ((${#dead_evidence[@]} > 0)); then
+		local joined_dead
+		joined_dead="$(IFS=';'; printf '%s' "${dead_evidence[*]}")"
+		gate_findings+=("dead evidence link(s) on Success Criteria without a documented exception: $joined_dead")
 	fi
 	local own_id cand f child_id child_status child_rel
 	own_id="$(task_id_of_basename "${file##*/}")"
@@ -2878,7 +3030,7 @@ cmd_close() {
 			"Duration"$'\034'"**Duration:** $duration" \
 			"Updated"$'\034'"**Updated:** $ts" \
 			"$CLAIM_RELEASE_WRITE"
-		release_claim "$file" "$tasks_dir" "$file" "cancelled"
+		release_claim "$file" "$tasks_dir" "$file" "$OUTCOME_CANCELLED"
 		render_unlocked "$tasks_dir"
 		printf 'cancelled %s (elapsed Duration %s)\n' "$(basename "$file")" "$duration"
 		return
@@ -2890,7 +3042,7 @@ cmd_close() {
 		"Updated"$'\034'"**Updated:** $ts" \
 		"$STATUS_REASON_KEY"$'\034' \
 		"$CLAIM_RELEASE_WRITE"
-	release_claim "$file" "$tasks_dir" "$file" "completed"
+	release_claim "$file" "$tasks_dir" "$file" "$OUTCOME_PASS"
 	render_unlocked "$tasks_dir"
 	printf 'closed %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
@@ -3190,7 +3342,8 @@ lint_class_hard() { # rel; reads status_of/arch_of from the caller's scope
 # plumbing (rev-list). Checks: template-section completeness, header field
 # shape (the CLI's canonical timestamp/duration forms per the Option-1
 # split), Status vocabulary, Success-Criteria checkbox vs Status
-# reconciliation, dead ../reports/ links, claim-sidecar hygiene, archive
+# reconciliation, dead ../reports/ links (markdown and (evidence: ...)
+# tag forms alike), claim-sidecar hygiene, archive
 # hygiene, and closure push-reconcile (every recorded commit hash must be
 # reachable from some ref). Severity: open-task structural findings (header
 # shape, sections, claim drift, unreachable commits) are hard; body-space
@@ -3209,7 +3362,8 @@ LINT_ADVISORY_CAP=20
 # all counted by the shared criteria counter AWK_CRITERIA_COUNTER the
 # closure gate's U/S/V records also run), M (file,
 # missing section), H (file, field, value, expected), L (file, line,
-# ../reports/ link target), T (file, line, commit-hash candidate). Links
+# ../reports/ link target, either the markdown form or the criteria
+# evidence tag), T (file, line, commit-hash candidate). Links
 # inside code spans or fences and lines that
 # carry an explicit "dead link" annotation are skipped; hash lines that
 # document known drift ("unreachable", "superseded", "accepted-lost") are
@@ -3240,7 +3394,7 @@ lint_scan_files() { # tasks_dir files...
 			nreq = split(ENVIRON["AWK_LINT_SECTIONS"], reqs, "\034")
 			for (i = 1; i <= nreq; i++) if (reqs[i] != "") reqsec[reqs[i]] = 1
 			hexrun = "[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]"
-			linkre = "\\(\\.\\./reports/[^)]+\\)"
+			linkre = "\\((\\.\\./reports/|evidence: \\.\\./reports/)[^)]+\\)"
 			wordc = "[0-9A-Za-z_]"
 		}
 		BEGIN {
@@ -3267,6 +3421,7 @@ lint_scan_files() { # tasks_dir files...
 				nb = gsub(/`/, "", before)
 				if (nb % 2 == 0) {
 					target = substr(rest, RSTART + 1, RLENGTH - 2)
+					if (target ~ /^evidence: /) target = substr(target, 11)
 					print "L" sep rel sep ln sep target
 				}
 				rest = substr(rest, RSTART + RLENGTH)
@@ -3551,7 +3706,7 @@ cmd_lint() {
 					lint_class_hard "$rel" && sev=hard ;;
 				H) msg="header $a not CLI-shaped: '$b' (expected $c)"
 					lint_class_hard "$rel" && sev=hard ;;
-				L) [[ -e "$tasks_dir/$REPORTS_DIR/${b#../reports/}" ]] && continue
+				L) report_target_live "$tasks_dir" "$b" && continue
 					msg="dead report link (line $a): $b" ;;
 				T) ((have_history)) || continue
 					[[ -n "${cand_reach[$b]+x}" ]] && continue
@@ -3765,8 +3920,9 @@ doctor_dependency_cycles() { # <succ-array-name>
 #                       declaring future children are grandfathered)
 #   DEP_CYCLE           a dependency cycle with at least one live member
 #                       (all-archived cycles are grandfathered)
-#   DEAD_REPORT_LINK    a ../reports/ link on a live task whose target is
-#                       missing (archived files are grandfathered)
+#   DEAD_REPORT_LINK    a ../reports/ link (markdown or criteria evidence
+#                       tag) on a live task whose target is missing
+#                       (archived files are grandfathered)
 #   DASHBOARD_DIVERGENCE dashboard.md missing or differing from the
 #                       board_walk assembly (global check, no grandfathering)
 #
@@ -3917,7 +4073,7 @@ cmd_doctor() {
 	for rel in "${sorted_files[@]}"; do
 		while IFS=$'\t' read -r ln tgt; do
 			[[ -n "$ln" ]] || continue
-			[[ -e "$tasks_dir/$REPORTS_DIR/${tgt#../reports/}" ]] && continue
+			report_target_live "$tasks_dir" "$tgt" && continue
 			if doctor_live "${status_of[$rel]:-}" "${arch_of[$rel]:-0}"; then
 				problems+=("DEAD_REPORT_LINK"$'\t'"$rel"$'\t'"dead report link (line $ln): $tgt")
 			else
@@ -4320,7 +4476,10 @@ cmd_events() {
 				local_extra = ""
 				typ = ev_unq(EV["\"type\""])
 				if (typ ~ /^claim\./) local_extra = "generation=" ev_unq(EV["\"generation\""])
-				else if (typ ~ /^attempt\./) local_extra = "worker=" ev_unq(EV["\"worker\""])
+				else if (typ ~ /^attempt\./) {
+					local_extra = "worker=" ev_unq(EV["\"worker\""])
+					if (typ == "attempt.completed" && ("\"outcome\"" in EV)) local_extra = local_extra " outcome=" ev_unq(EV["\"outcome\""])
+				}
 				return "EVENT\t" ev_unq(EV["\"ts\""]) "\t" ev_unq(EV["\"class\""]) "\t" typ "\t" ev_unq(EV["\"session\""]) "\t" ev_unq(EV["\"task\""]) ((local_extra == "") ? "" : "\t" local_extra)
 			}
 			BEGIN {

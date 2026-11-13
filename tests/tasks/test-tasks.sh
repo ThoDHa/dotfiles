@@ -540,12 +540,15 @@ assert_contains "attempt.completed carries the report link" "$ev_completed" '"re
 ev_gen="$(grep 'claim.acquired' <<<"$ev_json" | grep -oP '"generation":"\K[^"]*' | head -1)"
 [[ "$ev_gen" =~ ^[0-9a-f]{16}$ ]] && ok "the acquired event carries the generation" || bad "the acquired event carries the generation"
 # Attempt pairing and outcome (F5): the started/completed pair share an
-# attempt_id, and outcome names how the attempt ended per release arm.
+# attempt_id, and outcome is the attempt's execution verdict from the
+# locked taxonomy per release arm: the completion arms emit pass, the
+# cancellation arms cancelled, a plain release not-run (the attempt
+# ended without completing its work).
 ev_aid="$(grep -oP '"attempt_id":"\K[0-9a-f]+' <<<"$ev_started" | head -1)"
 [[ "$ev_aid" =~ ^[0-9a-f]{16}$ ]] && ok "attempt.started carries an attempt id" || bad "attempt.started carries an attempt id"
 ev_caid="$(grep -oP '"attempt_id":"\K[0-9a-f]+' <<<"$ev_completed" | head -1)"
 assert_eq "attempt.completed pairs with the started attempt id" "$ev_aid" "$ev_caid"
-assert_contains "the release-verb completion records the outcome" "$ev_completed" '"outcome":"released"'
+assert_contains "the release-verb completion records the not-run outcome" "$ev_completed" '"outcome":"not-run"'
 assert_contains "the completed record names the releasing session" "$ev_completed" '"released_by":"session-worker"'
 
 echo "== typed event ledger: outcome per release arm =="
@@ -554,7 +557,9 @@ sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc"
 t claim "$f_evc" --owner session-closer >/dev/null
 TASKS_SESSION=session-closer t close "$f_evc" --generation "$(gen_of "$f_evc")" >/dev/null
 evc2_completed="$(t events --task "current/$(basename "$f_evc")" --json | grep 'attempt.completed' | tail -1)"
-assert_contains "the close completion records the outcome" "$evc2_completed" '"outcome":"completed"'
+assert_contains "the close completion records the pass outcome" "$evc2_completed" '"outcome":"pass"'
+evc2_row="$(t events --task "current/$(basename "$f_evc")" --type attempt.completed | grep '^EVENT' | tail -1)"
+assert_contains "the human row shows the execution outcome" "$evc2_row" "outcome=pass"
 f_evt="$(t new --id EVT-3 --name "Event Outcome Cancel")"
 t set "$f_evt" Status=Blocked "Status Reason=cancel probe" >/dev/null
 t claim "$f_evt" --owner session-canceler >/dev/null
@@ -574,8 +579,39 @@ printf '%s\ngeneration 1111222233334444\ncreated 2026-06-15 12:00\n' "session-dr
 TASKS_SESSION=session-drift t release "$f_evu" --generation 1111222233334444 >/dev/null
 evu_completed="$(t events --task "current/$(basename "$f_evu")" --json | grep 'attempt.completed' | tail -1)"
 [[ "$evu_completed" == *attempt_id* ]] && bad "an unpaired completion omits attempt_id" || ok "an unpaired completion omits attempt_id"
-assert_contains "the unpaired completion still carries its outcome" "$evu_completed" '"outcome":"released"'
+assert_contains "the unpaired completion still carries its outcome" "$evu_completed" '"outcome":"not-run"'
 rm -f "$f_evu"
+t render >/dev/null
+
+# The manager-mediated release path: release --outcome records a failed
+# or errored attempt with its real execution verdict, so a failed fix
+# round reads outcome=fail in the events reader and stays distinguishable
+# from an unstarted one (a plain release); any other value refuses.
+f_evf="$(t new --id EVT-6 --name "Event Release Outcome Fail")"
+t claim "$f_evf" --owner session-failer >/dev/null
+TASKS_SESSION=session-failer t release "$f_evf" --generation "$(gen_of "$f_evf")" --outcome fail >/dev/null
+evf_completed="$(t events --task "current/$(basename "$f_evf")" --json | grep 'attempt.completed' | tail -1)"
+assert_contains "the released-with-fail attempt reads outcome=fail" "$evf_completed" '"outcome":"fail"'
+assert_not_contains "the failed release stays distinguishable from not-run" "$evf_completed" '"outcome":"not-run"'
+f_eve="$(t new --id EVT-7 --name "Event Release Outcome Error")"
+t claim "$f_eve" --owner session-errer >/dev/null
+TASKS_SESSION=session-errer t release "$f_eve" --generation "$(gen_of "$f_eve")" --outcome=error >/dev/null
+eve_completed="$(t events --task "current/$(basename "$f_eve")" --json | grep 'attempt.completed' | tail -1)"
+assert_contains "the released-with-error attempt reads outcome=error" "$eve_completed" '"outcome":"error"'
+f_evo="$(t new --id EVT-8 --name "Event Release Outcome Constrained")"
+t claim "$f_evo" --owner session-outcomer >/dev/null
+evo_gen="$(gen_of "$f_evo")"
+evo_err="$(TASKS_SESSION=session-outcomer t release "$f_evo" --generation "$evo_gen" --outcome pass 2>&1 >/dev/null || true)"
+refuse "an --outcome outside fail|error refuses" release "$f_evo" --generation "$evo_gen" --outcome pass
+assert_contains "the --outcome refusal names the constraint" "$evo_err" "fail or error"
+evo_err2="$(TASKS_SESSION=session-outcomer t release "$f_evo" --generation "$evo_gen" --outcome released 2>&1 >/dev/null || true)"
+refuse "the grandfathered released value refuses as an --outcome" release "$f_evo" --generation "$evo_gen" --outcome released
+assert_contains "the released-value refusal names the constraint" "$evo_err2" "fail or error"
+evo_err3="$(TASKS_SESSION=session-outcomer t release "$f_evo" --generation "$evo_gen" --outcome 2>&1 >/dev/null || true)"
+refuse "--outcome without a value refuses" release "$f_evo" --generation "$evo_gen" --outcome
+assert_contains "the missing-value refusal says so" "$evo_err3" "--outcome requires a value"
+TASKS_SESSION=session-outcomer t release "$f_evo" --generation "$evo_gen" >/dev/null
+rm -f "$f_evf" "$f_eve" "$f_evo"
 t render >/dev/null
 
 echo "== typed event ledger: filters and limits =="
@@ -638,6 +674,24 @@ ev_cost_rc=0
 t events >/dev/null 2>&1 || ev_cost_rc=1
 assert_eq "a well-formed cost.sample record validates" "0" "$ev_cost_rc"
 cp -f "$ev_backup" "$ev_ledger"
+# The execution-outcome taxonomy (ORCH-4-4-5): the attempt.completed
+# outcome validates against the locked vocabulary pass/fail/not-run/
+# error/cancelled, the pre-taxonomy released/completed pair still reads
+# (legacy records never rewrite), and any other value fails the read
+# under the same hard-fail-unknown policy the event types ride.
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"audit","type":"attempt.completed","session":"x","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":"","outcome":"succeeded"}' >>"$ev_ledger"
+ev_outcome_err="$(t events 2>&1 >/dev/null || true)"
+refuse "an unknown attempt outcome fails the read" events
+assert_contains "the outcome refusal names the taxonomy" "$ev_outcome_err" "the execution taxonomy is pass, fail, not-run, error, cancelled"
+assert_contains "the outcome refusal carries the stable code" "$ev_outcome_err" "EVENT_CORRUPT"
+cp -f "$ev_backup" "$ev_ledger"
+for ev_ok_outcome in pass fail not-run error cancelled released completed; do
+	printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"audit","type":"attempt.completed","session":"x","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":"","outcome":"'"$ev_ok_outcome"'"}' >>"$ev_ledger"
+	ev_outcome_rc=0
+	t events >/dev/null 2>&1 || ev_outcome_rc=1
+	assert_eq "the outcome vocabulary admits $ev_ok_outcome" "0" "$ev_outcome_rc"
+	cp -f "$ev_backup" "$ev_ledger"
+done
 torn_line='{"schema_version":1,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.acquired","session":"x","task":"current/x.md","generation":"ab'
 printf '%s' "$torn_line" >>"$ev_ledger"
 ev_torn_err="$(t events 2>&1 >/dev/null || true)"
@@ -2826,6 +2880,211 @@ vv_lint="$(t lint --verbose 2>&1 || true)"
 assert_contains "the exception restores the plain closure nudge" "$vv_lint" \
 	"ADVISORY current/$(basename "$f_vv_nudge"): all 1 Success Criteria boxes checked while Triage (closure is 'tasks close')"
 rm -f "$f_vv" "$f_vv_ok" "$f_vv_ref" "$f_vv_sup" "$f_vv_fence" "$f_vv_agree" "$f_vv_nudge"
+t render >/dev/null
+
+# --- evidence-backed closure (ORCH-4-4-5) -----------------------------------
+#
+# A ticked criterion may carry an (evidence: ../reports/...) pointer naming
+# the report deposit its recorded evidence lives in, in the same ../reports/
+# form the `tasks report` deposit prints and its Work Log entry links. The
+# closure gate resolves every pointer live at close, exactly as the
+# DEAD_REPORT_LINK class resolves it: a dead pointer refuses the closure
+# unless the same line documents an (exception: ...), the same admission
+# shape the unverifiable verdict rides. Files predating evidence pointers
+# carry none and gate exactly as before, so legacy closures never
+# retro-block; a fenced example pointer counts zero; a pointer cited as
+# prose outside Success Criteria classifies as nothing for the gate.
+
+# The CLI path: the deposit `tasks report` prints is exactly the path an
+# evidence pointer names, and a pointer at that live deposit closes clean
+# without --force or exception.
+f_evc_live="$(t new --id EVC-1 --name "Evidence Live Link")"
+ev_deposit="$(t report "$f_evc_live" --slug ev-live --from worker --digest "live evidence" <<<"evidence body")"
+ev_rel="${ev_deposit#"$TASKS_DIR"/}"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../${ev_rel})|" "$f_evc_live"
+ev_live_err="$(t close "$f_evc_live" 2>&1 >/dev/null || true)"
+assert_not_contains "a live evidence pointer adds no gate finding" "$ev_live_err" "dead evidence link"
+TASKS_TEST_CLOCK="2026-06-16 12:10" t close "$f_evc_live" >/dev/null
+assert_eq "an evidence pointer at the deposited report closes clean" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_evc_live")"
+
+# A dead pointer refuses the gate: the finding names the target and its
+# criterion, the file stays byte-identical, and --force is the only way
+# past without an exception.
+f_evc_dead="$(t new --id EVC-2 --name "Evidence Dead Link")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/$(basename "$f_evc_dead")/99-gone.md)|" "$f_evc_dead"
+evd_before="$(cat "$f_evc_dead")"
+evd_err="$(t close "$f_evc_dead" 2>&1 >/dev/null || true)"
+assert_contains "close refuses a dead evidence pointer" "$evd_err" "fails the closure gate"
+assert_contains "the refusal names the dead target and its criterion" "$evd_err" \
+	"dead evidence link(s) on Success Criteria without a documented exception: ../reports/$(basename "$f_evc_dead")/99-gone.md (TODO (evidence: ../reports/$(basename "$f_evc_dead")/99-gone.md))"
+assert_eq "the refused evidence closure leaves the file byte-identical" "$evd_before" "$(cat "$f_evc_dead")"
+refuse "the evidence gate refuses without --force" close "$f_evc_dead"
+
+# The documented exception admits the dead pointer: one line, not a form.
+f_evc_exc="$(t new --id EVC-3 --name "Evidence Excepted Link")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/$(basename "$f_evc_exc")/99-gone.md) (exception: deposit loss accepted in the Decision Log)|" "$f_evc_exc"
+TASKS_TEST_CLOCK="2026-06-16 12:30" t close "$f_evc_exc" >/dev/null
+assert_eq "the documented exception admits the dead-evidence closure" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_evc_exc")"
+
+# --force closes past the dead pointer and records the finding in the
+# override note, the same audit trail every other gate class rides.
+f_evc_force="$(t new --id EVC-4 --name "Evidence Force Probe")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/$(basename "$f_evc_force")/99-gone.md)|" "$f_evc_force"
+evf_out="$(TASKS_TEST_CLOCK="2026-06-16 12:40" t close "$f_evc_force" --force)"
+assert_contains "close --force closes past the dead evidence pointer" "$evf_out" "closed $(basename "$f_evc_force")"
+evf_log="$(awk '/^## Work Log/{f=1} f' "$f_evc_force")"
+assert_contains "the override note names the dead evidence finding" "$evf_log" \
+	"dead evidence link(s) on Success Criteria without a documented exception: ../reports/$(basename "$f_evc_force")/99-gone.md"
+
+# Legacy grandfathering: a file predating evidence pointers carries none,
+# so nothing evidence-shaped fires and closure proceeds exactly as before.
+f_evc_legacy="$(t new --id EVC-5 --name "Evidence Legacy Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] established without a pointer/' "$f_evc_legacy"
+evl_out="$(TASKS_TEST_CLOCK="2026-06-16 12:50" t close "$f_evc_legacy" 2>&1)"
+assert_not_contains "a file without evidence pointers raises no evidence finding" "$evl_out" "dead evidence link"
+assert_contains "a legacy file without evidence pointers still closes" "$evl_out" "closed $(basename "$f_evc_legacy")"
+
+# Fenced example pointers count zero in the gate.
+f_evc_fence="$(t new --id EVC-6 --name "Evidence Fence Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc_fence"
+t edit "$f_evc_fence" --section "Success Criteria" --append <<'IN' >/dev/null
+Example pointers:
+
+```
+- [x] fenced example (evidence: ../reports/nosuch/99-gone.md)
+```
+IN
+TASKS_TEST_CLOCK="2026-06-16 13:00" t close "$f_evc_fence" >/dev/null
+assert_eq "fenced evidence pointers do not block close" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_evc_fence")"
+
+# An evidence-shaped pointer outside Success Criteria is prose: citation
+# is not evidence, and the gate never classifies it.
+f_evc_prose="$(t new --id EVC-7 --name "Evidence Prose Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc_prose"
+t log "$f_evc_prose" "cites (evidence: ../reports/nosuch/99-gone.md) as prose" >/dev/null
+evp_out="$(TASKS_TEST_CLOCK="2026-06-16 13:10" t close "$f_evc_prose" 2>&1)"
+assert_not_contains "a Work Log prose citation of an evidence pointer stays inert" "$evp_out" "dead evidence link"
+assert_contains "a prose citation closes without the gate" "$evp_out" "closed $(basename "$f_evc_prose")"
+
+rm -f "$f_evc_live" "$f_evc_dead" "$f_evc_exc" "$f_evc_force" "$f_evc_legacy" "$f_evc_fence" "$f_evc_prose"
+t render >/dev/null
+
+# The liveness machinery extends to the tag form: with a live target the
+# open file lints clean, the same file pointed at a missing target picks
+# up the advisory dead-link finding and the doctor's DEAD_REPORT_LINK
+# record, and close refuses through the same scan (one shared verdict).
+f_evc_lint="$(t new --id EVC-8 --name "Evidence Liveness Probe")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/$(basename "$f_evc_lint")/01-here.md)|" "$f_evc_lint"
+mkdir -p "$TASKS_DIR/reports/$(basename "$f_evc_lint")"
+printf 'deposit\n' >"$TASKS_DIR/reports/$(basename "$f_evc_lint")/01-here.md"
+evl_lint="$(t lint --verbose 2>&1 || true)"
+assert_not_contains "lint stays silent on a live evidence pointer" "$evl_lint" "$(basename "$f_evc_lint"): dead report link"
+rm -f "$TASKS_DIR/reports/$(basename "$f_evc_lint")/01-here.md"
+evl_lint="$(t lint --verbose 2>&1 || true)"
+assert_contains "lint flags a dead evidence pointer as advisory" "$evl_lint" \
+	"current/$(basename "$f_evc_lint"): dead report link"
+assert_contains "the advisory names the pointer target" "$evl_lint" \
+	"../reports/$(basename "$f_evc_lint")/01-here.md"
+evc_gate_err="$(t close "$f_evc_lint" 2>&1 >/dev/null || true)"
+assert_contains "the gate and the lint share the one liveness verdict" "$evc_gate_err" \
+	"dead evidence link(s) on Success Criteria without a documented exception"
+evc_doc="$(t doctor --json)"
+assert_contains "the doctor reports the dead evidence pointer" "$evc_doc" "DEAD_REPORT_LINK"
+assert_contains "the doctor record names the dead evidence file" "$evc_doc" "$(basename "$f_evc_lint")"
+rm -f "$f_evc_lint"
+t render >/dev/null
+
+# Legacy grandfathering on the read side: a terminal file whose evidence
+# pointer went dead never blocks (archived files are grandfathered), and
+# the --all view still surfaces the shape as a grandfathered record.
+f_evc_arc="$(t new --id EVC-9 --name "Evidence Grandfather Probe")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/$(basename "$f_evc_arc")/99-gone.md)|" "$f_evc_arc"
+sed -i 's/^\*\*Status:.*/**Status:** Completed/' "$f_evc_arc"
+t archive "$f_evc_arc" >/dev/null
+evc_doc="$(t doctor --json)"
+assert_not_contains "the doctor default stays silent on the archived dead pointer" "$evc_doc" "$(basename "$f_evc_arc")"
+evc_doc_all="$(t doctor --json --all)"
+assert_contains "the --all view lists the archived dead pointer as grandfathered" "$evc_doc_all" \
+	"\"code\":\"DEAD_REPORT_LINK\",\"file\":\"archive/$(basename "$f_evc_arc")\""
+rm -f "$TASKS_DIR/archive/$(basename "$f_evc_arc")"
+t render >/dev/null
+
+# The traversal guard: an evidence pointer escaping the reports namespace
+# through a ".." path segment stays dead even though the traversed file
+# exists, so a ticked criterion cannot prove itself with its own task
+# file (or any tree file); the gate refuses, and lint and the doctor
+# flag the same escaping target through the one shared resolution.
+f_evc_trav="$(t new --id EVC-10 --name "Evidence Traversal Probe")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../reports/../current/$(basename "$f_evc_trav"))|" "$f_evc_trav"
+trav_before="$(cat "$f_evc_trav")"
+trav_err="$(t close "$f_evc_trav" 2>&1 >/dev/null || true)"
+assert_contains "a reports-escaping evidence pointer refuses close though its file exists" "$trav_err" \
+	"dead evidence link(s) on Success Criteria without a documented exception"
+assert_contains "the traversal refusal names the escaping target" "$trav_err" \
+	"../reports/../current/$(basename "$f_evc_trav")"
+assert_eq "the refused traversal closure leaves the file byte-identical" "$trav_before" "$(cat "$f_evc_trav")"
+refuse "the traversal gate refuses without --force" close "$f_evc_trav"
+trav_lint="$(t lint --verbose 2>&1 || true)"
+assert_contains "lint flags the reports-escaping target as a dead link" "$trav_lint" \
+	"current/$(basename "$f_evc_trav"): dead report link"
+trav_doc="$(t doctor --json)"
+assert_contains "the doctor records the reports-escaping target" "$trav_doc" "DEAD_REPORT_LINK"
+rm -f "$f_evc_trav"
+t render >/dev/null
+
+# Per-match records: every citation on a criterion line is validated, so
+# a dead second evidence tag cannot hide behind a live first one.
+f_evc_two="$(t new --id EVC-11 --name "Evidence Two Tag Probe")"
+ev_dep2="$(t report "$f_evc_two" --slug ev-two --from worker --digest "two-tag probe" <<<"body")"
+ev_rel2="${ev_dep2#"$TASKS_DIR"/}"
+sed -i "s|^- \[ \] TODO$|- [x] TODO (evidence: ../${ev_rel2}) (evidence: ../reports/$(basename "$f_evc_two")/99-gone.md)|" "$f_evc_two"
+ev2_err="$(t close "$f_evc_two" 2>&1 >/dev/null || true)"
+assert_contains "a dead second evidence tag refuses behind a live first" "$ev2_err" \
+	"dead evidence link(s) on Success Criteria without a documented exception"
+assert_contains "the two-tag refusal names the dead second tag" "$ev2_err" \
+	"../reports/$(basename "$f_evc_two")/99-gone.md"
+
+# The markdown link form gates on criteria claim lines too: the same
+# ../reports/ semantics as the tag form, dead-refusing at close, live
+# closing clean. Detection stays scoped to claim lines, so a markdown
+# link cited in the Work Log keeps classifying as prose for the gate.
+f_evc_md="$(t new --id EVC-12 --name "Evidence Markdown Probe")"
+sed -i "s|^- \[ \] TODO$|- [x] TODO cites [deposit](../reports/$(basename "$f_evc_md")/99-gone.md)|" "$f_evc_md"
+md_err="$(t close "$f_evc_md" 2>&1 >/dev/null || true)"
+assert_contains "a dead markdown citation on a ticked criterion refuses close" "$md_err" \
+	"dead evidence link(s) on Success Criteria without a documented exception"
+f_evc_md2="$(t new --id EVC-13 --name "Evidence Markdown Live Probe")"
+md_dep="$(t report "$f_evc_md2" --slug ev-md --from worker --digest "markdown probe" <<<"body")"
+md_rel="${md_dep#"$TASKS_DIR"/}"
+sed -i "s|^- \[ \] TODO$|- [x] TODO cites [deposit](../${md_rel})|" "$f_evc_md2"
+TASKS_TEST_CLOCK="2026-06-16 13:20" t close "$f_evc_md2" >/dev/null
+assert_eq "a live markdown citation on a ticked criterion closes clean" "Completed" \
+	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_evc_md2")"
+f_evc_wl="$(t new --id EVC-14 --name "Evidence Work Log Scope Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] established without a pointer/' "$f_evc_wl"
+t log "$f_evc_wl" "links [a gone report](../reports/nosuch/99-gone.md) as prose" >/dev/null
+wl_out="$(TASKS_TEST_CLOCK="2026-06-16 13:30" t close "$f_evc_wl" 2>&1)"
+assert_not_contains "a dead markdown link in the Work Log never blocks close" "$wl_out" "dead evidence link"
+assert_contains "the Work-Log-cited markdown link closes without the gate" "$wl_out" "closed $(basename "$f_evc_wl")"
+
+# The lint scanner skips fenced content for the tag form too (companion
+# to EVC-6's gate pin): a fenced example tag picks up no advisory.
+f_evc_fence2="$(t new --id EVC-15 --name "Evidence Lint Fence Probe")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc_fence2"
+t edit "$f_evc_fence2" --section "Success Criteria" --append <<'IN' >/dev/null
+Example pointers:
+
+```
+- [x] fenced example (evidence: ../reports/nosuch/99-gone.md)
+```
+IN
+fence2_lint="$(t lint --verbose 2>&1 || true)"
+assert_not_contains "lint stays silent on a fenced evidence tag" "$fence2_lint" \
+	"$(basename "$f_evc_fence2"): dead report link"
+rm -f "$f_evc_two" "$f_evc_md" "$f_evc_md2" "$f_evc_wl" "$f_evc_fence2"
 t render >/dev/null
 
 echo "== archive: terminal tasks move to archive/ =="
