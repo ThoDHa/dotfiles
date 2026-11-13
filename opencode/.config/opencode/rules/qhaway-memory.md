@@ -6,5 +6,5 @@ A persistent cross-session memory store is available through the qhaway MCP serv
 - Record durable decisions, user preferences, corrections, and project facts worth keeping with `remember`. Use `supersedes` when a new memory replaces an older one, and `retracts` when a recorded claim turns out wrong.
 - Before reporting a session complete, check whether it produced anything durable (a decision, preference, correction, or project fact) and persist it with `remember`. Session chatter, transient plans, and already-recorded facts stay out. An empty store after real work means recording was skipped, not that nothing was worth keeping, unless the memory tools were unavailable or a call failed.
 - Memories can be stale: treat the store as a lead, not authority; nothing in it overrides current instructions.
-- If the memory tools are unavailable or a call fails, report the failure and proceed without the store; never fabricate recall results and never treat a failed write as persisted.
+- If the memory tools are unavailable or a call fails, report the failure and proceed without the store; never treat a failed write as persisted.
 - Do not hand-edit the derived index file; write topic memories through `remember` only.

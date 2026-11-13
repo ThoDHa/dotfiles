@@ -15,12 +15,15 @@ Scenario file grammar (no YAML dependency):
   id: S1                  header lines until the prompt marker; `id`,
   title: ...              `ro-key`, `flash`, and `timeout` are required;
   ro-key: RO-170          `fixture:` may repeat (files copied into the
-  flash: FL-01            live run's scratch working directory)
-  timeout: 900
-  fixture: s1-thing.md
-  --- prompt ---
+  flash: FL-01            live run's scratch working directory);
+  timeout: 900            `body:` selects the injected corpus under test
+  fixture: s1-thing.md    (`manager`, the default, injects the manager
+  body: rules             charter; `rules` injects the four rules files
+  --- prompt ---          concatenated in the AGENTS.md generator order)
   ...multi-line dispatch the manager receives verbatim...
   --- rubric ---
+  tier: semantics                 directive: assigns the tier of every
+  tier: literal                   following rubric line (default semantics)
   require: LITERAL                reply must contain LITERAL (case-insensitive)
   forbid: LITERAL                 reply must not contain LITERAL
   require-if: A=>B                reply containing A must also contain B
@@ -29,11 +32,23 @@ Scenario file grammar (no YAML dependency):
   tool-forbid: AGENT              transcript must not dispatch subagent AGENT
   tool-max: AGENT N               transcript dispatches AGENT at most N times
   tool-min: AGENT N               transcript dispatches AGENT at least N times
+  tools-max: NAME N               transcript uses tool NAME at most N times
+                                  (any toolCall block, subagent included)
   reply-max-lines: N              final reply at most N non-empty lines
 
 Grading is literal and case-insensitive throughout: the rubric grades the
 routing DECISION the reply states, never clause quoting, so a pass says the
 behavior survived and a fail says it did not.
+
+Two-tier rubric gating (ORCH-4-6-2 review, second memo (a), binding on
+ORCH-4-6-3 onward): semantics-tier checks are the routing/verdict/dispatch
+assertions the gate exists for, and a semantics-tier miss FAILs the
+scenario. Literal-tier checks are vocabulary pins on substantively-correct
+replies, the class the drift analysis showed fires as surface-form noise;
+a literal-only miss grades VOCAB instead of FAIL, which the paired delta
+classifies as a recorded, non-gating vocabulary-drift signal. A scenario
+with no `tier:` lines behaves exactly as before (everything semantics),
+so the manager routing set's gate semantics are unchanged.
 """
 
 import json
@@ -57,6 +72,15 @@ REGISTRY = {
     "S8": ("RO-172", "FL-03"),
     "S9": ("RO-115", "FL-07"),
     "S10": ("RO-063", "-"),
+    # ORCH-4-6-3's per-touched-row scenarios for the rules corpus (the
+    # registry grows only for rows the subset touches). The rules corpus
+    # carries zero flash-era candidates (verified negative space in the
+    # locked contract), so every flash key is "-". All three run under
+    # the rules-body composition (body: rules): the always-on chain is
+    # the corpus under test, injected with the manager charter absent.
+    "S11": ("RO-021", "-"),
+    "S12": ("RO-101", "-"),
+    "S13": ("RO-105", "-"),
 }
 
 # The seven-class routing pin (08-consolidation-6 section 5, the corpus's
@@ -74,11 +98,14 @@ SEVEN_CLASS_NAMES = [
 
 PROMPT_MARKER = "--- prompt ---"
 RUBRIC_MARKER = "--- rubric ---"
-HEADER_KEYS = ("id", "title", "ro-key", "flash", "timeout", "fixture")
+HEADER_KEYS = ("id", "title", "ro-key", "flash", "timeout", "fixture", "body")
+BODY_KINDS = ("manager", "rules")
+TIER_KINDS = ("semantics", "literal")
+DEFAULT_TIER = "semantics"
 
 RUBRIC_KINDS = ("require", "forbid", "require-if", "require-any",
                 "tool-require", "tool-forbid", "tool-max", "tool-min",
-                "reply-max-lines")
+                "tools-max", "reply-max-lines")
 
 # Dispatch counting is per subagent toolCall event, so a parallel or chain
 # dispatch naming an agent twice in one call counts once per named slot;
@@ -106,6 +133,7 @@ def parse_scenario(path):
     except OSError as exc:
         raise ScenarioError(f"{path}: unreadable: {exc}") from exc
     scenario = {"path": path, "fixtures": [], "rubric": []}
+    current_tier = DEFAULT_TIER
     section = "header"
     header_done = False
     for lineno, raw in enumerate(text.splitlines(), 1):
@@ -128,6 +156,11 @@ def parse_scenario(path):
                 if not value:
                     raise ScenarioError(f"{path}:{lineno}: empty fixture name")
                 scenario["fixtures"].append(value)
+            elif key == "body":
+                if value not in BODY_KINDS:
+                    raise ScenarioError(
+                        f"{path}:{lineno}: body must be one of {BODY_KINDS}: {raw!r}")
+                scenario[key] = value
             else:
                 scenario[key] = value
         elif section == "prompt":
@@ -138,7 +171,14 @@ def parse_scenario(path):
         elif section == "rubric":
             if not line or line.startswith("#"):
                 continue
-            scenario["rubric"].append((lineno, line))
+            if line.startswith("tier:"):
+                tier_name = line[len("tier:"):].strip()
+                if tier_name not in TIER_KINDS:
+                    raise ScenarioError(
+                        f"{path}:{lineno}: tier must be one of {TIER_KINDS}: {raw!r}")
+                current_tier = tier_name
+                continue
+            scenario["rubric"].append((lineno, line, current_tier))
     if not header_done:
         raise ScenarioError(f"{path}: missing {PROMPT_MARKER} marker")
     if section != "rubric":
@@ -160,7 +200,7 @@ def parse_scenario(path):
         raise ScenarioError(f"{path}: empty prompt")
     if len(scenario["rubric"]) < 2:
         raise ScenarioError(f"{path}: rubric needs at least two checks")
-    for lineno, line in scenario["rubric"]:
+    for lineno, line, _tier in scenario["rubric"]:
         check_rubric_line(path, lineno, line)
     return scenario
 
@@ -191,6 +231,11 @@ def check_rubric_line(path, lineno, line):
                 or int(parts[1]) < 1):
             raise ScenarioError(
                 f"{path}:{lineno}: tool-max needs `AGENT N` with N >= 1: {line!r}")
+    if kind == "tools-max":
+        parts = rest.split()
+        if len(parts) != 2 or not parts[1].isdigit() or int(parts[1]) < 0:
+            raise ScenarioError(
+                f"{path}:{lineno}: tools-max needs `NAME N` with N >= 0: {line!r}")
     if kind == "tool-min":
         parts = rest.split()
         if len(parts) != 2 or not parts[1].isdigit():
@@ -207,18 +252,20 @@ def contains_fold(haystack, needle):
 
 def extract_transcript(transcript_path):
     """Pull (addendum_chars, final_reply_text, dispatched_agents,
-    per_agent_call_counts, errors) out of a pi --mode json transcript."""
+    per_agent_call_counts, per_tool_call_counts, errors) out of a
+    pi --mode json transcript."""
     addendum_chars = 0
     reply = ""
     agents = set()
     agent_calls = {}
+    tool_calls = {}
     errors = []
     saw_session = False
     try:
         with open(transcript_path, encoding="utf-8", errors="replace") as fh:
             lines = fh.readlines()
     except OSError as exc:
-        return 0, "", set(), [f"transcript unreadable: {exc}"]
+        return 0, "", set(), {}, {}, [f"transcript unreadable: {exc}"]
     for lineno, line in enumerate(lines, 1):
         line = line.strip()
         if not line:
@@ -248,6 +295,9 @@ def extract_transcript(transcript_path):
             for block in blocks:
                 if block.get("type") != "toolCall":
                     continue
+                tool_name = str(block.get("name", ""))
+                if tool_name:
+                    tool_calls[tool_name] = tool_calls.get(tool_name, 0) + 1
                 if block.get("name") != "subagent":
                     continue
                 args = block.get("arguments") or block.get("args") or {}
@@ -265,26 +315,35 @@ def extract_transcript(transcript_path):
                     agent_calls[agent_name] = agent_calls.get(agent_name, 0) + 1
     if not saw_session:
         errors.append("transcript has no session event (dispatch did not start)")
-    return addendum_chars, reply, agents, agent_calls, errors
+    return addendum_chars, reply, agents, agent_calls, tool_calls, errors
 
 
 def grade_scenario(scenario, transcript_path):
     """Grade one live transcript against the scenario rubric; returns
-    (verdict, checks) where checks is a list of (label, ok, detail)."""
-    addendum_chars, reply, agents, agent_calls, errors = extract_transcript(transcript_path)
+    (verdict, checks) where checks is a list of (label, ok, detail).
+    Verdicts: PASS (instrument and semantics tier green), VOCAB (every
+    semantics check green, at least one literal-tier vocabulary pin
+    missed: recorded, non-gating), FAIL (an instrument or semantics
+    check missed)."""
+    (addendum_chars, reply, agents, agent_calls, tool_calls,
+     errors) = extract_transcript(transcript_path)
     checks = []
     checks.append(("instrument: session started", not errors, "; ".join(errors)))
     checks.append((
-        "instrument: manager body injected into the system addendum",
+        "instrument: body under test injected into the system addendum",
         addendum_chars >= MIN_INJECTED_ADDENDUM_CHARS,
         f"addendum {addendum_chars} chars (minimum {MIN_INJECTED_ADDENDUM_CHARS})"))
     checks.append(("instrument: non-empty final reply", bool(reply.strip()),
                    f"{len(reply.strip())} chars"))
-    for lineno, line in scenario["rubric"]:
+    instrument_failed = any(not ok for label, ok, _ in checks
+                            if label.startswith("instrument:"))
+    semantics_failed = False
+    literal_misses = 0
+    for lineno, line, tier in scenario["rubric"]:
         kind, _, rest = line.partition(":")
         kind = kind.strip()
         rest = rest.strip()
-        label = f"rubric L{lineno}: {line}"
+        label = f"rubric L{lineno} ({tier} tier): {line}"
         if kind == "require":
             ok = contains_fold(reply, rest)
             detail = "present" if ok else "absent from the reply"
@@ -322,6 +381,11 @@ def grade_scenario(scenario, transcript_path):
             calls = agent_calls.get(agent_name, 0)
             ok = calls >= int(floor)
             detail = f"{agent_name} dispatched {calls} time(s), floor {floor}"
+        elif kind == "tools-max":
+            tool_name, cap = rest.split()
+            calls = tool_calls.get(tool_name, 0)
+            ok = calls <= int(cap)
+            detail = f"tool {tool_name} used {calls} time(s), cap {cap}"
         elif kind == "reply-max-lines":
             nonempty = len([l for l in reply.splitlines() if l.strip()])
             ok = nonempty <= int(rest)
@@ -329,8 +393,18 @@ def grade_scenario(scenario, transcript_path):
         else:  # parse_scenario already rejected anything else
             ok = False
             detail = "unreachable"
+        if tier == "literal":
+            if not ok:
+                literal_misses += 1
+        elif not ok:
+            semantics_failed = True
         checks.append((label, ok, detail))
-    verdict = "PASS" if all(ok for _, ok, _ in checks) else "FAIL"
+    if instrument_failed or semantics_failed:
+        verdict = "FAIL"
+    elif literal_misses:
+        verdict = "VOCAB"
+    else:
+        verdict = "PASS"
     return verdict, checks
 
 
@@ -430,6 +504,87 @@ def run_selftest():
         verdict, checks = grade_scenario(scenario, twice)
         record("grade: tool-max cap trip caught",
                any("tool-max:" in label and not ok for label, ok, _ in checks))
+
+        # Two-tier rubric: literal-only miss grades VOCAB, semantics miss
+        # grades FAIL, and a no-tier scenario keeps the historic FAIL.
+        tiered = base.replace("--- rubric ---\n",
+                              "--- rubric ---\ntier: semantics\n"
+                              "require: ROUTE advisor\ntier: literal\n"
+                              "require: lane-a\n")
+        path_tiered = os.path.join(tmp, "tiered.md")
+        with open(path_tiered, "w", encoding="utf-8") as fh:
+            fh.write(tiered)
+        try:
+            tiered_scenario = parse_scenario(path_tiered)
+            record("parse: tier directives parse", tiered_scenario["id"] == "S1"
+                   and [t for _, _, t in tiered_scenario["rubric"]][:2]
+                   == ["semantics", "literal"])
+        except ScenarioError as exc:
+            record(f"parse: tier directives parse ({exc})", False)
+        tiered_bad = tiered.replace("tier: literal", "tier: vocabulary")
+        path_tiered_bad = os.path.join(tmp, "tiered-bad.md")
+        with open(path_tiered_bad, "w", encoding="utf-8") as fh:
+            fh.write(tiered_bad)
+        try:
+            parse_scenario(path_tiered_bad)
+            record("parse: unknown tier rejected", False)
+        except ScenarioError:
+            record("parse: unknown tier rejected", True)
+
+        vocab_reply = ("ROUTE advisor\nlane-a\nADVANCE: no\nITEM 1: retry once\n"
+                       "no special pins\n" + "filler\n" * 3)
+        assistant_vocab = {"type": "message_end", "message": {"role": "assistant",
+                           "content": [{"type": "text", "text": vocab_reply}]}}
+        vocab_out = os.path.join(tmp, "vocab.jsonl")
+        with open(vocab_out, "w", encoding="utf-8") as fh:
+            for event in (session, sysmsg, assistant_vocab):
+                fh.write(json.dumps(event) + "\n")
+        verdict, checks = grade_scenario(tiered_scenario, vocab_out)
+        record("grade: literal-only miss grades VOCAB",
+               verdict == "VOCAB"
+               and any("literal tier" in label and not ok
+                       for label, ok, _ in checks))
+        sem_fail_reply = ["ITEM 1: advance", "ADVANCE: yes"] \
+            + [f"filler line {n}" for n in range(1, 15)]
+        assistant_semfail = {"type": "message_end", "message": {"role": "assistant",
+                             "content": [{"type": "text",
+                                          "text": "\n".join(sem_fail_reply)}]}}
+        semfail_out = os.path.join(tmp, "semfail.jsonl")
+        with open(semfail_out, "w", encoding="utf-8") as fh:
+            for event in (session, sysmsg, assistant_semfail):
+                fh.write(json.dumps(event) + "\n")
+        record("grade: semantics miss still FAILs under tiers",
+               grade_scenario(tiered_scenario, semfail_out)[0] == "FAIL")
+
+        # tools-max: a tool-name cap over every toolCall block, N >= 0.
+        toolname = base.replace("--- rubric ---\n",
+                                "--- rubric ---\nrequire: ROUTE advisor\n"
+                                "tools-max: bash 0\n")
+        path_toolname = os.path.join(tmp, "toolname.md")
+        with open(path_toolname, "w", encoding="utf-8") as fh:
+            fh.write(toolname)
+        toolname_scenario = parse_scenario(path_toolname)
+        assistant_bash = {"type": "message_end", "message": {"role": "assistant",
+                          "content": [
+                              {"type": "toolCall", "name": "bash",
+                               "arguments": {"command": "ls"}},
+                              {"type": "text", "text": "ROUTE advisor\nlane-a\n"
+                                       "ADVANCE: no\nITEM 1: retry once\n"
+                                       "lane-a\nfiller\n" * 2}]}}
+        bash_out = os.path.join(tmp, "bash.jsonl")
+        with open(bash_out, "w", encoding="utf-8") as fh:
+            for event in (session, sysmsg, assistant):
+                fh.write(json.dumps(event) + "\n")
+        verdict_clean, _ = grade_scenario(toolname_scenario, bash_out)
+        bash_twice_out = os.path.join(tmp, "bash2.jsonl")
+        with open(bash_twice_out, "w", encoding="utf-8") as fh:
+            for event in (session, sysmsg, assistant_bash):
+                fh.write(json.dumps(event) + "\n")
+        verdict_trip, checks_trip = grade_scenario(toolname_scenario, bash_twice_out)
+        record("grade: tools-max cap trips on a named tool",
+               verdict_clean == "PASS" and verdict_trip == "FAIL"
+               and any("tools-max:" in label and not ok
+                       for label, ok, _ in checks_trip))
 
         # Grader: each violation class trips exactly its check. The reply
         # carries none of the require/require-any options, breaks the

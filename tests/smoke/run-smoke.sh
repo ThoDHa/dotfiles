@@ -30,15 +30,35 @@
 #                [--thinking LEVEL] [--run-dir DIR] [--baseline-ref REF]
 #       Paired delta mode, explicit invocation only (never chained): per
 #       scenario, dispatch baseline and tip bodies back to back in the
-#       same time window (baseline body from --baseline-ref, default main;
-#       tip body from the worktree) and grade both, then emit a
+#       same time window (baseline bodies from --baseline-ref, default
+#       main; tip bodies from the worktree) and grade both, then emit a
 #       per-scenario delta table. Gate semantics are delta-based over the
-#       gating registry S1-S7 (S8-S10 are advisory): RED only on tip FAIL
-#       where baseline PASS (a regression the corpus edit caused);
-#       both-FAIL is instrument-inconclusive drift, recorded but not red;
-#       otherwise green. Exit 0 green-by-delta, 1 regression, 2 when no
-#       gating scenario produced any green/regression evidence (an
-#       entirely broken instrument must not exit 0).
+#       gating registry S1-S7 + S11-S13 (S8-S10 are advisory): RED only
+#       on tip FAIL where baseline PASS (a regression the corpus edit
+#       caused); both-FAIL is instrument-inconclusive drift, recorded but
+#       not red; otherwise green. Exit 0 green-by-delta, 1 regression, 2
+#       when no gating scenario produced any green, vocab, or regression
+#       evidence (an entirely broken instrument must not exit 0).
+#
+# Two-tier rubric gate (ORCH-4-6-2 review, second memo (a), binding from
+# ORCH-4-6-3 on): a scenario rubric may split its checks into a semantics
+# tier (routing/verdict/dispatch assertions) and a literal tier
+# (vocabulary pins) via `tier:` directives. A literal-only miss grades
+# VOCAB, which is a recorded, non-gating vocabulary-drift signal, not a
+# red; any semantics-tier miss grades FAIL and gates at full force. The
+# falsifiable-claim rule from the memo applies across windows: a
+# semantics-tier single-window red is a regression immediately, so the
+# caller's 2-of-3 majority discipline over repeated paired windows is a
+# noise absorber for instrument flake, never a reason to wait on a
+# semantics-tier red.
+#
+# Body under test (scenario header `body:`): `manager` (default) injects
+# the manager charter exactly as before; `rules` injects the four rules
+# files concatenated in the AGENTS.md generator order (core,
+# coding-standards, execution-standards, qhaway-memory) with the manager
+# charter absent, so always-on chain behavior is graded against the same
+# composition contract the paired delta needs. Baseline and tip rules
+# bodies come from the same ref/worktree split as the manager bodies.
 #
 # Live composition contract (held constant across baseline and post-edit
 # runs so a delta is attributable to the corpus edit alone): the session is
@@ -69,11 +89,17 @@ LIB="$REPO_ROOT/tests/smoke/smoke_lib.py"
 SCENARIO_DIR="$REPO_ROOT/tests/smoke/scenarios"
 MANAGER_REL="opencode/.config/opencode/agents/manager.md"
 FLEET_MANAGER_MD="$REPO_ROOT/$MANAGER_REL"
+RULES_DIR_REL="opencode/.config/opencode/rules"
+# The fixed four-file list in the AGENTS.md generator's provenance order
+# (pi/generate-agents-md.sh): a rules-body scenario's injected corpus is
+# exactly the always-on chain that generation produces.
+RULES_FILES=(core.md coding-standards.md execution-standards.md qhaway-memory.md)
 
-# Gating registry fixed by the calibration ruling (ORCH-4-6-2 task file,
-# Work Log 2026-11-09 23:10): S1-S7 gate the paired delta; S8-S10 are
-# advisory until they carry their own baseline plus stability.
-GATING_IDS="S1 S2 S3 S4 S5 S6 S7"
+# Gating registry: fixed by the calibration ruling (ORCH-4-6-2 task file,
+# Work Log 2026-11-09 23:10) for the manager set S1-S7, extended by
+# ORCH-4-6-3 with its per-touched-row rules-corpus scenarios S11-S13;
+# S8-S10 are advisory until they carry their own baseline plus stability.
+GATING_IDS="S1 S2 S3 S4 S5 S6 S7 S11 S12 S13"
 
 usage() {
 	echo "usage: run-smoke.sh --validate"
@@ -112,6 +138,38 @@ manager_body_from() {
 }
 
 manager_body() { manager_body_from "$FLEET_MANAGER_MD"; }
+
+# Concatenate the four rules files (generator order) into $1: the
+# always-on chain body a `body: rules` scenario injects.
+rules_body_from_dir() {
+	local out="$1" f
+	: > "$out"
+	for f in "${RULES_FILES[@]}"; do
+		[[ -f "$REPO_ROOT/$RULES_DIR_REL/$f" ]] || die "rules source missing: $RULES_DIR_REL/$f"
+		cat "$REPO_ROOT/$RULES_DIR_REL/$f" >> "$out"
+	done
+}
+
+# Same concatenation from a git ref: the pre-edit rules chain the paired
+# delta compares against.
+rules_body_from_ref() {
+	local ref="$1" out="$2" f
+	: > "$out"
+	for f in "${RULES_FILES[@]}"; do
+		git -C "$REPO_ROOT" show "$ref:$RULES_DIR_REL/$f" >> "$out" \
+			|| die "cannot read $RULES_DIR_REL/$f from $ref"
+	done
+}
+
+# Which corpus a scenario injects: `manager` (default) or `rules`.
+scenario_body() {
+	python3 - "$1" "$LIB" <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[2].rsplit("/", 1)[0])
+import smoke_lib
+print(smoke_lib.parse_scenario(sys.argv[1]).get("body", "manager"))
+PYEOF
+}
 
 scenario_path() { # ID -> file path
 	local id="$1" file
@@ -209,7 +267,7 @@ PYEOF
 # PASS.
 run_one() {
 	local sid="$1" body_file="$2" sdir="$3"
-	[[ -s "$body_file" ]] || die "manager body extraction produced nothing (frontmatter unclosed?)"
+	[[ -s "$body_file" ]] || die "body extraction produced nothing for $sid (frontmatter unclosed or rules concat empty?)"
 	local sfile verdict grade_out
 	sfile="$(scenario_path "$sid")"
 	mkdir -p "$sdir"
@@ -315,17 +373,32 @@ run_live() {
 		run_dir="/tmp/llm/smoke/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 	fi
 	mkdir -p "$run_dir" || die "cannot create run dir $run_dir"
-	local body_file="$run_dir/manager-body.md"
-	manager_body > "$body_file"
+	local body_file sid sdir body_kind
+	local -A tip_body_files=()
+	tip_body_files[manager]="$run_dir/manager-body.md"
+	manager_body > "${tip_body_files[manager]}"
+	tip_body_files[rules]="$run_dir/rules-body.md"
+	rules_body_from_dir "${tip_body_files[rules]}"
+
+	# Resolve per-scenario bodies up front so a missing corpus or a
+	# malformed scenario dies before any dispatch.
+	for sid in "${scenarios[@]}"; do
+		body_kind="$(scenario_body "$(scenario_path "$sid")")" \
+			|| die "scenario $sid failed to parse during body selection"
+		[[ -n "${tip_body_files[$body_kind]:-}" ]] || die "unknown body kind for $sid: $body_kind"
+	done
 
 	echo "Live smoke run: ${scenarios[*]}"
 	echo "  run dir: $run_dir"
 	echo "  model: ${model:-host pi default}"
 	[[ -n "$thinking" ]] && echo "  thinking: $thinking"
 
-	local overall=0 sid sdir
+	local overall=0
 	for sid in "${scenarios[@]}"; do
 		sdir="$run_dir/$sid"
+		body_kind="$(scenario_body "$(scenario_path "$sid")")" \
+			|| die "scenario $sid failed to parse during body selection"
+		body_file="${tip_body_files[$body_kind]}"
 		run_one "$sid" "$body_file" "$sdir" || overall=1
 		printf '%s\t%s\t%s\n' "$sid" "$(cat "$sdir/verdict.txt")" "$sdir" >> "$run_dir/manifest.txt"
 	done
@@ -351,12 +424,21 @@ paired_class() {
 			case "$vb" in
 				PASS) printf 'GREEN' ;;
 				FAIL) printf 'GREEN (improved: baseline FAIL)' ;;
+				VOCAB) printf 'GREEN (baseline literal-only miss)' ;;
 				*) printf 'GREEN (baseline instrument error)' ;;
+			esac ;;
+		VOCAB)
+			case "$vb" in
+				PASS) printf 'VOCAB (literal-tier miss, non-gating)' ;;
+				FAIL) printf 'GREEN (improved: baseline FAIL, tip literal-only)' ;;
+				VOCAB) printf 'VOCAB (both literal-miss, non-gating)' ;;
+				*) printf 'INCONCLUSIVE (baseline instrument error)' ;;
 			esac ;;
 		FAIL)
 			case "$vb" in
 				PASS) printf 'REGRESSION' ;;
 				FAIL) printf 'DRIFT (both-FAIL: instrument-inconclusive)' ;;
+				VOCAB) printf 'REGRESSION (semantics red over literal-only baseline)' ;;
 				*) printf 'INCONCLUSIVE (baseline instrument error)' ;;
 			esac ;;
 		*)
@@ -396,14 +478,23 @@ run_paired() {
 	tip_sha="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 	git -C "$REPO_ROOT" show "$baseline_ref:$MANAGER_REL" > "$run_dir/baseline-manager.md" \
 		|| die "cannot read $MANAGER_REL from $baseline_ref"
-	local baseline_body="$run_dir/baseline-body.md"
+	local baseline_body="$run_dir/manager-body-baseline.md"
 	manager_body_from "$run_dir/baseline-manager.md" > "$baseline_body"
 	[[ -s "$baseline_body" ]] || die "baseline body extraction produced nothing (frontmatter unclosed?)"
-	local tip_body="$run_dir/tip-body.md"
+	local tip_body="$run_dir/manager-body-tip.md"
 	manager_body > "$tip_body"
 	[[ -s "$tip_body" ]] || die "tip body extraction produced nothing (frontmatter unclosed?)"
 	cmp -s "$baseline_body" "$tip_body" \
-		&& echo "NOTE: baseline and tip bodies are byte-identical; the delta table measures stability, not a corpus delta."
+		&& echo "NOTE: baseline and tip manager bodies are byte-identical; the manager rows measure stability, not a corpus delta."
+	local baseline_rules_body="$run_dir/rules-body-baseline.md" tip_rules_body="$run_dir/rules-body-tip.md"
+	rules_body_from_ref "$baseline_ref" "$baseline_rules_body"
+	rules_body_from_dir "$tip_rules_body"
+	[[ -s "$baseline_rules_body" ]] || die "baseline rules body concatenation produced nothing"
+	[[ -s "$tip_rules_body" ]] || die "tip rules body concatenation produced nothing"
+	cmp -s "$baseline_rules_body" "$tip_rules_body" \
+		&& echo "NOTE: baseline and tip rules bodies are byte-identical; the rules rows measure stability, not a corpus delta."
+	local -A baseline_bodies=([manager]="$baseline_body" [rules]="$baseline_rules_body")
+	local -A tip_bodies=([manager]="$tip_body" [rules]="$tip_rules_body")
 
 	echo "Paired delta run: ${scenarios[*]}"
 	echo "  run dir: $run_dir"
@@ -412,18 +503,21 @@ run_paired() {
 	echo "  model: ${model:-host pi default}"
 	[[ -n "$thinking" ]] && echo "  thinking: $thinking"
 
-	local red=0 gating_green=0 drift=0 inconclusive=0 advisory_green=0 advisory_other=0
-	local sid vb vt cls gate row
+	local red=0 gating_green=0 drift=0 inconclusive=0 advisory_green=0 advisory_other=0 vocab_signal=0
+	local sid vb vt cls gate row body_kind
 	local -a table_rows=()
 	: > "$run_dir/manifest.txt"
 	# Interleave per scenario (baseline then tip back to back) so each
 	# pair sits in the tightest possible time window: the pairing, not the
-	# overall wall clock, is what controls model-behavior drift.
+	# overall wall clock, is what controls model-behavior drift. Each
+	# scenario's body kind selects which corpus pair grades it.
 	for sid in "${scenarios[@]}"; do
 		if is_gating "$sid"; then gate="gating"; else gate="advisory"; fi
-		run_one "$sid" "$baseline_body" "$run_dir/$sid/baseline" || true
+		body_kind="$(scenario_body "$(scenario_path "$sid")")" \
+			|| die "scenario $sid failed to parse during body selection"
+		run_one "$sid" "${baseline_bodies[$body_kind]}" "$run_dir/$sid/baseline" || true
 		vb="$(cat "$run_dir/$sid/baseline/verdict.txt")"
-		run_one "$sid" "$tip_body" "$run_dir/$sid/tip" || true
+		run_one "$sid" "${tip_bodies[$body_kind]}" "$run_dir/$sid/tip" || true
 		vt="$(cat "$run_dir/$sid/tip/verdict.txt")"
 		cls="$(paired_class "$vb" "$vt")"
 		row="$(printf '%-4s baseline=%-33s tip=%-33s %s [%s]' "$sid" "$vb" "$vt" "$cls" "$gate")"
@@ -435,6 +529,7 @@ run_paired() {
 				case "$cls" in
 					REGRESSION*) red=$((red + 1)) ;;
 					GREEN*) gating_green=$((gating_green + 1)) ;;
+					VOCAB*) vocab_signal=$((vocab_signal + 1)) ;;
 					DRIFT*) drift=$((drift + 1)) ;;
 					*) inconclusive=$((inconclusive + 1)) ;;
 				esac ;;
@@ -447,22 +542,22 @@ run_paired() {
 	done
 
 	for row in "${table_rows[@]}"; do echo "  $row"; done
-	echo "Gating counts: $gating_green green, $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
+	echo "Gating counts: $gating_green green, $vocab_signal vocab (non-gating literal drift), $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
 	{
 		echo "Delta table (gating: $GATING_IDS; baseline $baseline_ref @$baseline_sha vs tip @$tip_sha)"
 		for row in "${table_rows[@]}"; do echo "  $row"; done
-		echo "Gating counts: $gating_green green, $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
+		echo "Gating counts: $gating_green green, $vocab_signal vocab (non-gating literal drift), $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
 	} > "$run_dir/delta.txt"
 
 	if ((red > 0)); then
 		echo "Paired gate: RED ($red regression(s) on the gating set: tip FAIL where baseline PASS; transcripts under $run_dir)"
 		return 1
 	fi
-	if ((gating_green == 0)); then
-		echo "Paired gate: INCONCLUSIVE (no gating scenario produced a green or regression delta; the instrument carried no evidence)"
+	if ((gating_green == 0 && vocab_signal == 0)); then
+		echo "Paired gate: INCONCLUSIVE (no gating scenario produced green, vocab, or regression evidence; the instrument carried no evidence)"
 		return 2
 	fi
-	echo "Paired gate: GREEN-BY-DELTA (no tip FAIL where baseline PASS on the gating set; drift rows recorded as instrument-inconclusive)"
+	echo "Paired gate: GREEN-BY-DELTA (no tip FAIL where baseline PASS on the gating set; drift rows recorded as instrument-inconclusive; vocab rows recorded as non-gating literal drift)"
 	return 0
 }
 

@@ -95,7 +95,7 @@ Row keywords are accepted synonyms for the [Required Prompt](#required-prompt) o
 
 Task file tracking is NOT part of this prompt. Choosing Sequential, Parallel delegation, or Parallel with worktrees decides execution approach only and does NOT authorize task file creation; task files require a separate explicit confirmation per the `task-files` skill's Large Task Offer.
 
-Coordination note: the `task-files` skill carries a paired trigger at the same 4-or-more-todos threshold, sequenced to ride this pause (its Large Task Offer). The two sides of the pairing are coordinated by design; a change to either trigger must account for the other and is not made unilaterally.
+Coordination note: the `task-files` skill carries a paired trigger riding this pause (its Large Task Offer); the two sides are coordinated by design, and a change to either trigger must account for the other and is not made unilaterally.
 
 Implementations MUST NOT proceed past a trigger of this protocol without user direction on execution approach.
 
@@ -163,4 +163,4 @@ If conflicts are unavoidable, run the conflicting tasks sequentially, unless git
 
 Conformance is canonical in the core rule's [Conformance](core.md#conformance) section.
 
-Violations of the [Task Complexity Protocol](#task-complexity-protocol) are serious conformance failures, as they remove user control over execution strategy.
+Violations of the [Task Complexity Protocol](#task-complexity-protocol) are serious: they remove user control over execution strategy.

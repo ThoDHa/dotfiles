@@ -6,6 +6,9 @@
 !tests/task-metrics/fixtures/pi-store/engine.log
 !tests/task-metrics/fixtures/pi-store/engine-interrupted.log
 
+# Python bytecode caches
+__pycache__/
+
 # OS files
 .DS_Store
 Thumbs.db

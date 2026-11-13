@@ -25,10 +25,15 @@ pins; file line ranges never are.
 | S8 | Consequential design-challenge ruling obtains the second adversarial advisor pass | RO-172 | FL-03 |
 | S9 | Dispatch discipline: delegation default, never-implement routes, resume versus fresh, worktree regimes | RO-115 | FL-07 |
 | S10 | Git integration plan preserves the ordered pair, pushed tips, staging scope, and teardown | RO-063 | - |
+| S11 | Memory-store check on a tool-less session reports failure and never fabricates recall results | RO-021 | - |
+| S12 | A five-component task pauses with the execution-approach options instead of starting work | RO-101 | - |
+| S13 | The execution-approach pause bars any execution until the user directs the approach | RO-105 | - |
 
-S8-S10 are this subset's per-touched-row scenarios (compression and
-pointer-collapse surfaces the initial registry did not carry); a "-"
-flash key marks a row with no Flash-era candidate.
+S8-S10 are ORCH-4-6-2's per-touched-row scenarios (compression and
+pointer-collapse surfaces the initial registry did not carry); S11-S13
+are ORCH-4-6-3's, one per touched rules-corpus row, run under the rules
+body composition (below). A "-" flash key marks a row with no Flash-era
+candidate.
 
 ## Modes
 
@@ -63,8 +68,24 @@ recorded but not red; a tip PASS is green whatever the baseline did;
 instrument errors (timeout, pi exit, grader crash) are never graded
 verdicts and stay inconclusive. Exit 0 = green-by-delta, 1 = regression
 on the gating set (stop: rollback is the manager's decision), 2 = no
-gating scenario produced a green or regression delta (an entirely
-broken instrument must not exit 0).
+gating scenario produced green, vocab, or regression evidence (an
+entirely broken instrument must not exit 0).
+
+## Two-tier rubric gate and rules-body composition
+
+A scenario rubric may split its checks with `tier:` directives
+(`semantics`, the default, and `literal`): semantics checks are the
+routing/verdict/dispatch assertions the gate exists for; literal checks
+are vocabulary pins. A literal-only miss grades VOCAB, recorded as a
+non-gating vocabulary-drift signal (the paired table carries it as a
+VOCAB row); any semantics miss FAILs and gates at full force, in any
+single window, per the two-tier rule from the ORCH-4-6-2 review's second
+memo. Scenario header `body: rules` swaps the injected corpus: instead
+of the manager charter the session receives the four rules files
+concatenated in the AGENTS.md generator order, so always-on chain
+behavior grades under the same composition contract; `body: manager`
+(default) keeps the charter. Paired mode builds a baseline and tip body
+per kind from the same ref/worktree split.
 
 ## Live composition contract
 
@@ -87,14 +108,17 @@ the wrong charter.
 ## Scenario file grammar
 
 Header lines (`id`, `title`, `ro-key`, `flash`, `timeout`, repeatable
-`fixture:`), then `--- prompt ---` with the verbatim dispatch, then
-`--- rubric ---` with the mechanical checks: `require:`, `forbid:`,
+`fixture:`, `body:`), then `--- prompt ---` with the verbatim dispatch,
+then `--- rubric ---` with the mechanical checks: `require:`, `forbid:`,
 `require-if: A=>B`, `require-any: A|B`, `tool-require: AGENT`,
-`tool-forbid: AGENT`, `tool-max: AGENT N`, `reply-max-lines: N`. Matching is literal and
-case-insensitive with whitespace-run tolerance; rubrics grade the routing
-decision the reply states, never clause quoting, so a pass says the
-behavior survived and a fail says it did not. The prompt's output-contract
-lines (labeled decision lines) are what make the grading deterministic.
+`tool-forbid: AGENT`, `tool-max: AGENT N`, `tool-min: AGENT N`,
+`tools-max: NAME N` (any toolCall block, subagent included, N >= 0),
+`reply-max-lines: N`, and `tier: semantics|literal` directives. Matching
+is literal and case-insensitive with whitespace-run tolerance; rubrics
+grade the routing decision the reply states, never clause quoting, so a
+pass says the behavior survived and a fail says it did not. The prompt's
+output-contract lines (labeled decision lines) are what make the grading
+deterministic.
 
 ## Extending
 
