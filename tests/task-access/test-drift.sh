@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Task-access drift-check suite (ORCH-4-9-1, Tier A). Proves the drift check
-# green on the unmigrated corpus (the migrated-surfaces list ships empty) and
-# red on every planted failure fixture: one fixture per pattern class under
+# green on the real migrated-surfaces list (the corpus as migrated so far;
+# ORCH-4-9-2 lands the two skill homes on it) and red on every planted
+# failure fixture: one fixture per pattern class under
 # tests/fixtures/task-access/failures/, planted into a temp root and scanned
 # through --list/--root overrides, so the suite never touches the real list.
 # Also pins the allowance semantics (fences, the task-access-sanctioned
@@ -34,10 +35,14 @@ run_drift() {
 	if ((rc == 0)); then ok "$label"; else bad "$label (exit $rc)"; fi
 }
 
-echo "== default run: green on the empty migrated-surfaces list =="
-run_drift "default run exits 0 on the real (empty) list"
-assert_contains "default run reports the empty-list contract" "$out" "empty"
+echo "== default run: green on the real migrated-surfaces list =="
+expected_surfaces="$(grep -cv '^[[:space:]]*\(#\|$\)' "$REPO_ROOT/tests/fixtures/task-access/migrated-surfaces.txt")"
+run_drift "default run exits 0 on the real migrated-surfaces list"
+assert_contains "default run scans every listed surface" "$out" "$expected_surfaces migrated surface(s) clean"
 assert_eq "default run writes nothing to stderr" "" "$err"
+real_list="$(cat "$REPO_ROOT/tests/fixtures/task-access/migrated-surfaces.txt")"
+assert_contains "the real list carries the migrated task-files skill" "$real_list" "agents/.agents/skills/task-files/SKILL.md"
+assert_contains "the real list carries the migrated delegation skill" "$real_list" "agents/.agents/skills/delegation/SKILL.md"
 
 echo "== list validation =="
 out="$(bash "$DRIFT" --list "$ROOT/no-such-list.txt" 2>&1)"; rc=$?
@@ -68,6 +73,7 @@ plant uncited-mention write-framing.md "P4"
 plant uncited-mention read-framing.md "P4"
 plant uncited-mention mention-noun.md "P4"
 plant uncited-mention mention-deposit.md "P4"
+plant uncited-mention mention-cliframe.md "P4"
 plant tool-dirarg tool-dirarg.md "P3"
 
 echo "== exact finding count on a single-pattern file =="
@@ -109,6 +115,17 @@ printf '%s\n' 'Task files live under .tasks/current/; read them with tasks show,
 printf '%s\n' "cited.md" > "$ROOT/cited-list.txt"
 run_drift "a cited .tasks mention is not a finding" --list "$ROOT/cited-list.txt" --root "$ROOT"
 assert_contains "cited-mention run is green" "$out" "clean"
+
+printf '%s\n' 'Task files live under .tasks/current/; the board carries them, run by the tasks reports reader.' > "$ROOT/cited-read.md"
+printf '%s\n' "cited-read.md" > "$ROOT/cited-read-list.txt"
+run_drift "a citation naming a landed read verb stem satisfies the rule" --list "$ROOT/cited-read-list.txt" --root "$ROOT"
+assert_contains "read-verb-stem citation run is green" "$out" "clean"
+
+printf '%s\n' 'Writes go through the tasks CLI; the .tasks/ tree holds the board.' > "$ROOT/nouncli.md"
+printf '%s\n' "nouncli.md" > "$ROOT/nouncli-list.txt"
+out="$(bash "$DRIFT" --list "$ROOT/nouncli-list.txt" --root "$ROOT" 2>&1)"; rc=$?
+if ((rc == 1)); then ok "a noun framing citing only the tasks CLI is a finding"; else bad "a noun framing citing only the tasks CLI is a finding (exit $rc)"; fi
+assert_contains "the noun-CLI framing fires as uncited" "$out" "P4"
 
 echo "== P5 fence parity: an odd fence count is a finding =="
 {

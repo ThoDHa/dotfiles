@@ -16,7 +16,10 @@ nothing: `show`, `list`, `reports`, `export`, `lint`, `doctor`, `frontier`, `cla
 `events`, plus `help` for usage text. Write verbs mutate the board: `init`, `render`,
 `new`, `set`, `report`, `log`, `edit`, `claim`, `release`, `reclaim`, `archive`, `close`,
 `stamp`. Task files resolve by path; archived tasks resolve by full path under `archive/`
-(bare basenames resolve only inside `current/`).
+(bare basenames resolve only inside `current/`). The task-files skill's raw escape hatch
+(`tasks show <taskfile> --raw`) rides the authorized `show` verb's flag space: it is
+admissible wherever a role's set admits `tasks show`, and replay-proven `--raw` forms in
+the per-role sets ride ORCH-4-9-3's fixture work.
 
 ### Deviations From the Plan's Cited Contract (Reconciliation Record)
 

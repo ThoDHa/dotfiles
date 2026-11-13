@@ -87,15 +87,18 @@ rules.
 
 Under the task-files protocol every `.tasks/` write has exactly one owner:
 the manager owns the task files and the dashboard, dispatched agents own the
-two `tasks` CLI channels (Work Log entries and report deposits, attributed
-via `--from`; the reviewer's findings deposit rides the report channel the
-same way, no third exception), and the two agent-owned write exceptions are
-the planner's planning-section carve-out and the research deposit, a
-task-file-less agent's direct file write into the reserved `research/`
-namespace (the task-files skill's Agent Write Path, Serialized Task-File
-Body Edits, and Reports Namespace sections). Bulky output lives under
-`.tasks/reports/` (the skill's Reports Namespace and Manual Fallback
-sections); closure work opens with a short digest and planning fan-out
+tasks CLI channels (Work Log entries and report deposits through `tasks log`
+and `tasks report`, attributed via `--from`; the reviewer's findings deposit
+rides the report channel the same way, no third exception), the planner
+writes its planning sections through the widened `tasks edit` channel while
+its own planning dispatch is in flight, and the one agent-owned direct-write
+exception left is the research deposit, a task-file-less agent's direct file
+write into the reserved `research/` namespace, retained until a CLI
+research-deposit path lands (the task-files skill's Agent Write Path,
+Serialized Task-File Body Edits, and Reports Namespace sections). Bulky
+output lives under `.tasks/reports/`, deposited through `tasks report` and
+read back through `tasks reports` (the skill's Reports Namespace section);
+closure work opens with a short digest and planning fan-out
 shares one reconnaissance artifact (the skill's Closure Digest and Triage to
 Ready Planning Phase sections, the latter tied to the delegation skill's
 Planning Approval Authority). Between the manager's Triage → Ready approval
@@ -233,13 +236,15 @@ The LRU context plugin and its `/lru` sidebar panel live in their own repository
   the flash worker's adherence; the reviewer's expectation check is the
   backstop, except on all-mechanical tasks where the reviewer is skipped
   and the verifier's raw results plus git reconciliation are the only
-  checks. The planner's restraint inside its planning-section carve-out
-  is likewise prompt-soft, and the planner runs pinned to glm-5.3, not
-  flash: the manager's planning review of the filled-out task file
-  is its backstop. The no-implementation and territory-scoping
-  restraints on research dispatches routed to the same planner are
-  likewise prompt-soft, and the manager's review of the findings is
-  their backstop. The advisor's no-authorship and evidence-anchoring
+  checks. The planner's restraint inside its `tasks edit` planner
+  channel (only the planning sections, only while its own planning
+  dispatch is in flight, though the channel itself accepts any
+  template section) is likewise prompt-soft, and the planner runs
+  pinned to glm-5.3, not flash: the manager's planning review of the
+  filled-out task file is its backstop. The no-implementation and
+  territory-scoping restraints on research dispatches routed to the
+  same planner are likewise prompt-soft, and the manager's review of
+  the findings is their backstop. The advisor's no-authorship and evidence-anchoring
   restraints are prompt-soft the same way: the manager's review of each
   memo, and its final yes/no on everything the memo informs, are the
   backstop. The plan-review gate on high-cost plans is advisory

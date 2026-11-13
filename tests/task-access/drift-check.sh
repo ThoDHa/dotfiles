@@ -111,7 +111,10 @@ patterns=(
 # match. Word boundaries stay explicit character classes (the bash =~ regex
 # \b is a GNU libc extension, not portable to the verify container's libc).
 mention_re='\.tasks(/|$|[^/[:alnum:]-])'
-cite_re='(^|[^[:alnum:]_-])tasks[[:space:]]+[[:alpha:]]'
+# The citation alternation pins the landed verb stems, so noun framings
+# ("the tasks CLI", "the tasks board") satisfy nothing: P4's documented
+# teeth. A verb that lands updates this alternation in the same change.
+cite_re='(^|[^[:alnum:]_-])tasks[[:space:]]+(show|list|reports|export|lint|doctor|frontier|claims|events|help|init|render|new|set|report|log|edit|claim|release|reclaim|archive|close|stamp)'
 
 # Marker line that ends a tier-b config's target map; everything below it
 # is fixture-only denial tail. Matched as a fixed whole line (grep -xF):

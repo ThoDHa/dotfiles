@@ -1,13 +1,12 @@
 # Migrated-surfaces list for the task-access drift check (ORCH-4-9-1).
 #
-# EMPTY at this landing: no contract surface has migrated to CLI-only access
-# yet, so the check is trivially green on the unmigrated corpus. ORCH-4-9-2
-# and ORCH-4-9-3 append one repo-relative path per migrated surface, per
-# stage. A listed surface's discipline is strict: any non-fenced line
-# naming .tasks must cite a `tasks <verb>` on the same line or carry the
-# task-access-sanctioned marker, a status reserved for the retained
-# research-deposit exception until a CLI research-deposit path lands and
-# the exception is removed.
+# ORCH-4-9-1 landed the list empty; ORCH-4-9-2 appends the two skill homes
+# as they migrate (task-files first, then delegation), and ORCH-4-9-3
+# extends it to the charters. A listed surface's discipline is strict: any
+# non-fenced line naming .tasks must cite a `tasks <verb>` on the same
+# line or carry the task-access-sanctioned marker, a status reserved for
+# the retained research-deposit exception until a CLI research-deposit
+# path lands and the exception is removed.
 #
 # Format: one repo-relative path per line; blank lines and # comments are
 # ignored. A listed path that does not exist is itself a finding. A
@@ -17,3 +16,6 @@
 # tests/fixtures/task-access/tier-b/<role>.yaml above that config's
 # fixture-denial-tail marker instead of being text-scanned; the body
 # prose outside the frontmatter still follows the text patterns.
+
+agents/.agents/skills/task-files/SKILL.md
+agents/.agents/skills/delegation/SKILL.md
