@@ -1,0 +1,75 @@
+# Tier-B fixture dispatch config: worker (ORCH-4-9-1 skeleton; the
+# ORCH-4-9-4 representative executions run under this file).
+#
+# Realizes the verb map's target worker map: the allow-first posture is
+# unchanged (no map delta for the worker), and the fixture denial tail is
+# appended last so the .tasks routes lose against the blanket allows.
+#
+# Rule semantics are opencode's: ordered rules, the LAST matching rule
+# wins, so the denial tail overrides everything above it.
+#
+# Boundary: these rules deny the edit and shell routes. opencode maps have
+# no read action, so the native read tool is covered by the transcript
+# audit (tests/task-access/audit-transcript.sh), not denied here. This
+# fixture proves contract sufficiency and role discipline; it is not a
+# filesystem boundary, and enforcement is ORCH-4-10's work.
+description: "Tier-B fixture config: worker under CLI-only task access"
+mode: subagent
+permissions:
+  - { action: edit, resource: "*", effect: allow }
+  - { action: shell, resource: "*", effect: allow }
+  - { action: shell, resource: "git push*", effect: deny }
+  - { action: shell, resource: "git commit --amend*", effect: deny }
+  - { action: shell, resource: "git commit * --amend*", effect: deny }
+  - { action: shell, resource: "git rebase*", effect: deny }
+  - { action: shell, resource: "git pull* --rebase*", effect: deny }
+  - { action: shell, resource: "git pull* -r*", effect: deny }
+  - { action: shell, resource: "gh *", effect: deny }
+  - { action: shell, resource: "gh auth status*", effect: allow }
+  - { action: shell, resource: "gh issue status*", effect: allow }
+  - { action: shell, resource: "gh issue list*", effect: allow }
+  - { action: shell, resource: "gh issue view*", effect: allow }
+  - { action: shell, resource: "gh pr status*", effect: allow }
+  - { action: shell, resource: "gh pr list*", effect: allow }
+  - { action: shell, resource: "gh pr view*", effect: allow }
+  - { action: shell, resource: "gh pr diff*", effect: allow }
+  - { action: shell, resource: "gh pr checks*", effect: allow }
+  - { action: shell, resource: "gh release list*", effect: allow }
+  - { action: shell, resource: "gh release view*", effect: allow }
+  - { action: shell, resource: "gh repo list*", effect: allow }
+  - { action: shell, resource: "gh repo view*", effect: allow }
+  - { action: shell, resource: "gh run list*", effect: allow }
+  - { action: shell, resource: "gh run view*", effect: allow }
+  - { action: shell, resource: "gh run watch*", effect: allow }
+  - { action: shell, resource: "gh search*", effect: allow }
+  - { action: shell, resource: "gh workflow list*", effect: allow }
+  - { action: shell, resource: "gh workflow view*", effect: allow }
+  - { action: shell, resource: "gh label list*", effect: allow }
+  - { action: shell, resource: "make test*", effect: allow }
+  - { action: shell, resource: "mktemp /tmp/llm/*", effect: allow }
+  - { action: shell, resource: "mktemp -d /tmp/llm/*", effect: allow }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
+# fixture denial tail (fixture-only rules; not part of the target map)
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: shell, resource: "*cat *.tasks*", effect: deny }
+  - { action: shell, resource: "*grep *.tasks*", effect: deny }
+  - { action: shell, resource: "*ls *.tasks*", effect: deny }
+  - { action: shell, resource: "*wc *.tasks*", effect: deny }
+  - { action: shell, resource: "*find *.tasks*", effect: deny }
+  - { action: shell, resource: "*sed *.tasks*", effect: deny }
+  - { action: shell, resource: "*awk *.tasks*", effect: deny }
+  - { action: shell, resource: "*head *.tasks*", effect: deny }
+  - { action: shell, resource: "*tail *.tasks*", effect: deny }
+  - { action: shell, resource: "*rm *.tasks*", effect: deny }
+  - { action: shell, resource: "*cp *.tasks*", effect: deny }
+  - { action: shell, resource: "*mv *.tasks*", effect: deny }
+  - { action: shell, resource: "*tee *.tasks*", effect: deny }
+  - { action: shell, resource: "*touch *.tasks*", effect: deny }
+  - { action: shell, resource: "*mkdir *.tasks*", effect: deny }
+  - { action: shell, resource: "*python*.tasks*", effect: deny }
+  - { action: shell, resource: "*python3*.tasks*", effect: deny }
+  - { action: shell, resource: "*perl*.tasks*", effect: deny }
+  - { action: shell, resource: "*node*.tasks*", effect: deny }
+  - { action: shell, resource: "*ruby*.tasks*", effect: deny }
+  - { action: shell, resource: "*dd*.tasks*", effect: deny }

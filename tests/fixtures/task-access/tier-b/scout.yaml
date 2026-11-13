@@ -1,0 +1,33 @@
+# Tier-B fixture dispatch config: scout (ORCH-4-9-1 skeleton; the
+# ORCH-4-9-4 representative executions run under this file).
+#
+# Realizes the scout's zero-diff posture: the live map carries no shell
+# rules and names no task access, so the fixture adds the shell denial
+# tail explicitly and keeps everything else absent. Scout's authorized
+# task-command set is empty by contract (role-verbs.sh); any task access
+# is discipline-broken and the transcript audit covers the read-tool gap.
+#
+# Rule semantics are opencode's: ordered rules, the LAST matching rule
+# wins, so the denial tail overrides everything above it.
+#
+# Boundary: these rules deny the edit and shell routes. opencode maps have
+# no read action, so the native read tool is covered by the transcript
+# audit (tests/task-access/audit-transcript.sh), not denied here. This
+# fixture proves contract sufficiency and role discipline; it is not a
+# filesystem boundary, and enforcement is ORCH-4-10's work.
+description: "Tier-B fixture config: scout under CLI-only task access"
+mode: subagent
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+# fixture denial tail (fixture-only rules; not part of the target map)
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: shell, resource: "*cat *.tasks*", effect: deny }
+  - { action: shell, resource: "*grep *.tasks*", effect: deny }
+  - { action: shell, resource: "*ls *.tasks*", effect: deny }
+  - { action: shell, resource: "*wc *.tasks*", effect: deny }
+  - { action: shell, resource: "*find *.tasks*", effect: deny }
+  - { action: shell, resource: "*sed *.tasks*", effect: deny }
+  - { action: shell, resource: "*awk *.tasks*", effect: deny }
+  - { action: shell, resource: "*head *.tasks*", effect: deny }
+  - { action: shell, resource: "*tail *.tasks*", effect: deny }

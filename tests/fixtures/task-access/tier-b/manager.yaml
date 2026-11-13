@@ -1,0 +1,59 @@
+# Tier-B fixture dispatch config: manager (ORCH-4-9-1 skeleton; the
+# ORCH-4-9-4 representative executions run under this file).
+#
+# Realizes the verb map's target manager posture: the live charter's
+# retained `edit .tasks/**` allow (the interim recovery channel per the
+# parent Decision Log) is present and then OVERRIDDEN by the fixture
+# denial tail, proving the CLI suffices without the direct channel.
+#
+# Rule semantics are opencode's: ordered rules, the LAST matching rule
+# wins, so the denial tail overrides everything above it.
+#
+# Boundary: these rules deny the edit and shell routes. opencode maps have
+# no read action, so the native read tool is covered by the transcript
+# audit (tests/task-access/audit-transcript.sh), not denied here. This
+# fixture proves contract sufficiency and role discipline; it is not a
+# filesystem boundary, and enforcement is ORCH-4-10's work.
+description: "Tier-B fixture config: manager under CLI-only task access"
+mode: subagent
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: allow }
+  - { action: shell, resource: "*", effect: allow }
+  - { action: shell, resource: "git push -f*", effect: ask }
+  - { action: shell, resource: "git push --force*", effect: ask }
+  - { action: shell, resource: "git push * -f*", effect: ask }
+  - { action: shell, resource: "git push * --force*", effect: ask }
+  - { action: shell, resource: "git fetch*", effect: deny }
+  - { action: shell, resource: "git pull*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: subagent, resource: "worker", effect: allow }
+  - { action: subagent, resource: "verifier", effect: allow }
+  - { action: subagent, resource: "reviewer", effect: allow }
+  - { action: subagent, resource: "planner", effect: allow }
+  - { action: subagent, resource: "advisor", effect: allow }
+  - { action: subagent, resource: "scout", effect: allow }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
+# fixture denial tail (fixture-only rules; not part of the target map)
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: shell, resource: "*cat *.tasks*", effect: deny }
+  - { action: shell, resource: "*grep *.tasks*", effect: deny }
+  - { action: shell, resource: "*ls *.tasks*", effect: deny }
+  - { action: shell, resource: "*wc *.tasks*", effect: deny }
+  - { action: shell, resource: "*find *.tasks*", effect: deny }
+  - { action: shell, resource: "*sed *.tasks*", effect: deny }
+  - { action: shell, resource: "*awk *.tasks*", effect: deny }
+  - { action: shell, resource: "*head *.tasks*", effect: deny }
+  - { action: shell, resource: "*tail *.tasks*", effect: deny }
+  - { action: shell, resource: "*rm *.tasks*", effect: deny }
+  - { action: shell, resource: "*cp *.tasks*", effect: deny }
+  - { action: shell, resource: "*mv *.tasks*", effect: deny }
+  - { action: shell, resource: "*tee *.tasks*", effect: deny }
+  - { action: shell, resource: "*touch *.tasks*", effect: deny }
+  - { action: shell, resource: "*mkdir *.tasks*", effect: deny }
+  - { action: shell, resource: "*python*.tasks*", effect: deny }
+  - { action: shell, resource: "*python3*.tasks*", effect: deny }
+  - { action: shell, resource: "*perl*.tasks*", effect: deny }
+  - { action: shell, resource: "*node*.tasks*", effect: deny }
+  - { action: shell, resource: "*ruby*.tasks*", effect: deny }
+  - { action: shell, resource: "*dd*.tasks*", effect: deny }

@@ -74,6 +74,8 @@ dotfiles/
 └── README.md
 ```
 
+Task-access contract: the fleet's per-role CLI-only verb map lives at [`tests/fixtures/task-access/verb-map.md`](tests/fixtures/task-access/verb-map.md).
+
 ## Commands
 
 | Command | Description |

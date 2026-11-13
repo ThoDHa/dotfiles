@@ -1,0 +1,69 @@
+# Tier-B fixture dispatch config: planner (ORCH-4-9-1 skeleton; the
+# ORCH-4-9-4 representative executions run under this file).
+#
+# Realizes the verb map's target planner map (tests/fixtures/task-access/verb-map.md):
+# the `edit .tasks/**` allow is REMOVED (planning writes go through
+# `tasks edit`), the CLI read verbs and the widened `tasks edit` write
+# channel are allowed, and the fixture denial tail is appended last.
+# The narrow `.tasks/reports/research/**` edit allow after the denial
+# tail's `.tasks/**` deny is the interim research-deposit exception's
+# mechanism (verb-map.md, planner entry): ordered after the deny so
+# last-match-wins keeps it inside the research subtree, removed together
+# with the exception when a CLI research-deposit path lands.
+#
+# Rule semantics are opencode's: ordered rules, the LAST matching rule
+# wins, so the denial tail overrides everything above it.
+#
+# Boundary: these rules deny the edit and shell routes. opencode maps have
+# no read action, so the native read tool is covered by the transcript
+# audit (tests/task-access/audit-transcript.sh), not denied here. This
+# fixture proves contract sufficiency and role discipline; it is not a
+# filesystem boundary, and enforcement is ORCH-4-10's work.
+description: "Tier-B fixture config: planner under CLI-only task access"
+mode: subagent
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: shell, resource: "*", effect: deny }
+  - { action: shell, resource: "git status *", effect: allow }
+  - { action: shell, resource: "git diff *", effect: allow }
+  - { action: shell, resource: "git log *", effect: allow }
+  - { action: shell, resource: "git show *", effect: allow }
+  - { action: shell, resource: "git rev-parse *", effect: allow }
+  - { action: shell, resource: "git worktree list *", effect: allow }
+  - { action: shell, resource: "git -C * status *", effect: allow }
+  - { action: shell, resource: "git -C * log *", effect: allow }
+  - { action: shell, resource: "git -C * diff *", effect: allow }
+  - { action: shell, resource: "git -C * show *", effect: allow }
+  - { action: shell, resource: "ls *", effect: allow }
+  - { action: shell, resource: "cat *", effect: allow }
+  - { action: shell, resource: "grep *", effect: allow }
+  - { action: shell, resource: "wc *", effect: allow }
+  - { action: shell, resource: "make verify", effect: allow }
+  - { action: shell, resource: "make lint-corpus", effect: allow }
+  - { action: shell, resource: "tasks log *", effect: allow }
+  - { action: shell, resource: "tasks report *", effect: allow }
+  - { action: shell, resource: "tasks show *", effect: allow }
+  - { action: shell, resource: "tasks list *", effect: allow }
+  - { action: shell, resource: "tasks reports *", effect: allow }
+  - { action: shell, resource: "tasks edit *", effect: allow }
+  - { action: shell, resource: "sqlite3 -readonly *", effect: allow }
+  - { action: shell, resource: "opencode --help *", effect: allow }
+  - { action: shell, resource: "opencode run --help", effect: allow }
+  - { action: shell, resource: "opencode --version", effect: allow }
+  - { action: shell, resource: "opencode debug config", effect: allow }
+  - { action: shell, resource: "opencode debug agents", effect: allow }
+  - { action: shell, resource: "* *.env*", effect: deny }
+  - { action: subagent, resource: "*", effect: deny }
+  - { action: subagent, resource: "scout", effect: allow }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: ".tasks/reports/research/**", effect: allow }
+# fixture denial tail (fixture-only rules; not part of the target map)
+  - { action: shell, resource: "*cat *.tasks*", effect: deny }
+  - { action: shell, resource: "*grep *.tasks*", effect: deny }
+  - { action: shell, resource: "*ls *.tasks*", effect: deny }
+  - { action: shell, resource: "*wc *.tasks*", effect: deny }
+  - { action: shell, resource: "*find *.tasks*", effect: deny }
+  - { action: shell, resource: "*sed *.tasks*", effect: deny }
+  - { action: shell, resource: "*awk *.tasks*", effect: deny }
+  - { action: shell, resource: "*head *.tasks*", effect: deny }
+  - { action: shell, resource: "*tail *.tasks*", effect: deny }

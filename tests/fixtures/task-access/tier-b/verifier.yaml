@@ -1,0 +1,43 @@
+# Tier-B fixture dispatch config: verifier (ORCH-4-9-1 skeleton; the
+# ORCH-4-9-4 representative executions run under this file).
+#
+# Realizes the verifier's zero-diff posture: the live map's `tasks render`
+# allow stays (the role's one sanctioned CLI write), no task reads exist,
+# and the fixture denial tail is appended last.
+#
+# Rule semantics are opencode's: ordered rules, the LAST matching rule
+# wins, so the denial tail overrides everything above it.
+#
+# Boundary: these rules deny the edit and shell routes. opencode maps have
+# no read action, so the native read tool is covered by the transcript
+# audit (tests/task-access/audit-transcript.sh), not denied here. This
+# fixture proves contract sufficiency and role discipline; it is not a
+# filesystem boundary, and enforcement is ORCH-4-10's work.
+description: "Tier-B fixture config: verifier under CLI-only task access"
+mode: subagent
+permissions:
+  - { action: edit, resource: "*", effect: deny }
+  - { action: shell, resource: "*", effect: deny }
+  - { action: shell, resource: "git push*", effect: deny }
+  - { action: shell, resource: "make verify", effect: allow }
+  - { action: shell, resource: "tasks render", effect: allow }
+  - { action: shell, resource: "git status *", effect: allow }
+  - { action: shell, resource: "git diff *", effect: allow }
+  - { action: shell, resource: "git log *", effect: allow }
+  - { action: shell, resource: "git show *", effect: allow }
+  - { action: shell, resource: "git rev-parse *", effect: allow }
+  - { action: shell, resource: "ls *", effect: allow }
+  - { action: shell, resource: "cat *", effect: allow }
+  - { action: shell, resource: "grep *", effect: allow }
+  - { action: shell, resource: "make test*", effect: allow }
+# fixture denial tail (fixture-only rules; not part of the target map)
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: shell, resource: "*cat *.tasks*", effect: deny }
+  - { action: shell, resource: "*grep *.tasks*", effect: deny }
+  - { action: shell, resource: "*ls *.tasks*", effect: deny }
+  - { action: shell, resource: "*wc *.tasks*", effect: deny }
+  - { action: shell, resource: "*find *.tasks*", effect: deny }
+  - { action: shell, resource: "*sed *.tasks*", effect: deny }
+  - { action: shell, resource: "*awk *.tasks*", effect: deny }
+  - { action: shell, resource: "*head *.tasks*", effect: deny }
+  - { action: shell, resource: "*tail *.tasks*", effect: deny }

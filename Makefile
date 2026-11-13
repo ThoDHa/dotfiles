@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -395,7 +395,7 @@ check: test
 # runner script and make stops at the first nonzero exit, so no aggregate
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
-verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -502,6 +502,27 @@ test-tasks:
 test-tasks-hazard:
 	@echo "Testing tasks CLI parser hazard pins..."
 	@bash tests/tasks/test-tasks-hazard.sh
+
+# Task-access drift check (ORCH-4-9-1, Tier A): green on the empty
+# migrated-surfaces list at landing, red on every planted failure fixture;
+# ORCH-4-9-2 and ORCH-4-9-3 extend the list per migration stage.
+test-task-access-drift:
+	@echo "Testing task-access drift check..."
+	@bash tests/task-access/test-drift.sh
+
+# Command-sufficiency replay (ORCH-4-9-1, Tier A): each role's authorized
+# command set replayed against a seeded TASKS_DIR fixture board under PATH
+# shims refusing direct .tasks arguments.
+test-task-access-replay:
+	@echo "Testing task-access command-sufficiency replay..."
+	@bash tests/task-access/test-replay.sh
+
+# Tier-B fixture harness skeleton (ORCH-4-9-1): per-role dispatch configs
+# validated by an ordered-rule evaluator plus the transcript audit; the
+# representative executions themselves are ORCH-4-9-4's.
+test-task-access-tierb:
+	@echo "Testing task-access Tier-B fixture skeleton..."
+	@bash tests/task-access/test-tier-b.sh
 
 # Test the oc-continue runner (budgets, retention, follow, flag contract)
 test-oc-continue:
