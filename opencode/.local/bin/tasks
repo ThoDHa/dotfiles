@@ -39,8 +39,60 @@ readonly SORT_SEP=$'\034'
 # the sidecar once that write commits. A terminal task owns nothing, so
 # a surviving sidecar is stale by definition. close (both branches), set,
 # release, and archive route through these pieces, so a sidecar
-# semantics change lands in one place.
+# semantics change lands in one place. release and the closure arms
+# verify the claim's ownership ahead of them (the documented G15
+# narrowing, refuse_foreign_claim); archive drops only a terminal task's
+# stale sidecar, which is drift by definition.
 readonly CLAIM_RELEASE_WRITE="Owner${SORT_SEP}**Owner:**"
+
+# Claim sidecar format, version 2: line 1 is the owner (unchanged, so
+# owner-only readers keep working), line 2 is "generation <hex16>", line 3
+# is "created YYYY-MM-DD HH:MM". A sidecar carrying a generation line is
+# v2; one with only the owner line is legacy and migrates in place on the
+# first write-path touch (created backdated from the file mtime, owner
+# byte-identical). The generation is the ABA guard: a holder acts on
+# owner plus generation together, so a stale holder whose claim was
+# reissued (manager reclaim after expiry) cannot release or otherwise
+# drop the successor's claim. A v2 sidecar missing only its created line
+# reads as fresh: the generation must never be reassigned and staleness
+# cannot be proven without the stamp.
+readonly CLAIM_GENERATION_LINE_PREFIX="generation "
+readonly CLAIM_CREATED_LINE_PREFIX="created "
+readonly CLAIM_GENERATION_CHARS=16
+
+# Minutes after a claim's created stamp beyond which expiry-on-read
+# treats the claim as stale. `tasks log` and `tasks report` checkpoints
+# by the owning session refresh the stamp, so the timer measures silence
+# since the last checkpoint. The default covers the fleet's real
+# lifecycle: usage-limit parks run hours long and claims span days, so
+# a TTL that a healthy park outlives turns every park into routine
+# expired-noise and trains the manager to ignore the sweep; the default
+# is set past those parks (TASKS_CLAIM_TTL_MINUTES overrides for longer
+# holds). The override is validated wherever it is read.
+readonly CLAIM_TTL_MINUTES_DEFAULT=1440
+readonly CLAIM_TTL_MINUTES_VAR="TASKS_CLAIM_TTL_MINUTES"
+
+# The typed append-only event ledger at the board root: one JSON object per
+# line, appended under the board lock at the sanctioned lifecycle points
+# only - recovery (claim.acquired/released/expired/recovered/migrated),
+# audit (attempt.started/completed with the worker, branch, base SHA,
+# checkpoint, and report-link provenance; attempt_id and outcome are
+# optional pairing fields, and released_by names the releasing session),
+# and the telemetry reservation cost.sample, which this CLI never emits
+# but every read validates. Not a
+# chatter channel: there is no generic emit verb, so the ledger grows only
+# where the lifecycle writes it. Reads validate every record against the
+# enumerated schema and fail with EVENT_CORRUPT on an invalid one; a
+# trailing line without its newline is a crash-torn append and is dropped
+# with a note instead of failing the read.
+readonly EVENT_LOG_NAME="events.log"
+
+# How far back the ledger-tail scans look: the expired-episode dedup and
+# the attempt pairing only need recent history, so the scans read a
+# bounded window instead of the whole file. Past the window a check
+# degrades to an honest duplicate record or an unpaired completion,
+# never to wrong state.
+readonly EVENT_LEDGER_SCAN_WINDOW=200
 
 # Section headers for the six dashboard lanes, indexed by the lane ordinal
 # the row assembler emits (lane 7 is the latest-updated tag and has none).
@@ -307,6 +359,124 @@ readonly AWK_JSON_ESCAPE='		function json_escape(s,  out, i, n, c, code, hexd) {
 		}
 '
 
+# Shared awk function source: the typed event ledger's single reader, so
+# validation and display can never drift on what a valid event record is.
+# ev_parse splits one flat JSON object line into EV[key] (raw value, quotes
+# kept on strings) and EVT[key] (value kind); it accepts exactly the shape
+# the CLI's own emitters produce - flat key/value pairs of strings, plain
+# integers, booleans, and null, no nesting - and rejects anything else.
+# ev_type_class derives an event type's class from its enumerated prefix
+# (claim.* recovery, attempt.* audit, cost.sample cost), which is the
+# enumeration itself: a type outside the vocabulary maps to no class and
+# fails validation. ev_valid checks one raw line and returns "" when it
+# conforms, else the reason. Optional fields carry a shape check when
+# present (attempt_id/outcome/released_by are non-empty strings on the
+# attempt types, released_by on claim.released) and are tolerated absent,
+# so pre-field ledgers read unchanged; the outcome vocabulary (released/
+# completed/cancelled so far) is left to its first real consumer to lock.
+# ev_unq strips quotes and unescapes the common
+# escapes for the human row (display only). Requires AWK_JSON_ESCAPE-
+# compatible plain awk only (no interval expressions, no gawk-isms).
+readonly AWK_EVENT_VALIDATE='		function ev_parse(line,    inner, n, i, c, inq, esc, seg, col, i2, c2, k, v) {
+			for (k in EV) delete EV[k]
+			for (k in EVT) delete EVT[k]
+			sub(/^[ \t\r]+/, "", line); sub(/[ \t\r]+$/, "", line)
+			if (substr(line, 1, 1) != "{" || substr(line, length(line), 1) != "}") return 0
+			inner = substr(line, 2, length(line) - 2)
+			n = length(inner); seg = ""; inq = 0; esc = 0
+			for (i = 1; i <= n; i++) {
+				c = substr(inner, i, 1)
+				if (esc) { seg = seg c; esc = 0; continue }
+				if (inq && c == "\\") { seg = seg c; esc = 1; continue }
+				if (c == "\"") { inq = !inq; seg = seg c; continue }
+				if (!inq && c == ",") { if (!ev_field(seg)) return 0; seg = ""; continue }
+				seg = seg c
+			}
+			if (seg != "") return ev_field(seg)
+			return 0
+		}
+		function ev_field(seg,    col, i2, c2, inq, esc, k, v) {
+			if (seg == "") return 0
+			inq = 0; esc = 0; col = 0
+			for (i2 = 1; i2 <= length(seg); i2++) {
+				c2 = substr(seg, i2, 1)
+				if (esc) { esc = 0; continue }
+				if (inq && c2 == "\\") { esc = 1; continue }
+				if (c2 == "\"") { inq = !inq; continue }
+				if (!inq && c2 == ":") { col = i2; break }
+			}
+			if (col == 0) return 0
+			k = substr(seg, 1, col - 1); v = substr(seg, col + 1)
+			sub(/^[ \t]+/, "", v)
+			if (k !~ /^"(\\.|[^"\\])*"$/) return 0
+			if (v ~ /^"(\\.|[^"\\])*"$/) EVT[k] = "string"
+			else if (v ~ /^[0-9]+$/) EVT[k] = "number"
+			else if (v == "true" || v == "false") EVT[k] = "bool"
+			else if (v == "null") EVT[k] = "null"
+			else return 0
+			EV[k] = v
+			return 1
+		}
+		function ev_type_class(typ) {
+			if (typ == "claim.acquired" || typ == "claim.released" || typ == "claim.expired" || typ == "claim.recovered" || typ == "claim.migrated") return "recovery"
+			if (typ == "attempt.started" || typ == "attempt.completed") return "audit"
+			if (typ == "cost.sample") return "cost"
+			return ""
+		}
+		function ev_required_strings(typ,    req) {
+			if (typ == "claim.expired") return "generation owner created"
+			if (typ == "claim.recovered") return "generation prior_owner prior_generation"
+			if (typ == "claim.migrated") return "generation prior_format"
+			if (typ == "claim.acquired" || typ == "claim.released") return "generation"
+			if (typ == "attempt.started" || typ == "attempt.completed") return "worker branch base_sha checkpoint report"
+			if (typ == "cost.sample") return "model"
+			return ""
+		}
+		function ev_valid(line,    cls, typ, req, arr, i, f) {
+			if (!ev_parse(line)) return "not a flat JSON object of scalar fields"
+			if (!("\"schema_version\"" in EV) || EVT["\"schema_version\""] != "number" || EV["\"schema_version\""] != "1") return "unsupported schema_version"
+			if (!("\"class\"" in EV) || EVT["\"class\""] != "string") return "class must be a string"
+			if (!("\"type\"" in EV) || EVT["\"type\""] != "string") return "type must be a string"
+			cls = ev_unq(EV["\"class\""]); typ = ev_unq(EV["\"type\""])
+			if (cls != "recovery" && cls != "audit" && cls != "cost") return "unknown class: " cls
+			if (ev_type_class(typ) != cls) return "type " typ " does not belong to class " cls
+			if (!("\"ts\"" in EV) || EVT["\"ts\""] != "string" || EV["\"ts\""] !~ /^"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]"$/) return "ts must be the canonical stamp"
+			if (!("\"session\"" in EV) || EVT["\"session\""] != "string" || length(EV["\"session\""]) <= 2) return "session must be a non-empty string"
+			if (!("\"task\"" in EV) || EVT["\"task\""] != "string") return "task must be a string"
+			if (typ != "cost.sample" && length(EV["\"task\""]) <= 2) return "task must be non-empty for " typ
+			split(ev_required_strings(typ), arr, " ")
+			for (i = 1; arr[i] != ""; i++) {
+				f = arr[i]
+				if (!("\"" f "\"" in EV) || EVT["\"" f "\""] != "string") return f " must be a string on " typ
+			}
+			if (typ == "attempt.started" || typ == "attempt.completed") {
+				if (("\"attempt_id\"" in EV) && length(EV["\"attempt_id\""]) <= 2) return "attempt_id must be non-empty on " typ
+				if (("\"outcome\"" in EV) && length(EV["\"outcome\""]) <= 2) return "outcome must be non-empty on " typ
+				if (("\"released_by\"" in EV) && length(EV["\"released_by\""]) <= 2) return "released_by must be non-empty on " typ
+			}
+			if (typ == "claim.released" && ("\"released_by\"" in EV) && length(EV["\"released_by\""]) <= 2) return "released_by must be non-empty on " typ
+			if (typ != "claim.released" && ("\"generation\"" in EV) && length(EV["\"generation\""]) <= 2) return "generation must be non-empty on " typ
+			if (!("\"generation\"" in EV) && (typ ~ /^claim\./)) return "generation is required on " typ
+			if (typ == "cost.sample") {
+				if (!("\"tokens_in\"" in EV) || EV["\"tokens_in\""] !~ /^[0-9]+$/) return "tokens_in must be a nonnegative integer"
+				if (!("\"tokens_out\"" in EV) || EV["\"tokens_out\""] !~ /^[0-9]+$/) return "tokens_out must be a nonnegative integer"
+				if (!("\"duration_ms\"" in EV) || EV["\"duration_ms\""] !~ /^[0-9]+$/) return "duration_ms must be a nonnegative integer"
+			}
+			return ""
+		}
+		function ev_unq(v) {
+			sub(/^"/, "", v); sub(/"$/, "", v)
+			gsub(/\\\\/, EVS, v)
+			gsub(/\\n/, " ", v)
+			gsub(/\\r/, " ", v)
+			gsub(/\\t/, " ", v)
+			gsub(/\\"/, "\"", v)
+			gsub(EVS, "\\\\", v)
+			return v
+		}
+		BEGIN { EVS = sprintf("%c", 30) }
+'
+
 # Shared awk function source: the task-file header reader every row-level
 # emitter runs, so the header-field regexes exist exactly once and the
 # dashboard assembler and the versioned JSON readers can never drift on
@@ -384,6 +554,7 @@ readonly CODE_NO_BOARD="NO_BOARD"
 readonly CODE_TASK_NOT_FOUND="TASK_NOT_FOUND"
 readonly CODE_BOARD_ROOT_ESCAPE="BOARD_ROOT_ESCAPE"
 readonly CODE_SECTION_NOT_FOUND="SECTION_NOT_FOUND"
+readonly CODE_EVENT_CORRUPT="EVENT_CORRUPT"
 readonly CODE_USAGE="USAGE"
 diec() { local code="$1"; shift; err "$* (code: $code)"; exit 1; }
 
@@ -486,6 +657,210 @@ valid_slug() { [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
 # --owner or TASKS_SESSION; the pid fallback keeps distinct shells distinct.
 session_id() { printf '%s' "${TASKS_SESSION:-$(hostname -s 2>/dev/null || hostname)-$$}"; }
 
+# Fresh hex token, CLAIM_GENERATION_CHARS long, from the OS CSPRNG. A
+# short draw would silently weaken whatever the token guards, so a draw
+# failure is fatal rather than degraded; callers pass their own die
+# message so the failure names the surface that drew.
+new_hex_token() { # error-message
+	local hex
+	hex="$(od -An -N$((CLAIM_GENERATION_CHARS / 2)) -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" || true
+	[[ "$hex" =~ ^[0-9a-f]{16}$ ]] || die "$1"
+	printf '%s\n' "$hex"
+}
+
+# Fresh ABA generation token for a claim sidecar.
+new_claim_generation() { new_hex_token "claim: cannot draw a generation token from /dev/urandom"; }
+
+# Fresh attempt id: the pairing token an attempt.started record carries
+# so its attempt.completed record can reference the same attempt without
+# correlating by timestamp ordering alone.
+new_attempt_id() { new_hex_token "attempt: cannot draw an attempt id from /dev/urandom"; }
+
+# Read a claim sidecar into CS_OWNER, CS_GENERATION, CS_CREATED, and
+# CS_LEGACY. Owner is line 1; the generation and created lines are
+# recognized by prefix on any later line. CS_LEGACY=1 marks the owner-only
+# pre-ABA format (no generation line).
+claim_sidecar_read() { # claim-file
+	CS_OWNER=""; CS_GENERATION=""; CS_CREATED=""; CS_LEGACY=0
+	local line
+	while IFS= read -r line; do
+		if [[ -z "$CS_OWNER" ]]; then CS_OWNER="$line"; continue; fi
+		case "$line" in
+			"$CLAIM_GENERATION_LINE_PREFIX"*) CS_GENERATION="${line#"$CLAIM_GENERATION_LINE_PREFIX"}" ;;
+			"$CLAIM_CREATED_LINE_PREFIX"*) CS_CREATED="${line#"$CLAIM_CREATED_LINE_PREFIX"}" ;;
+		esac
+	done <"$1"
+	[[ -z "$CS_GENERATION" ]] && CS_LEGACY=1
+	return 0
+}
+
+# The active claim TTL in minutes: the env override when it is a positive
+# integer, else the default. A malformed override is refused rather than
+# silently ignored, so a typo can never quietly disable expiry.
+claim_ttl_minutes() {
+	local v="${!CLAIM_TTL_MINUTES_VAR:-}"
+	if [[ -n "$v" ]]; then
+		[[ "$v" =~ ^[1-9][0-9]*$ ]] || die "$CLAIM_TTL_MINUTES_VAR must be a positive integer of minutes, got: $v"
+		printf '%s\n' "$v"
+	else
+		printf '%s\n' "$CLAIM_TTL_MINUTES_DEFAULT"
+	fi
+}
+
+# Expiry-on-read: minute-resolution comparison of a claim's created stamp
+# against the CLI clock (now), true when created + TTL < now. An
+# unparseable stamp never reads as expired (staleness must be provable).
+claim_created_is_expired() { # created [now-ts]
+	local created="$1" nowts="${2:-$(now)}" ttl c e
+	ttl="$(claim_ttl_minutes)"
+	c="$(date -d "$created" +%s 2>/dev/null)" || return 1
+	e="$(date -d "$nowts" +%s 2>/dev/null)" || return 1
+	((c + ttl * 60 < e))
+}
+
+# The created stamp a migration assigns a legacy sidecar: the file's
+# mtime, the only creation evidence an owner-only sidecar carries.
+claim_mtime_stamp() { # claim-file
+	date -d "@$(stat -c %Y "$1")" '+%Y-%m-%d %H:%M'
+}
+
+# Atomically rewrite a claim sidecar (mktemp + mv in the sidecar's
+# directory) under the caller's held board lock.
+claim_sidecar_write() { # claim-file owner generation created
+	local claim="$1" tmp
+	tmp="$(mktemp "$claim.XXXXXX")" || die "claim: cannot stage the sidecar rewrite for $1"
+	{
+		printf '%s\n' "$2"
+		printf '%s%s\n' "$CLAIM_GENERATION_LINE_PREFIX" "$3"
+		printf '%s%s\n' "$CLAIM_CREATED_LINE_PREFIX" "$4"
+	} >"$tmp"
+	mv -f "$tmp" "$claim" || { rm -f "$tmp"; die "claim: cannot rewrite $claim"; }
+}
+
+# True when the ledger tail already carries an open claim.expired
+# episode for this generation: the expiry was recorded and no recovery
+# has closed it, so repeated takeover probes append one recovery record
+# instead of one per probe. claim.recovered naming this generation as
+# its prior closes the episode - the claim was reclaimed, and it can
+# only expire again under a NEW generation, which records fresh.
+# Bounded to the tail: a dedup window past 200 records degrades to an
+# honest duplicate record, never to lost recovery state. The generation
+# needle keeps its leading quote so a recovered record's prior_generation
+# cannot match the expired arm's needle. Runs under the board lock.
+ledger_has_open_expired() { # tasks_dir generation
+	local ledger="$1/$EVENT_LOG_NAME"
+	[[ -f "$ledger" ]] || return 1
+	tail -n "$EVENT_LEDGER_SCAN_WINDOW" "$ledger" | AWK_EXP_GEN="$2" awk '
+		{
+			if (index($0, "\"type\":\"claim.expired\"") && index($0, "\"generation\":\"" ENVIRON["AWK_EXP_GEN"] "\"")) open = 1
+			if (index($0, "\"type\":\"claim.recovered\"") && index($0, "\"prior_generation\":\"" ENVIRON["AWK_EXP_GEN"] "\"")) open = 0
+		}
+		END { exit open ? 0 : 1 }
+	'
+}
+
+# Migrate a legacy owner-only sidecar to v2 in place: the recorded owner
+# survives byte-exact, created comes from the file mtime, the generation
+# is fresh. Echoes 1 when it migrated, 0 when the sidecar is already v2.
+# Runs only under the board lock on write paths; read-only surfaces
+# report legacy state instead of touching it. The migration rides the
+# ledger as a recovery event.
+claim_sidecar_migrate() { # claim-file tasks_dir task-rel
+	local claim="$1"
+	claim_sidecar_read "$claim"
+	((CS_LEGACY == 0)) && { printf '0\n'; return 0; }
+	local gen created
+	gen="$(new_claim_generation)"
+	created="$(claim_mtime_stamp "$claim")"
+	claim_sidecar_write "$claim" "$CS_OWNER" "$gen" "$created"
+	events_emit "$2" recovery "claim.migrated" "$3" \
+		"generation" "$gen" "prior_format" "owner-only"
+	printf '1\n'
+}
+
+# Refresh the owning session's claim timer: `tasks log` and `tasks
+# report` checkpoints by the owning session are the heartbeat, so
+# expiry-on-read measures silence since the last checkpoint, not raw
+# wall-clock since claim time. Only the recorded owner may refresh;
+# another session's checkpoint must never extend a foreign claim, and it
+# says so on stderr: a reclaimed-then-resumed worker discovers the
+# takeover at its next checkpoint instead of failing on a later write.
+# No-op when no sidecar exists. Runs under the board lock.
+claim_refresh() { # task-file tasks_dir
+	local claim="$1$CLAIM_SUFFIX"
+	[[ -e "$claim" ]] || return 0
+	claim_sidecar_migrate "$claim" "$2" "${1#"$2/"}" >/dev/null
+	claim_sidecar_read "$claim"
+	if [[ "$CS_OWNER" != "$(session_id)" ]]; then
+		printf 'warning: the claim on %s is owned by %s, not by %s; the heartbeat was not refreshed (recovery moved the claim; coordinate with the manager)\n' \
+			"$(basename "$1")" "${CS_OWNER:-unknown}" "$(session_id)" >&2
+		return 0
+	fi
+	claim_sidecar_write "$claim" "$CS_OWNER" "$CS_GENERATION" "$(now)"
+}
+
+# Append one event record to the board's typed ledger. The caller holds
+# the board lock; the single small append is the crash-safety story (a
+# torn tail is dropped on read). Extra fields arrive as raw NAME VALUE
+# pairs; the whole record is built by one awk running the shared JSON
+# escaper, so value escaping exists exactly once and an event costs one
+# spawn regardless of its field count. Field names are CLI-controlled
+# constants, never caller data, so they pass unescaped.
+events_emit() { # tasks_dir class type task_rel [name value]...
+	local tasks_dir="$1" class="$2" type="$3" task_rel="$4"
+	shift 4
+	local -a efields=()
+	while (($#)); do
+		(($# >= 2)) || die "events: internal: odd field pair"
+		efields+=("$1" "$2")
+		shift 2
+	done
+	local i
+	export E_TS="$(now)" E_SESSION="$(session_id)" E_CLASS="$class" E_TYPE="$type" E_TASK="$task_rel"
+	export E_N=$(( ${#efields[@]} / 2 ))
+	for ((i = 0; i < ${#efields[@]}; i += 2)); do
+		export "E_K_$((i / 2 + 1))=${efields[$i]}" "E_V_$((i / 2 + 1))=${efields[$((i + 1))]}"
+	done
+	AWK_SCHEMA_VERSION="$SCHEMA_VERSION" awk "$AWK_JSON_ESCAPE"'BEGIN {
+			line = "{\"schema_version\":" ENVIRON["AWK_SCHEMA_VERSION"] ",\"ts\":" jq(ENVIRON["E_TS"])
+			line = line ",\"class\":" jq(ENVIRON["E_CLASS"]) ",\"type\":" jq(ENVIRON["E_TYPE"])
+			line = line ",\"session\":" jq(ENVIRON["E_SESSION"]) ",\"task\":" jq(ENVIRON["E_TASK"])
+			n = ENVIRON["E_N"] + 0
+			for (i = 1; i <= n; i++) line = line ",\"" ENVIRON["E_K_" i] "\":" jq(ENVIRON["E_V_" i])
+			print line "}"
+		}' >>"$tasks_dir/$EVENT_LOG_NAME" \
+		|| die "events: cannot append to $tasks_dir/$EVENT_LOG_NAME"
+}
+
+# Attempt provenance captured at emission: the worker is the attempt's
+# owner; branch and base SHA describe the invoking process's repository
+# context, best-effort (empty when git is unavailable or the cwd is not
+# a work tree).
+attempt_provenance() { # worker
+	AP_WORKER="$1"
+	AP_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+	AP_BASE_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+}
+
+# The attempt.completed provenance a claim release records: the last
+# Work Log checkpoint anchor (the same heartbeat the claim expiry
+# measures) and the last report link deposited for the task, both from
+# one pass over the file.
+attempt_completed_fields() { # file
+	local both
+	both="$(awk '
+		/^## Work Log/ { inwork = 1; next }
+		inwork && /^## / { exit }
+		inwork {
+			if ($0 ~ /^### [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:/) ts = substr($0, 5, 16)
+			if (match($0, /\]\([^)]*reports\/[^)]*\)/)) rep = substr($0, RSTART + 2, RLENGTH - 3)
+		}
+		END { print ts "\t" rep }
+	' "$1")"
+	AC_CHECKPOINT="${both%%$'\t'*}"
+	AC_REPORT="${both#*$'\t'}"
+}
+
 usage() {
 	cat <<'EOF'
 Usage: tasks <command> [options]
@@ -508,10 +883,15 @@ Commands:
                                        header contract
   report [--dir DIR] <taskfile> --slug SLUG [--from WORKER] --digest TEXT [<file>|-]
                                        Deposit a report file under reports/ and
-                                       link it from the Work Log (locked).
+                                       link it from the Work Log (locked). A deposit
+                                       by the claim's owning session refreshes the
+                                       claim's created stamp (the expiry heartbeat),
+                                       like a log checkpoint.
   log [--dir DIR] <taskfile> [--from WORKER] MSG
                                        Append a Work Log entry attributed to
-                                       WORKER (default Manager), render.
+                                       WORKER (default Manager), render. A checkpoint
+                                       by the claim's owning session refreshes the
+                                       claim's created stamp (the expiry heartbeat).
   edit [--dir DIR] <taskfile> --section HEADING [--append] [<file>|-]
                                        Replace or append a section body from
                                        <file> or stdin, refresh Updated, render
@@ -567,17 +947,48 @@ Commands:
                                        repair arm). The human view lists the runnable and
                                        open rows; --json emits the schema_version 1 payload
                                        (tasks plus the from->to dep edges).
-  claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar), render.
-  release <taskfile>                   Release a claim and clear Owner, render. A claim
-                                       owned by another session warns with both
-                                       identities and proceeds (recovery unlock).
+  claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar carrying a
+                                       generation token), render. A live foreign claim
+                                       refuses; an expired one routes recovery to the
+                                       manager surface (claims/reclaim).
+  release <taskfile> --generation T    Release the caller's own claim and clear Owner, render.
+                                       T is required on a generation-token claim (the ABA
+                                       guard: identity strings replay, so a tokenless
+                                       release is refused even for the recorded owner; a
+                                       lost token routes through manager reclaim); a
+                                       foreign release is refused - recovery is
+                                       manager-owned (claims, reclaim).
+  claims [--dir DIR] [--json]          Read-only claim sweep for recovery: every sidecar with
+                                       owner, generation, created stamp, and state (fresh,
+                                       expired, legacy, orphan, terminal) plus a summary;
+                                       the manager's staleness report.
+  events [--dir DIR] [--json] [--class recovery|audit|cost]
+                                       [--type T] [--task REL] [--limit N]
+                                       Read-only typed event ledger: the append-only
+                                       record of the claim lifecycle (claim.acquired,
+                                       released, expired, recovered, migrated) and of
+                                       attempt provenance (attempt.started, completed;
+                                       worker, branch, base SHA, checkpoint, report
+                                       link; attempt_id and outcome are optional
+                                       pairing fields, released_by names the
+                                       releasing session). cost.sample is the telemetry reservation,
+                                       validated on read. Invalid records fail the read
+                                       with EVENT_CORRUPT.
+  reclaim [--dir DIR] <taskfile> [--owner ID]
+                                       Explicit manager-owned recovery: reissue a claim's
+                                       generation and set the new owner under the board
+                                       lock. Idempotent (no claim is a no-op); uncertain
+                                       liveness is the manager's decision, the CLI never
+                                       breaks a claim on its own.
   archive [--dir DIR] <taskfile>       Move a terminal (Completed or Cancelled) task
                                        from current/ into archive/, dropping any
                                        claim sidecar; render.
   close [--dir DIR] <taskfile>         Stamp and transition to Completed: Status, Completed
                                        (CLI clock), elapsed Duration (first-to-last Work
                                        Log anchors), Updated; drops Status Reason and
-                                       any claim; render. The closure gate refuses when
+                                       any claim (a claim owned by another session
+                                       refuses the closure; recovery is manager-owned);
+                                       render. The closure gate refuses when
                                        Success Criteria carry unticked boxes (a
                                        '- ~ [ ] ' line is a superseded annotation:
                                        resolved for the gate, listed in the close Work
@@ -1468,15 +1879,17 @@ EOF
 }
 
 cmd_set() {
-	local dir="" args=()
+	local dir="" generation="" args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "set: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
+			--generation) [[ $# -ge 2 && "$2" != --* ]] || die "set: --generation requires a value"; generation="$2"; shift 2 ;;
+			--generation=*) generation="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} >= 1)) || die "set: usage: tasks set <taskfile> Key=Value..."
+	((${#args[@]} >= 1)) || die "set: usage: tasks set <taskfile> Key=Value... [--generation TOKEN]"
 
 	# Validate every pair before touching the file, so a bad key or a bad
 	# Status cannot leave a half-applied update behind. The Status/Status
@@ -1562,21 +1975,27 @@ cmd_set() {
 	# validation-only command spawns nothing here. The read's || guard
 	# processes a file whose header lacks the trailing newline, exactly
 	# where awk's header_of stops.
-	local target_status="$new_status" current_reason=""
+	local target_status="$new_status" current_status="" current_reason=""
 	local hline
 	local re_status='^\*\*Status:\*\*[[:space:]]+(.*)$'
 	local re_reason='^\*\*'"$STATUS_REASON_KEY"':\*\*[[:space:]]+(.*)$'
 	local have_status=0 have_reason=0
 	# An explicit Status pair already fixed the transition target; only an
-	# absent one is read from the file.
+	# absent one is read from the file. The file's status is captured
+	# either way: the release arm's ownership check needs to know whether
+	# the transition lands from a live status or the file is already
+	# terminal.
 	[[ -n "$new_status" ]] && have_status=1
 	while IFS= read -r hline || [[ -n "$hline" ]]; do
 		[[ "$hline" == "## "* ]] && break
 		# First match wins per key even when the value is empty, so the
 		# flags - not the variables - gate the capture.
-		if ((have_status == 0)) && [[ "$hline" =~ $re_status ]]; then
-			target_status="${BASH_REMATCH[1]}"
-			have_status=1
+		if [[ "$hline" =~ $re_status ]]; then
+			current_status="${BASH_REMATCH[1]}"
+			if ((have_status == 0)); then
+				target_status="$current_status"
+				have_status=1
+			fi
 		elif ((have_reason == 0)) && [[ "$hline" =~ $re_reason ]]; then
 			current_reason="${BASH_REMATCH[1]}"
 			have_reason=1
@@ -1645,9 +2064,21 @@ cmd_set() {
 	if ((release_claim == 1)); then
 		writes+=("$CLAIM_RELEASE_WRITE")
 	fi
+	# Release verification rides a live claim's release only: a claim
+	# dropped by a transition INTO a terminal status is the foreign-close
+	# hole the G15 narrowing closes, while a sidecar on an already-
+	# terminal file is stale drift by definition and its release stays
+	# unconditional (the sweep and lint report it; dropping it is
+	# hygiene, not claim-taking). The verification is the release verb's
+	# full sequence: ownership plus the claim's generation token.
+	if ((release_claim == 1)) && ! is_terminal_status "$current_status"; then
+		verify_release_claim "$file" "$tasks_dir" "set" "$generation"
+	fi
 	write_header_fields "$file" ${writes[@]+"${writes[@]}"}
 	if ((release_claim == 1)); then
-		release_claim "$file"
+		# The outcome names the status the transition landed: the only
+		# terminal statuses are Completed and Cancelled.
+		release_claim "$file" "$tasks_dir" "$file" "${target_status,,}"
 	fi
 	render_unlocked "$tasks_dir"
 }
@@ -1672,50 +2103,87 @@ cmd_claim() {
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	local claim="$file$CLAIM_SUFFIX"
 
+	# Migration and expiry-on-read precede the create attempt: a legacy
+	# owner-only sidecar upgrades in place (owner survives, generation
+	# assigned, created from the mtime) before its freshness is judged, so
+	# the first write-path touch migrates a live board without dropping a
+	# single claim. An expired claim refuses takeover and routes recovery
+	# to the manager surface; the CLI never breaks a claim on its own.
+	if [[ -e "$claim" ]]; then
+		claim_sidecar_migrate "$claim" "$tasks_dir" "${file#"$tasks_dir/"}" >/dev/null
+		claim_sidecar_read "$claim"
+		if claim_created_is_expired "$CS_CREATED"; then
+			if ! ledger_has_open_expired "$tasks_dir" "$CS_GENERATION"; then
+				events_emit "$tasks_dir" recovery "claim.expired" "${file#"$tasks_dir/"}" \
+					"generation" "$CS_GENERATION" "owner" "$CS_OWNER" "created" "$CS_CREATED"
+			fi
+			die "claim: $(basename "$file") is claimed by '$CS_OWNER' with an expired claim (created ${CS_CREATED:-unknown}, TTL $(claim_ttl_minutes)min); recovery is manager-owned: 'tasks claims' reports stale claims, 'tasks reclaim' recovers one"
+		fi
+		die "already claimed by ${CS_OWNER:-unknown} (generation ${CS_GENERATION:-none}, created ${CS_CREATED:-unknown})"
+	fi
+
+	local gen; gen="$(new_claim_generation)"
 	# O_EXCL create: exactly one racer wins. noclobber makes '>' fail if it exists.
-	if (set -o noclobber; printf '%s\n' "$owner" >"$claim") 2>/dev/null; then
+	if (set -o noclobber; printf '%s\n%s%s\n%s%s\n' "$owner" \
+		"$CLAIM_GENERATION_LINE_PREFIX" "$gen" \
+		"$CLAIM_CREATED_LINE_PREFIX" "$(now)" >"$claim") 2>/dev/null; then
 		write_header_fields "$file" \
 			"Owner"$'\034'"**Owner:** $owner" \
 			"Updated"$'\034'"**Updated:** $(now)"
+		events_emit "$tasks_dir" recovery "claim.acquired" "${file#"$tasks_dir/"}" \
+			"generation" "$gen"
+		attempt_provenance "$owner"
+	local attempt_id; attempt_id="$(new_attempt_id)"
+		events_emit "$tasks_dir" audit "attempt.started" "${file#"$tasks_dir/"}" \
+			"worker" "$AP_WORKER" "branch" "$AP_BRANCH" "base_sha" "$AP_BASE_SHA" \
+			"checkpoint" "" "report" "" "attempt_id" "$attempt_id"
 		render_unlocked "$tasks_dir"
-		printf 'claimed %s by %s\n' "$(basename "$file")" "$owner"
-	elif [[ -e "$claim" ]]; then
-		die "already claimed by $(cat "$claim" 2>/dev/null || printf 'unknown')"
+		printf 'claimed %s by %s (generation %s)\n' "$(basename "$file")" "$owner" "$gen"
 	else
 		die "claim: cannot create $claim (check permissions)"
 	fi
 }
 
 cmd_release() {
-	local dir="" target=""
+	local dir="" target="" generation=""
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "release: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
+			--generation) [[ $# -ge 2 && "$2" != --* ]] || die "release: --generation requires a value"; generation="$2"; shift 2 ;;
+			--generation=*) generation="${1#*=}"; shift ;;
 			*) target="$1"; shift ;;
 		esac
 	done
-	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile>"
+	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile> [--generation TOKEN]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
-	# Release is the cooperative unlock behind stale-claim recovery, so a
-	# foreign owner is announced, never refused: the warning names both
-	# identities and the release proceeds (the recovery policy depends on
-	# any board-writer session being able to release a claim left behind
-	# by a dead session). The sidecar read is best-effort: an unreadable
-	# or empty sidecar releases without an identity to compare.
-	local claim="$file$CLAIM_SUFFIX" sidecar_owner="" self_id
-	self_id="$(session_id)"
-	if [[ -e "$claim" ]]; then
-		sidecar_owner="$(head -n 1 "$claim" 2>/dev/null || true)"
-		if [[ -n "$sidecar_owner" && "$sidecar_owner" != "$self_id" ]]; then
-			err "warning: releasing a claim owned by '$sidecar_owner' from session '$self_id' (recovery unlock proceeds)"
-		fi
-	fi
-	release_claim "$file"
+	# BEHAVIOR CHANGE (G15, documented): the foreign-release recovery unlock
+	# is narrowed under generation-token claims on all three release arms.
+	# Release verifies ownership plus generation: a mismatching generation
+	# is refused even when the session identity matches (identity strings
+	# replay via hostname-pid reuse or a duplicated TASKS_SESSION), and the
+	# token itself is required - a tokenless release is refused even under
+	# the recorded owner's identity, because the replayed identity IS the
+	# bypass the guard exists to close; a lost token routes through manager
+	# reclaim. close and a set landing on a terminal status run the same
+	# sequence through the shared check (verify_release_claim), so neither
+	# a foreign closure nor a same-owner tokenless or stale-token one can
+	# drop a live claim. A foreign release is
+	# refused on every arm because the broad unlock was exactly the stale-
+	# release hole the ABA guard exists to close; recovery is the explicit
+	# manager surface: 'tasks claims' reports stale claims, 'tasks reclaim'
+	# takes one over. Rollout window: until the fleet converges on this
+	# version, a pre-upgrade binary still carries the old broad unlock and
+	# can drop a v2 claim with no generation check - the ABA guard is only
+	# as strong as the oldest tasks binary in the fleet (worktree-stowed
+	# sessions make that window real), so treat the window as closed on
+	# fleet-wide convergence, not on a timer.
+	verify_release_claim "$file" "$tasks_dir" "release" "$generation"
+	release_claim "$file" "$tasks_dir" "$file" "released"
 	write_header_fields "$file" \
 		"$CLAIM_RELEASE_WRITE" \
 		"Updated"$'\034'"**Updated:** $(now)"
@@ -1723,11 +2191,223 @@ cmd_release() {
 	printf 'released %s\n' "$(basename "$file")"
 }
 
+# Read-only claim sweep, the manager's staleness report: every claim
+# sidecar with owner, generation, created stamp, and state. State
+# precedence: orphan (no task file), terminal (sidecar on a terminal or
+# archived task), expired (expiry-on-read), legacy (pre-ABA format,
+# migrates on the next write-path touch), fresh. Read-only by the
+# doctor's contract: no lock, no render, no sidecar rewrite, exit 0
+# always (lint stays the enforcement arm).
+cmd_claims() {
+	local dir="" json=0
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "claims: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			*) diec "$CODE_USAGE" "claims: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+
+	local -a claims=()
+	local subdir file
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md.claim; do
+			[[ -e "$file" ]] || continue
+			claims+=("${file#"$tasks_dir/"}")
+		done
+	done
+	for file in "$tasks_dir"/*.md.claim; do
+		[[ -e "$file" ]] || continue
+		claims+=("${file#"$tasks_dir/"}")
+	done
+	local -a sorted_claims=()
+	((${#claims[@]} > 0)) && mapfile -t sorted_claims < <(printf '%s\n' "${claims[@]}" | LC_ALL=C sort)
+
+	local claim_rel task_rel state expired legacy out="" n=0 e=0 l=0 st
+	for claim_rel in "${sorted_claims[@]+${sorted_claims[@]}}"; do
+		task_rel="${claim_rel%.claim}"
+		claim_sidecar_read "$tasks_dir/$claim_rel"
+		expired=0; legacy="$CS_LEGACY"
+		state="fresh"
+		if [[ ! -f "$tasks_dir/$task_rel" ]]; then
+			state="orphan"
+		elif [[ "$task_rel" == "$ARCHIVE_DIR"/* ]] || is_terminal_status "$(header_status "$tasks_dir/$task_rel")"; then
+			state="terminal"
+		elif [[ -n "$CS_CREATED" ]] && claim_created_is_expired "$CS_CREATED"; then
+			state="expired"; expired=1
+		elif ((legacy == 1)); then
+			state="legacy"
+		fi
+		((expired == 1)) && e=$((e + 1))
+		((legacy == 1)) && l=$((l + 1))
+		n=$((n + 1))
+		if ((json == 1)); then
+			out+="{\"task\":$(jqstr_bash "$task_rel"),\"owner\":$(jqstr_bash "$CS_OWNER"),\"generation\":$(jqstr_bash "$CS_GENERATION"),\"created\":$(jqstr_bash "$CS_CREATED"),\"state\":$(jqstr_bash "$state"),\"expired\":$([[ $expired == 1 ]] && printf true || printf false),\"legacy\":$([[ $legacy == 1 ]] && printf true || printf false)},"
+		else
+			printf 'CLAIM\t%s\towner=%s\tgeneration=%s\tcreated=%s\tstate=%s\n' \
+				"$claim_rel" "${CS_OWNER:-unknown}" "${CS_GENERATION:--}" "${CS_CREATED:--}" "$state"
+		fi
+	done
+	if ((json == 1)); then
+		printf '{"schema_version":%d,"type":"claims","total":%d,"expired":%d,"legacy":%d,"claims":[%s]}\n' \
+			"$SCHEMA_VERSION" "$n" "$e" "$l" "${out%,}"
+	else
+		printf 'claims: %d total, %d expired, %d legacy\n' "$n" "$e" "$l"
+	fi
+}
+
+# Explicit manager-owned recovery: reissue a claim's generation and set
+# the new owner, under the board lock. Uncertain liveness is the
+# manager's decision to make out-of-band; the CLI provides the mechanism
+# and never breaks a claim on its own. Idempotent: a second reclaim
+# converges to the same owner, and reclaiming an unclaimed task is a
+# no-op success.
+cmd_reclaim() {
+	local dir="" owner="" target=""
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "reclaim: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--owner) [[ $# -ge 2 && "$2" != --* ]] || die "reclaim: --owner requires a value"; owner="$2"; shift 2 ;;
+			--owner=*) owner="${1#*=}"; shift ;;
+			*) target="$1"; shift ;;
+		esac
+	done
+	[[ -n "$target" ]] || die "reclaim: usage: tasks reclaim <taskfile> [--owner ID]"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	require_tasks_dir_for_write "$tasks_dir"
+	acquire_board_lock "$tasks_dir"
+	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
+	local claim="$file$CLAIM_SUFFIX"
+	if [[ ! -e "$claim" ]]; then
+		printf 'no claim to reclaim on %s\n' "$(basename "$file")"
+		return 0
+	fi
+	claim_sidecar_migrate "$claim" "$tasks_dir" "${file#"$tasks_dir/"}" >/dev/null
+	claim_sidecar_read "$claim"
+	local prior_owner="${CS_OWNER:-unknown}" prior_generation="${CS_GENERATION:-none}"
+	[[ -n "$owner" ]] || owner="$(session_id)"
+	local gen; gen="$(new_claim_generation)"
+	claim_sidecar_write "$claim" "$owner" "$gen" "$(now)"
+	write_header_fields "$file" \
+		"Owner"$'\034'"**Owner:** $owner" \
+		"Updated"$'\034'"**Updated:** $(now)"
+	events_emit "$tasks_dir" recovery "claim.recovered" "${file#"$tasks_dir/"}" \
+		"generation" "$gen" "prior_owner" "$CS_OWNER" "prior_generation" "$CS_GENERATION"
+	render_unlocked "$tasks_dir"
+	printf 'reclaimed %s by %s (generation %s; prior owner %s, prior generation %s)\n' \
+		"$(basename "$file")" "$owner" "$gen" "$prior_owner" "$prior_generation"
+}
+
+# The release arms' shared ownership verification: refuse when a claim
+# sidecar on the task names another session as its owner. release, close,
+# and a set landing on a terminal status while the task is still live
+# route through this check via verify_release_claim, so a foreign session
+# cannot drop a live claim through any release arm; stale-claim recovery
+# stays the explicit manager surface ('tasks claims' reports, 'tasks
+# reclaim' takes over). The migration rides this write-path touch (owner
+# survives byte-exact), so the check always judges v2 state; a caller
+# that already migrated re-runs a no-op read. Unclaimed tasks pass
+# through untouched.
+refuse_foreign_claim() { # file tasks_dir verb
+	local claim="$1$CLAIM_SUFFIX"
+	[[ -e "$claim" ]] || return 0
+	claim_sidecar_migrate "$claim" "$2" "${1#"$2/"}" >/dev/null
+	claim_sidecar_read "$claim"
+	[[ "$CS_OWNER" == "$(session_id)" ]] && return 0
+	die "$3: $(basename "$1") is claimed by '${CS_OWNER:-unknown}', not by '$(session_id)'; foreign release is refused (recovery is manager-owned: 'tasks claims' reports stale claims, 'tasks reclaim' recovers one)"
+}
+
+# The release arms' shared release verification: the three-step sequence
+# the release verb's G15 narrowing established, run by every arm that
+# drops a live claim (release, close, a set landing on a terminal
+# status). The order is load-bearing: a presented token that mismatches
+# the sidecar's generation refuses first (the ABA guard outranks every
+# identity, so a stale token never falls through to the ownership
+# verdict), the ownership check follows, and a live v2 claim presented
+# with no token refuses last - identity strings replay via hostname-pid
+# reuse or a duplicated TASKS_SESSION, so the token itself is required
+# and a lost token routes through manager reclaim. generation is the
+# caller's --generation value, empty when none was presented; verb names
+# the refusing arm in the messages.
+verify_release_claim() { # file tasks_dir verb generation
+	local file="$1" tasks_dir="$2" verb="$3" generation="${4:-}"
+	local claim="$file$CLAIM_SUFFIX"
+	if [[ -e "$claim" ]]; then
+		claim_sidecar_migrate "$claim" "$tasks_dir" "${file#"$tasks_dir/"}" >/dev/null
+		claim_sidecar_read "$claim"
+		if [[ -n "$generation" && "$generation" != "$CS_GENERATION" ]]; then
+			die "$verb: generation mismatch on $(basename "$file") (claim generation is ${CS_GENERATION:-none}, caller presented $generation); a stale generation may not release a reissued claim (ABA guard; recovery is manager-owned: 'tasks reclaim')"
+		fi
+	fi
+	refuse_foreign_claim "$file" "$tasks_dir" "$verb"
+	if [[ -e "$claim" && -z "$generation" ]]; then
+		die "$verb: $(basename "$file") carries a generation-token claim and no --generation was presented; the token is required because identity strings replay (hostname-pid reuse, a duplicated TASKS_SESSION) - pass the token the claim printed, or route a lost token through manager recovery ('tasks reclaim')"
+	fi
+}
+
 # Drop a released task's claim sidecar: the rm half of the terminal claim
 # release (CLAIM_RELEASE_WRITE carries the blank Owner line, which rides
-# the caller's locked header rewrite and commits before this runs).
-release_claim() { # file
-	rm -f "$1$CLAIM_SUFFIX"
+# the caller's locked header rewrite and commits before this runs). The
+# release rides the ledger: claim.released carries the sidecar's
+# generation (empty marks a legacy-format release), and attempt.completed
+# records the attempt's final provenance (worker = the sidecar's owner,
+# checkpoint = the last Work Log anchor, report = the last deposit link).
+# The releasing actor is recorded distinctly from the attempt worker:
+# released_by names the session that ran the release (the envelope's
+# session field carries the same actor; the field keeps the record body
+# self-describing), while worker names the attempt's owner. Every release
+# arm verifies ownership plus the claim's generation before calling
+# (verify_release_claim), so the two attributions differ only when a
+# future manager-mediated release path arrives. outcome records how the
+# attempt ended (released, completed, cancelled); attempt_id pairs with
+# the task's last attempt.started record in the ledger tail and is
+# emitted only when that record carries one, so absence means unpaired
+# (an attempt opened before the ledger, a migrated or reclaimed claim)
+# and an empty value never rides the ledger.
+release_claim() { # file tasks_dir [content-file] [outcome]
+	local file="$1" tasks_dir="$2" content_file="${3:-$1}" outcome="${4:-released}"
+	local claim="$file$CLAIM_SUFFIX"
+	[[ -e "$claim" ]] || { rm -f "$claim"; return 0; }
+	claim_sidecar_read "$claim"
+	local rel="${file#"$tasks_dir/"}" actor attempt_id
+	local -a pairing=()
+	actor="$(session_id)"
+	attempt_id="$(last_attempt_id "$tasks_dir" "$rel")"
+	[[ -n "$attempt_id" ]] && pairing=("attempt_id" "$attempt_id")
+	events_emit "$tasks_dir" recovery "claim.released" "$rel" \
+		"generation" "$CS_GENERATION" "released_by" "$actor"
+	attempt_provenance "$CS_OWNER"
+	attempt_completed_fields "$content_file"
+	events_emit "$tasks_dir" audit "attempt.completed" "$rel" \
+		"worker" "$AP_WORKER" "branch" "$AP_BRANCH" "base_sha" "$AP_BASE_SHA" \
+		"checkpoint" "$AC_CHECKPOINT" "report" "$AC_REPORT" \
+		"released_by" "$actor" "outcome" "$outcome" ${pairing[@]+"${pairing[@]}"}
+	rm -f "$claim"
+}
+
+# The attempt id a completed record pairs with: the last attempt.started
+# record for the task in the ledger tail, empty when none exists. Bounded
+# to the tail - the pairing target is the most recent start - and the
+# scan rides the caller's board lock, so it cannot race a concurrent
+# append. Needle matching is a literal index() over the emitter's
+# canonical field order, not a parsed read: a best-effort optional field
+# never justifies a second JSON parser.
+last_attempt_id() { # tasks_dir task_rel
+	local ledger="$1/$EVENT_LOG_NAME"
+	[[ -f "$ledger" ]] || return 0
+	tail -n "$EVENT_LEDGER_SCAN_WINDOW" "$ledger" | AWK_AT_TASK="$2" awk '
+		{ if (index($0, "\"type\":\"attempt.started\"") && index($0, "\"task\":\"" ENVIRON["AWK_AT_TASK"] "\"")) {
+			if (match($0, /"attempt_id":"[0-9a-f]*"/)) print substr($0, RSTART + 14, RLENGTH - 15)
+			else print ""
+		} }
+	' | tail -n 1
 }
 
 # --- closure stamping -------------------------------------------------------
@@ -1929,7 +2609,9 @@ cmd_archive() {
 	# file is terminal, so its claim is released with the move; the Owner
 	# blank already rode the closure write that made it terminal.
 	mv "$file" "$dest" || die "archive: cannot move $(basename "$file") into $ARCHIVE_DIR (check permissions)"
-	release_claim "$file"
+	# The archived task is terminal, so the outcome names its landed
+	# status - the attempt ended when the task closed, not here.
+	release_claim "$file" "$tasks_dir" "$dest" "${status,,}"
 	render_unlocked "$tasks_dir"
 	printf 'archived %s\n' "${dest##*/}"
 }
@@ -2107,17 +2789,19 @@ closure_gate_findings() { # <findings-array> <superseded-array> <tasks_dir> <fil
 # assembler and dashboard formats are the locked write path's own, so
 # closure rows render byte-compatibly.
 cmd_close() {
-	local dir="" cancelled=0 force=0 args=()
+	local dir="" cancelled=0 force=0 generation="" args=()
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "close: --dir requires a value"; dir="$2"; shift 2 ;;
 			--dir=*) dir="${1#*=}"; shift ;;
 			--cancelled) cancelled=1; shift ;;
 			--force) force=1; shift ;;
+			--generation) [[ $# -ge 2 && "$2" != --* ]] || die "close: --generation requires a value"; generation="$2"; shift 2 ;;
+			--generation=*) generation="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled] [--force]"
+	((${#args[@]} == 1)) || die "close: usage: tasks close <taskfile> [--cancelled] [--force] [--generation TOKEN]"
 	((cancelled == 1 && force == 1)) \
 		&& die "close: --force gates the completion path only; --cancelled closure already requires a deliberate Status Reason"
 
@@ -2125,6 +2809,14 @@ cmd_close() {
 	require_tasks_dir_for_write "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+
+	# The G15 narrowing on the closure arm: a live claim owned by another
+	# session refuses the closure before any write it would make (including
+	# a --force override note), and the release-verb generation sequence
+	# rides the same check - a same-owner tokenless or stale-token closure
+	# refuses too, because identity strings replay. Recovery is
+	# manager-owned (claims, reclaim).
+	verify_release_claim "$file" "$tasks_dir" "close" "$generation"
 
 	local status
 	status="$(header_status "$file")"
@@ -2186,7 +2878,7 @@ cmd_close() {
 			"Duration"$'\034'"**Duration:** $duration" \
 			"Updated"$'\034'"**Updated:** $ts" \
 			"$CLAIM_RELEASE_WRITE"
-		release_claim "$file"
+		release_claim "$file" "$tasks_dir" "$file" "cancelled"
 		render_unlocked "$tasks_dir"
 		printf 'cancelled %s (elapsed Duration %s)\n' "$(basename "$file")" "$duration"
 		return
@@ -2198,7 +2890,7 @@ cmd_close() {
 		"Updated"$'\034'"**Updated:** $ts" \
 		"$STATUS_REASON_KEY"$'\034' \
 		"$CLAIM_RELEASE_WRITE"
-	release_claim "$file"
+	release_claim "$file" "$tasks_dir" "$file" "completed"
 	render_unlocked "$tasks_dir"
 	printf 'closed %s (Completed %s, elapsed Duration %s)\n' "$(basename "$file")" "$ts" "$duration"
 }
@@ -2295,6 +2987,12 @@ cmd_report() {
 		rm -f "$deposit"
 		die "report: failed to update $base (deposit removed)"
 	fi
+	# A report deposit is a checkpoint like a log entry: the owning
+	# session's claim heartbeat refreshes, so a worker that deposits its
+	# final report without logging stays alive to the sweep. Foreign-
+	# owned claims are never extended; claim_refresh notes the takeover
+	# on stderr instead.
+	claim_refresh "$file" "$tasks_dir"
 	render_unlocked "$tasks_dir"
 	printf '%s\n' "$deposit"
 }
@@ -2345,6 +3043,10 @@ cmd_log() {
 		printf -v entry '### %s: %s: %s\n\n' "$ts" "$from" "$first"
 	fi
 	append_work_log_entry "$file" "$entry" "$ts" "" || die "log: failed to update $(basename "$file")"
+	# A log checkpoint is the owning session's claim heartbeat: the created
+	# stamp refreshes, so expiry-on-read measures silence since the last
+	# checkpoint. No-op without a live own claim.
+	claim_refresh "$file" "$tasks_dir"
 	render_unlocked "$tasks_dir"
 	printf 'logged %s\n' "$(basename "$file")"
 }
@@ -3543,6 +4245,136 @@ cmd_frontier() {
 	fi
 }
 
+# Read-only typed event ledger reader: validates every record against the
+# enumerated schema (AWK_EVENT_VALIDATE is the single authority), applies
+# the optional class/type/task filters, and shows the last --limit matches
+# (all when no limit). A missing ledger reads as zero events; a trailing
+# line without its newline is a crash-torn append, dropped with a note;
+# any other invalid record fails the read with EVENT_CORRUPT. No lock, no
+# render, no write (the doctor's read-only contract).
+cmd_events() {
+	local dir="" json=0 class="" type="" task="" limit=""
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "events: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--json) json=1; shift ;;
+			--class) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "events: --class requires a value"; class="$2"; shift 2 ;;
+			--class=*) class="${1#*=}"; shift ;;
+			--type) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "events: --type requires a value"; type="$2"; shift 2 ;;
+			--type=*) type="${1#*=}"; shift ;;
+			--task) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "events: --task requires a value"; task="$2"; shift 2 ;;
+			--task=*) task="${1#*=}"; shift ;;
+			--limit) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "events: --limit requires a value"; limit="$2"; shift 2 ;;
+			--limit=*) limit="${1#*=}"; shift ;;
+			*) diec "$CODE_USAGE" "events: unknown argument: $1" ;;
+		esac
+	done
+	case "$class" in
+		"") ;;
+		recovery | audit | cost) ;;
+		*) diec "$CODE_USAGE" "events: unknown class: $class (classes: recovery, audit, cost)" ;;
+	esac
+	[[ -z "$type" || "$type" =~ ^[a-z]+\.[a-z_]+$ ]] || diec "$CODE_USAGE" "events: --type must name an enumerated event type, got: $type"
+	[[ -z "$class" || -z "$type" || "${type%%.*}" == "$class" ]] \
+		|| diec "$CODE_USAGE" "events: --type $type does not belong to class $class"
+	[[ -z "$limit" || "$limit" =~ ^[1-9][0-9]*$ ]] || diec "$CODE_USAGE" "events: --limit must be a positive integer, got: $limit"
+
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+	local ledger="$tasks_dir/$EVENT_LOG_NAME"
+	if [[ ! -f "$ledger" ]]; then
+		((json == 1)) && printf '{"schema_version":%d,"type":"events","total":0,"matched":0,"shown":0,"events":[]}\n' "$SCHEMA_VERSION"
+		((json == 0)) && printf 'events: 0 shown of 0 total\n'
+		return 0
+	fi
+
+	# A trailing line without its newline is a crash-torn append: drop it
+	# with a note instead of failing the read (the ledger stays untouched;
+	# the read works over a temp copy). od classifies the last byte without
+	# touching command substitution's newline stripping, which is exactly
+	# the signal this check needs. The drop is output-only and self-
+	# correcting: the append usually completes an instant later and the
+	# next read sees the line whole, so the note implies no recovery
+	# action.
+	local read_from="$ledger" last_byte
+	last_byte="$(tail -c 1 "$ledger" 2>/dev/null | od -An -c | tr -d ' \n')"
+	if [[ -s "$ledger" && "$last_byte" != '\n' ]]; then
+		read_from="$(mktemp "${TMPDIR:-/tmp}/tasks-events.XXXXXX")"
+		arm_tmp_cleanup_trap "$read_from"
+		sed '$d' "$ledger" >"$read_from"
+		printf 'events: dropped a torn tail line (crash-truncated append)\n' >&2
+	fi
+
+	local rc=0 out
+	out="$(AWK_JSON_MODE="$json" AWK_SCHEMA_VERSION="$SCHEMA_VERSION" AWK_FCLASS="$class" AWK_FTYPE="$type" AWK_FTASK="$task" AWK_FLIMIT="$limit" \
+		awk "$AWK_EVENT_VALIDATE"'
+			function matches() {
+				if (fclass != "" && ev_unq(EV["\"class\""]) != fclass) return 0
+				if (ftype != "" && ev_unq(EV["\"type\""]) != ftype) return 0
+				if (ftask != "" && ev_unq(EV["\"task\""]) != ftask) return 0
+				return 1
+			}
+			function row() {
+				local_extra = ""
+				typ = ev_unq(EV["\"type\""])
+				if (typ ~ /^claim\./) local_extra = "generation=" ev_unq(EV["\"generation\""])
+				else if (typ ~ /^attempt\./) local_extra = "worker=" ev_unq(EV["\"worker\""])
+				return "EVENT\t" ev_unq(EV["\"ts\""]) "\t" ev_unq(EV["\"class\""]) "\t" typ "\t" ev_unq(EV["\"session\""]) "\t" ev_unq(EV["\"task\""]) ((local_extra == "") ? "" : "\t" local_extra)
+			}
+			BEGIN {
+				fclass = ENVIRON["AWK_FCLASS"]; ftype = ENVIRON["AWK_FTYPE"]
+				ftask = ENVIRON["AWK_FTASK"]; flimit = ENVIRON["AWK_FLIMIT"] + 0
+				json = ENVIRON["AWK_JSON_MODE"]; schema = ENVIRON["AWK_SCHEMA_VERSION"]
+				total = 0; matched = 0
+			}
+			{
+				total++
+				reason = ev_valid($0)
+				if (reason != "") {
+					printf "EVENT_BAD\t%d\t%s\n", FNR, reason > "/dev/stderr"
+					exit 2
+				}
+				if (!matches()) next
+				matched++
+				# With a limit the buffers hold a rolling window of the last
+				# flimit matches only, so a long-ledger filtered read costs
+				# O(limit) memory; without a limit the read output IS every
+				# match and the buffering is inherent.
+				if (flimit > 0) {
+					slot = ((matched - 1) % flimit) + 1
+					raw[slot] = $0
+					rw[slot] = row()
+				} else {
+					raw[matched] = $0
+					rw[matched] = row()
+				}
+			}
+			END {
+				nwin = (flimit > 0 && matched > flimit) ? flimit : matched
+				first = matched - nwin + 1
+				shown = nwin
+				if (json == "1") {
+					payload = ""
+					for (k = 1; k <= nwin; k++) {
+						i = (flimit > 0) ? (((first + k - 2) % flimit) + 1) : (first + k - 1)
+						payload = payload ((k > 1) ? "," : "") raw[i]
+					}
+					printf "{\"schema_version\":%s,\"type\":\"events\",\"total\":%d,\"matched\":%d,\"shown\":%d,\"events\":[%s]}\n", schema, total, matched, shown, payload
+				} else {
+					for (k = 1; k <= nwin; k++) {
+						i = (flimit > 0) ? (((first + k - 2) % flimit) + 1) : (first + k - 1)
+						print rw[i]
+					}
+					printf "events: %d shown of %d total\n", shown, total
+				}
+			}
+		' "$read_from")" || rc=$?
+	((rc == 0)) || diec "$CODE_EVENT_CORRUPT" "events: the ledger has an invalid record (see the EVENT_BAD diagnostic above)"
+	printf '%s\n' "$out"
+}
+
 # Print the final N entries of a task's Work Log section, verbatim, from a
 # snapshot supplied on stdin. Entries start at each "### " heading; the tail
 # begins at the Nth-from-last heading and runs to the end of the section
@@ -4269,6 +5101,9 @@ main() {
 		set) cmd_set "$@" ;;
 		claim) cmd_claim "$@" ;;
 		release) cmd_release "$@" ;;
+		claims) cmd_claims "$@" ;;
+		reclaim) cmd_reclaim "$@" ;;
+		events) cmd_events "$@" ;;
 		archive) cmd_archive "$@" ;;
 		close) cmd_close "$@" ;;
 		stamp) cmd_stamp "$@" ;;

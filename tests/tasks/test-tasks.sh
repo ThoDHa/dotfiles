@@ -17,6 +17,12 @@ refuse() { # label; rest is the command to attempt
 	if t "$@" </dev/null >/dev/null 2>&1; then bad "$label"; else ok "$label"; fi
 }
 
+# The battery owns the sidecar format (fixtures hand-write it), so a
+# release's ABA token is read straight from the sidecar the way a real
+# owner captures the token its claim printed. Releases always name it:
+# a tokenless release is refused under the G15 narrowing.
+gen_of() { sed -n 's/^generation //p' "$1.claim" | head -1; }
+
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 export TASKS_DIR="$ROOT/.tasks"
@@ -161,43 +167,507 @@ echo "== double claim rejected =="
 refuse "second claim rejected" claim "$f_tr" --owner "intruder"
 
 echo "== release clears claim and owner =="
-t release "$f_tr" >/dev/null
+# The release runs as the winning race session: a claim release is the
+# owner's op (foreign release is refused under the G15 narrowing), and
+# the token the claim minted is required.
+TASKS_SESSION="$claimed_owner" t release "$f_tr" --generation "$(gen_of "$f_tr")" >/dev/null
 [[ ! -f "$f_tr.claim" ]] && ok "sidecar removed on release" || bad "sidecar removed on release"
 owner_after="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr" || true)"
 assert_eq "Owner cleared on release" "" "${owner_after:-}"
 assert_eq "release leaves the Owner field present and empty" "1" \
 	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
 
-echo "== release: any session may release a foreign claim (G15 pin) =="
-# Release is a cooperative unlock, not an ownership transfer: the
-# stale-sidecar recovery path depends on any board-writer session being
-# able to release a claim left behind by a dead session. The mismatch is
-# announced, never refused: a foreign release warns with both identities
-# and then succeeds, so recovery can never dead-end on a dead owner.
+echo "== release: foreign release refused, recovery is manager-owned (G15 change) =="
+# BEHAVIOR CHANGE (documented, ORCH-4-4-4): the old G15 pin "any session may
+# release a foreign claim" narrowed under generation-token claims, on all
+# three release arms (release, close, terminal set). The broad
+# cooperative unlock was exactly the stale-release hole the ABA guard
+# exists to close: a foreign release can no longer drop a claim, and
+# stale-claim recovery is the explicit manager surface (tasks claims
+# reports, tasks reclaim recovers). The generation token is itself
+# required on every arm that drops a live claim: a tokenless release is
+# refused even for the recorded owner, because the replayed identity
+# (hostname-pid reuse, a duplicated TASKS_SESSION) is exactly the bypass
+# the guard exists to close; a lost token routes through manager
+# reclaim. This section is the updated pin;
+# the behavior-change record rides the same landing (child Work Log +
+# report) per the protocol's behavior-change rule.
 f_xo="$(t new --id XOWN-1 --name "Cross Owner Release Target")"
 t claim "$f_xo" --owner session-alice >/dev/null
 assert_contains "claim sets the owning session" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
 xo_err_file="$ROOT/xo-release-err.txt"
-xo_out="$(TASKS_SESSION=session-bob t release "$f_xo" 2>"$xo_err_file")" && xo_rc=0 || xo_rc=$?
-assert_eq "a foreign session's release succeeds" "0" "$xo_rc"
-assert_contains "a foreign session's release reports success" "$xo_out" "released XOWN-1"
+refuse "a foreign session's release is refused" release "$f_xo"
+TASKS_SESSION=session-bob t release "$f_xo" 2>"$xo_err_file" && xo_rc=0 || xo_rc=$?
+assert_eq "a foreign session's release exits nonzero" "1" "$xo_rc"
 xo_err="$(cat "$xo_err_file")"
-assert_contains "the foreign-release warning reads as a warning" "$xo_err" "warning:"
-assert_contains "the warning names the sidecar's recorded owner" "$xo_err" "session-alice"
-assert_contains "the warning names the releasing session" "$xo_err" "session-bob"
-assert_contains "the warning announces the recovery unlock" "$xo_err" "recovery unlock"
-[[ ! -f "$f_xo.claim" ]] && ok "a foreign session's release removes the sidecar" || bad "a foreign session's release removes the sidecar"
+assert_contains "the foreign refusal names the recorded owner" "$xo_err" "session-alice"
+assert_contains "the foreign refusal names the caller session" "$xo_err" "session-bob"
+assert_contains "the foreign refusal routes recovery to the manager surface" "$xo_err" "reclaim"
+[[ -f "$f_xo.claim" ]] && ok "a refused foreign release leaves the sidecar intact" || bad "a refused foreign release leaves the sidecar intact"
+assert_contains "a refused foreign release leaves Owner set" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
+xof_err="$(TASKS_SESSION=session-bob t release "$f_xo" --generation "$(gen_of "$f_xo")" 2>&1 >/dev/null || true)"
+assert_contains "a foreign release is refused even with the correct token" "$xof_err" "not by 'session-bob'"
+[[ -f "$f_xo.claim" ]] && ok "the correct-token foreign refusal keeps the claim too" || bad "the correct-token foreign refusal keeps the claim too"
+xo2_err_file="$ROOT/xo2-release-err.txt"
+TASKS_SESSION=session-alice t release "$f_xo" 2>"$xo2_err_file" && xo2_rc=0 || xo2_rc=$?
+assert_eq "a tokenless release is refused even for the recorded owner" "1" "$xo2_rc"
+xo2_err="$(cat "$xo2_err_file")"
+assert_contains "the tokenless refusal names the replay hole it closes" "$xo2_err" "identity strings replay"
+assert_contains "the tokenless refusal routes a lost token to reclaim" "$xo2_err" "tasks reclaim"
+[[ -f "$f_xo.claim" ]] && ok "the tokenless refusal leaves the sidecar intact" || bad "the tokenless refusal leaves the sidecar intact"
+TASKS_SESSION=session-alice t release "$f_xo" --generation "$(gen_of "$f_xo")" >/dev/null
+[[ ! -f "$f_xo.claim" ]] && ok "the owner's own tokened release removes the sidecar" || bad "the owner's own tokened release removes the sidecar"
 owner_cross="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo" || true)"
-assert_eq "a foreign session's release clears Owner" "" "${owner_cross:-}"
+assert_eq "the owner's own release clears Owner" "" "${owner_cross:-}"
 rm -f "$f_xo" "$xo_err_file"
-# The matching-identity leg stays silent: the warning fires on the
-# mismatch, not on release itself.
-f_xo2="$(t new --id XOWN-2 --name "Same Owner Release Target")"
-TASKS_SESSION=session-carol t claim "$f_xo2" >/dev/null
-xo2_err="$(TASKS_SESSION=session-carol t release "$f_xo2" 2>&1 >/dev/null || true)"
-assert_not_contains "a same-session release does not warn" "$xo2_err" "warning:"
-rm -f "$f_xo2"
 t render >/dev/null
+
+echo "== ABA guard: a stale generation's late release cannot drop a successor's claim =="
+# The interleaving, run end to end: A claims (generation 1); the manager
+# reclaims to B (generation 2); A wakes and releases late. Session identity
+# strings can replay (hostname-pid reuse, duplicated TASKS_SESSION), so the
+# generation decides: the stale token is refused even under the successor's
+# identity, the successor's claim survives intact, and the successor's own
+# correct-token release succeeds.
+f_aba="$(t new --id ABA-1 --name "ABA Guard Target")"
+TASKS_SESSION=session-aba t claim "$f_aba" >/dev/null
+gen1="$(sed -n 's/^generation //p' "$f_aba.claim")"
+[[ "$gen1" =~ ^[0-9a-f]{16}$ ]] && ok "claim sidecar carries a generation token" || bad "claim sidecar carries a generation token"
+TASKS_SESSION=manager t reclaim "$f_aba" --owner session-successor >/dev/null
+gen2="$(sed -n 's/^generation //p' "$f_aba.claim")"
+[[ -n "$gen2" && "$gen2" != "$gen1" ]] && ok "reclaim reissues the generation" || bad "reclaim reissues the generation"
+aba_err="$(TASKS_SESSION=session-successor t release "$f_aba" --generation "$gen1" 2>&1 >/dev/null || true)"
+[[ -f "$f_aba.claim" ]] && ok "the stale generation's late release leaves the sidecar intact" || bad "the stale generation's late release leaves the sidecar intact"
+assert_contains "the stale generation's late release is refused" "$aba_err" "generation mismatch"
+assert_contains "the surviving claim still names the successor" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_aba")" "session-successor"
+aba_err2="$(TASKS_SESSION=session-aba t release "$f_aba" --generation "$gen1" 2>&1 >/dev/null || true)"
+[[ -f "$f_aba.claim" ]] && ok "the stale holder under its own identity is refused too" || bad "the stale holder under its own identity is refused too"
+assert_contains "the stale holder's stale token trips the ABA guard first" "$aba_err2" "generation mismatch"
+TASKS_SESSION=session-successor t release "$f_aba" --generation "$gen2" >/dev/null
+[[ ! -f "$f_aba.claim" ]] && ok "the successor's correct-generation release succeeds" || bad "the successor's correct-generation release succeeds"
+owner_aba="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_aba" || true)"
+assert_eq "the successor's release clears Owner" "" "${owner_aba:-}"
+rm -f "$f_aba"
+
+# The previously-unguarded interleaving (the review's falsifiable case):
+# the reclaim's --owner reissues the claim to the SAME identity the stale
+# holder replays, and a tokenless release under that identity must refuse
+# - before the token requirement, it deleted the successor's claim with
+# no token at all.
+f_aba2="$(t new --id ABA-2 --name "ABA Unguarded Interleaving")"
+TASKS_SESSION=session-replayed t claim "$f_aba2" >/dev/null
+TASKS_SESSION=manager t reclaim "$f_aba2" --owner session-replayed >/dev/null
+gen_reissued="$(gen_of "$f_aba2")"
+[[ -n "$gen_reissued" ]] && ok "the same-owner reclaim reissued a generation" || bad "the same-owner reclaim reissued a generation"
+red_err="$(TASKS_SESSION=session-replayed t release "$f_aba2" 2>&1 >/dev/null || true)"
+[[ -f "$f_aba2.claim" ]] && ok "a tokenless release under a replayed identity leaves the sidecar intact" || bad "a tokenless release under a replayed identity leaves the sidecar intact"
+assert_contains "the replayed identity's tokenless release is refused" "$red_err" "--generation"
+assert_contains "the surviving claim still carries the reissued generation" "$(gen_of "$f_aba2")" "$gen_reissued"
+assert_contains "the surviving claim still names the owner" "$(sed -n '1p' "$f_aba2.claim")" "session-replayed"
+TASKS_SESSION=session-replayed t release "$f_aba2" --generation "$gen_reissued" >/dev/null
+[[ ! -f "$f_aba2.claim" ]] && ok "the replayed owner releases with the reissued token" || bad "the replayed owner releases with the reissued token"
+rm -f "$f_aba2"
+t render >/dev/null
+
+# The same identity-replay interleaving through the closure arm: the
+# reclaim reissues to the identity the stale holder replays, and the
+# stale holder's close must refuse exactly as its release does - a
+# tokenless close under the replayed identity refuses with the
+# token-required message, a stale token presented from a foreign
+# identity trips the mismatch guard before the ownership verdict, and
+# only the reissued token closes, dropping the successor's claim.
+f_aba3="$(t new --id ABA-3 --name "ABA Close Interleaving")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_aba3"
+TASKS_SESSION=session-closeplay t claim "$f_aba3" >/dev/null
+gen_close1="$(gen_of "$f_aba3")"
+TASKS_SESSION=manager t reclaim "$f_aba3" --owner session-closeplay >/dev/null
+gen_close2="$(gen_of "$f_aba3")"
+[[ -n "$gen_close2" && "$gen_close2" != "$gen_close1" ]] && ok "the same-owner reclaim reissued the closure target's generation" || bad "the same-owner reclaim reissued the closure target's generation"
+red_close_err="$(TASKS_SESSION=session-closeplay t close "$f_aba3" 2>&1 >/dev/null || true)"
+[[ -f "$f_aba3.claim" ]] && ok "a tokenless close under a replayed identity leaves the sidecar intact" || bad "a tokenless close under a replayed identity leaves the sidecar intact"
+assert_contains "the replayed identity's tokenless close is refused" "$red_close_err" "--generation"
+assert_contains "the tokenless close refusal routes a lost token to reclaim" "$red_close_err" "tasks reclaim"
+assert_contains "the refused close leaves the status open" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_aba3")" "Triage"
+stale_close_err="$(TASKS_SESSION=session-closeforeign t close "$f_aba3" --generation "$gen_close1" 2>&1 >/dev/null || true)"
+assert_contains "a stale token trips the mismatch guard on close before the ownership verdict" "$stale_close_err" "generation mismatch"
+[[ -f "$f_aba3.claim" ]] && ok "the mismatch-refused close keeps the sidecar too" || bad "the mismatch-refused close keeps the sidecar too"
+TASKS_SESSION=session-closeplay t close "$f_aba3" --generation "$gen_close2" >/dev/null
+[[ ! -f "$f_aba3.claim" ]] && ok "the successor's properly-tokened close proceeds" || bad "the successor's properly-tokened close proceeds"
+assert_contains "the tokened close lands the closure" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_aba3")" "Completed"
+rm -f "$f_aba3"
+t render >/dev/null
+
+# The G15 narrowing on the closure arm: a foreign close on a fresh claim
+# refuses and routes to reclaim, mirroring the release verb; the owner's
+# own close still releases its claim with the closure by presenting the
+# claim's token.
+f_fc="$(t new --id FCL-1 --name "Foreign Close Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_fc"
+t claim "$f_fc" --owner session-holder >/dev/null
+fc_err="$(TASKS_SESSION=session-foreign t close "$f_fc" 2>&1 >/dev/null || true)"
+[[ -f "$f_fc.claim" ]] && ok "a foreign close on a fresh claim leaves the sidecar intact" || bad "a foreign close on a fresh claim leaves the sidecar intact"
+if TASKS_SESSION=session-foreign t close "$f_fc" >/dev/null 2>&1; then bad "a foreign close on a fresh claim is refused"; else ok "a foreign close on a fresh claim is refused"; fi
+assert_contains "the foreign close refusal names the recorded owner" "$fc_err" "session-holder"
+assert_contains "the foreign close refusal names the caller session" "$fc_err" "session-foreign"
+assert_contains "the foreign close refusal routes recovery to reclaim" "$fc_err" "reclaim"
+assert_contains "the refused foreign close leaves the status open" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_fc")" "Triage"
+TASKS_SESSION=session-holder t close "$f_fc" --generation "$(gen_of "$f_fc")" >/dev/null
+[[ ! -f "$f_fc.claim" ]] && ok "the owner's own tokened close releases the claim" || bad "the owner's own tokened close releases the claim"
+assert_contains "the owner's close lands the closure" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_fc")" "Completed"
+rm -f "$f_fc"
+t render >/dev/null
+
+echo "== expiry-on-read: an expired claim refuses takeover and routes to the manager =="
+# The battery owns the sidecar format for fixtures, so the created stamp is
+# backdated by hand rather than through the clock seam (the seam exists for
+# timeline backdating, not ownership). The default TTL is 1440 minutes (24h,
+# sized past the fleet's multi-hour usage-limit parks), so 06-14 11:00 is
+# expired against the pinned 06-15 12:00 clock, and 06-14 12:00 (exactly
+# TTL) is the not-expired boundary.
+f_exp="$(t new --id EXP-1 --name "Expired Claim Target")"
+t claim "$f_exp" --owner session-expired >/dev/null
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 11:00\n' "session-expired" >"$f_exp.claim"
+exp_err="$(t claim "$f_exp" --owner newcomer 2>&1 >/dev/null || true)"
+refuse "claim on an expired claim is refused" claim "$f_exp" --owner newcomer
+assert_contains "the expiry refusal names the expired owner" "$exp_err" "session-expired"
+assert_contains "the expiry refusal names the expiry" "$exp_err" "expired"
+assert_contains "the expiry refusal carries the created stamp" "$exp_err" "2026-06-14 11:00"
+assert_contains "the expiry refusal routes recovery to the manager surface" "$exp_err" "reclaim"
+[[ -f "$f_exp.claim" ]] && ok "an expiry refusal leaves the sidecar intact" || bad "an expiry refusal leaves the sidecar intact"
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 12:00\n' "session-expired" >"$f_exp.claim"
+bound_err="$(t claim "$f_exp" --owner newcomer 2>&1 >/dev/null || true)"
+refuse "a claim at exactly the TTL boundary is still refused" claim "$f_exp" --owner newcomer
+assert_not_contains "the TTL boundary does not read as expired" "$bound_err" "expired claim"
+assert_contains "the TTL boundary refusal reads as a live claim" "$bound_err" "already claimed by session-expired"
+# A healthy multi-hour park must not read as expired under the new
+# default: 5h of log silence is the fleet's routine usage-limit park.
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-15 07:00\n' "session-expired" >"$f_exp.claim"
+park_err="$(t claim "$f_exp" --owner newcomer 2>&1 >/dev/null || true)"
+refuse "a claim inside a 5h park is still refused" claim "$f_exp" --owner newcomer
+assert_not_contains "a 5h-silent claim does not read as expired" "$park_err" "expired claim"
+assert_contains "the parked claim reads as a live claim" "$park_err" "already claimed by session-expired"
+ttl_err="$(TASKS_CLAIM_TTL_MINUTES=zero t claim "$f_exp" --owner newcomer 2>&1 >/dev/null || true)"
+refuse "a malformed TTL override is refused" claim "$f_exp" --owner newcomer
+assert_contains "the TTL refusal names the variable" "$ttl_err" "TASKS_CLAIM_TTL_MINUTES"
+TASKS_SESSION=manager t reclaim "$f_exp" --owner newcomer >/dev/null
+rec_created="$(sed -n 's/^created //p' "$f_exp.claim")"
+assert_eq "reclaim stamps the reclaimed claim with the CLI clock" "2026-06-15 12:00" "$rec_created"
+assert_contains "reclaim sets the new owner in the sidecar" "$(sed -n '1p' "$f_exp.claim")" "newcomer"
+assert_contains "reclaim sets the header Owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_exp")" "newcomer"
+TASKS_SESSION=newcomer t release "$f_exp" --generation "$(gen_of "$f_exp")" >/dev/null
+rm -f "$f_exp"
+t render >/dev/null
+
+echo "== claim heartbeat: log and report checkpoints refresh the owning session's timer =="
+# The heartbeat measures silence since the last checkpoint, so a log or
+# report deposit by the owning session re-stamps created; a foreign
+# session's checkpoint never extends the claim and says so on stderr
+# (the reclaimed-then-resumed worker discovers the takeover at its next
+# checkpoint instead of failing on a later write).
+f_hb="$(t new --id HB-1 --name "Heartbeat Target")"
+t claim "$f_hb" --owner session-hb >/dev/null
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 07:00\n' "session-hb" >"$f_hb.claim"
+hb_err="$(TASKS_TEST_CLOCK="2026-06-15 13:00" TASKS_SESSION=session-hb t log "$f_hb" "heartbeat checkpoint" 2>&1 >/dev/null)"
+assert_eq "the owner's log re-stamps the created heartbeat" "2026-06-15 13:00" "$(sed -n 's/^created //p' "$f_hb.claim")"
+assert_not_contains "the owner's log emits no warning" "$hb_err" "warning:"
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 07:00\n' "session-hb" >"$f_hb.claim"
+printf 'heartbeat body\n' | TASKS_TEST_CLOCK="2026-06-15 15:00" TASKS_SESSION=session-hb t report "$f_hb" --slug hb-probe --from session-hb --digest "heartbeat deposit" >/dev/null
+assert_eq "the owner's report re-stamps the created heartbeat" "2026-06-15 15:00" "$(sed -n 's/^created //p' "$f_hb.claim")"
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 07:00\n' "session-hb" >"$f_hb.claim"
+fhb_err="$(TASKS_TEST_CLOCK="2026-06-15 16:00" TASKS_SESSION=session-foreign t log "$f_hb" "foreign checkpoint" 2>&1 >/dev/null || true)"
+assert_contains "a foreign log names the recorded owner" "$fhb_err" "session-hb"
+assert_contains "a foreign log names the caller session" "$fhb_err" "session-foreign"
+assert_contains "a foreign log says the heartbeat was not refreshed" "$fhb_err" "heartbeat was not refreshed"
+assert_eq "a foreign log leaves the created stamp untouched" "2026-06-14 07:00" "$(sed -n 's/^created //p' "$f_hb.claim")"
+if TASKS_TEST_CLOCK="2026-06-15 16:00" TASKS_SESSION=session-foreign t log "$f_hb" "foreign checkpoint again" >/dev/null 2>&1; then ok "a foreign log still succeeds"; else bad "a foreign log still succeeds"; fi
+printf 'foreign body\n' | TASKS_TEST_CLOCK="2026-06-15 17:00" TASKS_SESSION=session-foreign t report "$f_hb" --slug hb-foreign --digest "foreign deposit" >/dev/null 2>"$ROOT/hb-foreign-err.txt"
+assert_contains "a foreign report also skips the heartbeat with a note" "$(cat "$ROOT/hb-foreign-err.txt")" "heartbeat was not refreshed"
+assert_eq "a foreign report leaves the created stamp untouched" "2026-06-14 07:00" "$(sed -n 's/^created //p' "$f_hb.claim")"
+rm -f "$ROOT/hb-foreign-err.txt"
+TASKS_SESSION=session-hb t release "$f_hb" --generation "$(gen_of "$f_hb")" >/dev/null
+rm -f "$f_hb"
+t render >/dev/null
+
+echo "== claim.expired records once per generation =="
+# N takeover probes against one stale claim append one recovery record,
+# not N: the ledger tail carries the open expired episode for the
+# generation, and reclaim closes it so a re-expired successor records
+# fresh.
+f_e6="$(t new --id EXPD-1 --name "Expired Probe Dedup")"
+t claim "$f_e6" --owner session-dead >/dev/null
+printf '%s\ngeneration 0123456789abcdef\ncreated 2026-06-14 11:00\n' "session-dead" >"$f_e6.claim"
+e6_before="$(t events --json | grep -oP '"total":\K[0-9]+')"
+refuse "the first expired probe is refused" claim "$f_e6" --owner newcomer
+e6_mid="$(t events --json | grep -oP '"total":\K[0-9]+')"
+assert_eq "the first expired probe records the expiry" "$((e6_before + 1))" "$e6_mid"
+refuse "a second expired probe is refused too" claim "$f_e6" --owner newcomer
+refuse "a third expired probe is refused too" claim "$f_e6" --owner newcomer
+e6_after="$(t events --json | grep -oP '"total":\K[0-9]+')"
+assert_eq "repeated probes do not re-record the same generation" "$e6_mid" "$e6_after"
+TASKS_SESSION=manager t reclaim "$f_e6" --owner newcomer >/dev/null
+e6_rec="$(sed -n 's/^generation //p' "$f_e6.claim")"
+printf '%s\ngeneration %s\ncreated 2026-06-14 11:00\n' "newcomer" "$e6_rec" >"$f_e6.claim"
+refuse "the reclaimed claim expires again on probe" claim "$f_e6" --owner third
+e6_re="$(t events --json | grep -oP '"total":\K[0-9]+')"
+assert_eq "a reclaimed claim's new generation records its expiry fresh" "$((e6_after + 2))" "$e6_re"
+TASKS_SESSION=manager t reclaim "$f_e6" --owner third >/dev/null
+TASKS_SESSION=third t release "$f_e6" --generation "$(gen_of "$f_e6")" >/dev/null
+rm -f "$f_e6"
+t render >/dev/null
+
+echo "== live-board migration: legacy owner-only sidecars gain tokens, owners survive =="
+# Three active claims (the live-board count this change must preserve):
+# migration rewrites each sidecar in place on the first write-path touch,
+# keeps the owner byte-exact, backdates created from the sidecar mtime, and
+# leaves the header untouched. The migration assigns a generation, so the
+# migrated owner releases with the token the sidecar now carries (read
+# below the way a real owner captures it); an owner that lost it routes
+# through manager reclaim, so the upgrade strands nobody.
+f_m1="$(t new --id MIG-1 --name "Migration One")"
+f_m2="$(t new --id MIG-2 --name "Migration Two")"
+f_m3="$(t new --id MIG-3 --name "Migration Three")"
+printf '%s\n' "session-mig-1" >"$f_m1.claim"
+printf '%s\n' "session-mig-2" >"$f_m2.claim"
+printf '%s\n' "session-mig-3" >"$f_m3.claim"
+mig_err1="$(t claim "$f_m1" --owner intruder 2>&1 >/dev/null || true)"
+refuse "claim against a migrated legacy claim is refused" claim "$f_m1" --owner intruder
+mig_err2="$(t claim "$f_m2" --owner intruder 2>&1 >/dev/null || true)"
+refuse "the second migrated claim refuses takeover too" claim "$f_m2" --owner intruder
+mig_gen1="$(sed -n 's/^generation //p' "$f_m1.claim")"
+[[ "$mig_gen1" =~ ^[0-9a-f]{16}$ ]] && ok "migration assigns a generation" || bad "migration assigns a generation"
+assert_eq "migration keeps the owner byte-exact" "session-mig-1" "$(sed -n '1p' "$f_m1.claim")"
+mig_created1="$(sed -n 's/^created //p' "$f_m1.claim")"
+mig_stamp_re='^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'
+[[ "$mig_created1" =~ $mig_stamp_re ]] && ok "migration backdates created to the canonical stamp form" || bad "migration backdates created to the canonical stamp form"
+owner_m1="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_m1" || true)"
+assert_eq "migration leaves the header Owner untouched" "" "${owner_m1:-}"
+mig_out="$(TASKS_SESSION=manager t claims)"
+assert_contains "the sweep reports a migrated claim as fresh" "$mig_out" "owner=session-mig-1"
+assert_contains "the untouched legacy claim still reports legacy" "$mig_out" "state=legacy"
+mig_json="$(t claims --json)"
+assert_contains "the claims JSON payload names the schema type" "$mig_json" '"type":"claims"'
+assert_contains "the claims JSON carries the legacy claim" "$mig_json" '"state":"legacy"'
+mig_count="$(grep -c 'owner=session-mig-' <<<"$mig_out" || true)"
+assert_eq "all three active claims survive with their owners" "3" "$mig_count"
+# The migration assigns a generation, so the migrated owner releases
+# with that token: a tokenless release is refused under the same ABA
+# requirement as any v2 claim (an owner that lost its token routes
+# through manager reclaim).
+mig_notok_err="$(TASKS_SESSION=session-mig-2 t release "$f_m2" 2>&1 >/dev/null || true)"
+[[ -f "$f_m2.claim" ]] && ok "a migrated owner's tokenless release is refused" || bad "a migrated owner's tokenless release is refused"
+assert_contains "the migrated tokenless refusal asks for the token" "$mig_notok_err" "--generation"
+mig_gen2="$(gen_of "$f_m2")"
+TASKS_SESSION=session-mig-2 t release "$f_m2" --generation "$mig_gen2" >/dev/null
+[[ ! -f "$f_m2.claim" ]] && ok "a migrated owner releases with its assigned token" || bad "a migrated owner releases with its assigned token"
+mig_rec="$(TASKS_SESSION=manager t reclaim "$f_m3" --owner session-mig-3)"
+assert_contains "the manager reclaims a legacy claim through the explicit surface" "$mig_rec" "prior owner session-mig-3"
+rm -f "$f_m1" "$f_m2" "$f_m3" "$f_m1.claim" "$f_m3.claim"
+t render >/dev/null
+
+echo "== reclaim: manager-owned recovery, explicit and idempotent =="
+f_rec="$(t new --id REC-1 --name "Reclaim Target")"
+rec_out="$(TASKS_SESSION=manager t reclaim "$f_rec")"
+assert_contains "reclaim without a claim is a no-op success" "$rec_out" "no claim to reclaim"
+t claim "$f_rec" --owner session-stalled >/dev/null
+rec_out2="$(TASKS_SESSION=manager t reclaim "$f_rec" --owner session-successor)"
+assert_contains "reclaim reports the new owner" "$rec_out2" "by session-successor"
+assert_contains "reclaim reports the prior owner" "$rec_out2" "prior owner session-stalled"
+assert_contains "reclaim reports the prior generation" "$rec_out2" "prior generation"
+assert_eq "reclaim sets the sidecar owner" "session-successor" "$(sed -n '1p' "$f_rec.claim")"
+[[ "$(sed -n 's/^generation //p' "$f_rec.claim")" =~ ^[0-9a-f]{16}$ ]] && ok "reclaim issues a fresh generation" || bad "reclaim issues a fresh generation"
+assert_contains "reclaim sets the header Owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_rec")" "session-successor"
+rec_gen2="$(sed -n 's/^generation //p' "$f_rec.claim")"
+TASKS_SESSION=manager t reclaim "$f_rec" --owner session-successor >/dev/null
+assert_eq "a second reclaim is idempotent on the owner" "session-successor" "$(sed -n '1p' "$f_rec.claim")"
+rec_gen3="$(sed -n 's/^generation //p' "$f_rec.claim")"
+[[ "$rec_gen3" =~ ^[0-9a-f]{16}$ ]] && ok "the idempotent reclaim still leaves a valid token" || bad "the idempotent reclaim still leaves a valid token"
+TASKS_SESSION=session-successor t release "$f_rec" --generation "$rec_gen3" >/dev/null
+t render >/dev/null
+rm -f "$f_rec"
+
+echo "== claims sweep states: fresh, expired, orphan, terminal =="
+f_cl_fresh="$(t new --id CLF-1 --name "Claim Fresh")"
+t claim "$f_cl_fresh" --owner session-fresh >/dev/null
+f_cl_dead="$(t new --id CLD-1 --name "Claim Dead")"
+printf '%s\ngeneration 1111222233334444\ncreated 2026-06-14 07:00\n' "session-dead" >"$f_cl_dead.claim"
+printf '%s\ngeneration 5555666677778888\ncreated 2026-06-15 12:00\n' "session-orphan" >"$TASKS_DIR/current/GHOST-1.md.claim"
+f_cl_term="$(t new --id CLT-1 --name "Claim Terminal")"
+t set "$f_cl_term" Status=Cancelled "Status Reason=sweep probe" >/dev/null
+printf '%s\ngeneration 9999aaaabbbbcccc\ncreated 2026-06-15 12:00\n' "session-left" >"$f_cl_term.claim"
+cl_out="$(t claims)"
+assert_contains "the sweep reports a fresh claim" "$cl_out" "state=fresh"
+assert_contains "the sweep reports an expired claim" "$cl_out" "state=expired"
+assert_contains "the sweep reports an orphan sidecar" "$cl_out" "state=orphan"
+assert_contains "the sweep reports a terminal-task sidecar" "$cl_out" "state=terminal"
+cl_json="$(t claims --json)"
+assert_contains "the sweep JSON carries the expired flag" "$cl_json" '"state":"expired","expired":true'
+assert_contains "the sweep JSON counts expired claims" "$cl_json" '"expired":1'
+refuse "the sweep rejects unknown arguments" claims --bogus
+TASKS_SESSION=session-fresh t release "$f_cl_fresh" --generation "$(gen_of "$f_cl_fresh")" >/dev/null
+rm -f "$f_cl_dead" "$f_cl_dead.claim" "$TASKS_DIR/current/GHOST-1.md.claim" "$f_cl_term" "$f_cl_term.claim"
+t render >/dev/null
+
+echo "== typed event ledger: claim lifecycle and attempt provenance =="
+# The ledger rides the same locked spans as the writes it records: claim
+# lands acquired+started, the owner's release lands released+completed,
+# and the completed record carries the attempt's final provenance (the
+# last Work Log checkpoint anchor and the last report link). The battery
+# runs from the repo checkout, so the git provenance fields are populated
+# here; the empty case is the unparseable-context fallback, pinned by
+# shape only.
+f_ev="$(t new --id EVT-1 --name "Event Ledger Target")"
+ev_rel="current/$(basename "$f_ev")"
+t claim "$f_ev" --owner session-worker >/dev/null
+t log "$f_ev" --from session-worker "checkpoint one" >/dev/null
+printf 'probe body\n' | t report "$f_ev" --slug ev-probe --from session-worker --digest "probe deposit" >/dev/null
+TASKS_SESSION=session-worker t release "$f_ev" --generation "$(gen_of "$f_ev")" >/dev/null
+ev_out="$(t events --task "$ev_rel")"
+assert_contains "claim acquired rides the ledger" "$ev_out" "claim.acquired"
+assert_contains "claim released rides the ledger" "$ev_out" "claim.released"
+assert_contains "attempt started rides the ledger" "$ev_out" "attempt.started"
+assert_contains "attempt completed rides the ledger" "$ev_out" "attempt.completed"
+ev_json="$(t events --task "$ev_rel" --json)"
+assert_contains "the events payload names the schema type" "$ev_json" '"type":"events"'
+ev_started="$(grep 'attempt.started' <<<"$ev_json")"
+assert_contains "attempt.started carries the worker" "$ev_started" '"worker":"session-worker"'
+ev_branch="$(grep -oP '"branch":"\K[^"]*' <<<"$ev_started" | head -1)"
+[[ -n "$ev_branch" ]] && ok "attempt.started carries the branch provenance" || bad "attempt.started carries the branch provenance"
+ev_sha="$(grep -oP '"base_sha":"\K[^"]*' <<<"$ev_started" | head -1)"
+[[ "$ev_sha" =~ ^[0-9a-f]{40}$ ]] && ok "attempt.started carries the base SHA provenance" || bad "attempt.started carries the base SHA provenance"
+ev_completed="$(grep 'attempt.completed' <<<"$ev_json")"
+assert_contains "attempt.completed carries the checkpoint anchor" "$ev_completed" '"checkpoint":"2026-06-15 12:00"'
+assert_contains "attempt.completed carries the report link" "$ev_completed" '"report":"../reports/'
+ev_gen="$(grep 'claim.acquired' <<<"$ev_json" | grep -oP '"generation":"\K[^"]*' | head -1)"
+[[ "$ev_gen" =~ ^[0-9a-f]{16}$ ]] && ok "the acquired event carries the generation" || bad "the acquired event carries the generation"
+# Attempt pairing and outcome (F5): the started/completed pair share an
+# attempt_id, and outcome names how the attempt ended per release arm.
+ev_aid="$(grep -oP '"attempt_id":"\K[0-9a-f]+' <<<"$ev_started" | head -1)"
+[[ "$ev_aid" =~ ^[0-9a-f]{16}$ ]] && ok "attempt.started carries an attempt id" || bad "attempt.started carries an attempt id"
+ev_caid="$(grep -oP '"attempt_id":"\K[0-9a-f]+' <<<"$ev_completed" | head -1)"
+assert_eq "attempt.completed pairs with the started attempt id" "$ev_aid" "$ev_caid"
+assert_contains "the release-verb completion records the outcome" "$ev_completed" '"outcome":"released"'
+assert_contains "the completed record names the releasing session" "$ev_completed" '"released_by":"session-worker"'
+
+echo "== typed event ledger: outcome per release arm =="
+f_evc="$(t new --id EVT-2 --name "Event Outcome Close")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc"
+t claim "$f_evc" --owner session-closer >/dev/null
+TASKS_SESSION=session-closer t close "$f_evc" --generation "$(gen_of "$f_evc")" >/dev/null
+evc2_completed="$(t events --task "current/$(basename "$f_evc")" --json | grep 'attempt.completed' | tail -1)"
+assert_contains "the close completion records the outcome" "$evc2_completed" '"outcome":"completed"'
+f_evt="$(t new --id EVT-3 --name "Event Outcome Cancel")"
+t set "$f_evt" Status=Blocked "Status Reason=cancel probe" >/dev/null
+t claim "$f_evt" --owner session-canceler >/dev/null
+TASKS_SESSION=session-canceler t close "$f_evt" --cancelled --generation "$(gen_of "$f_evt")" >/dev/null
+evt_completed="$(t events --task "current/$(basename "$f_evt")" --json | grep 'attempt.completed' | tail -1)"
+assert_contains "the cancelled closure records the outcome" "$evt_completed" '"outcome":"cancelled"'
+f_evs="$(t new --id EVT-4 --name "Event Outcome Terminal Set")"
+t claim "$f_evs" --owner session-setter >/dev/null
+TASKS_SESSION=session-setter t set "$f_evs" --generation "$(gen_of "$f_evs")" Status=Cancelled "Status Reason=set probe" >/dev/null
+evs_completed="$(t events --task "current/$(basename "$f_evs")" --json | grep 'attempt.completed' | tail -1)"
+assert_contains "the terminal-set release records the outcome" "$evs_completed" '"outcome":"cancelled"'
+rm -f "$f_evc" "$f_evt" "$f_evs"
+# A release with no started record for the task (a hand-written drift
+# sidecar) completes unpaired: attempt_id is omitted, never empty.
+f_evu="$(t new --id EVT-5 --name "Event Unpaired Completion")"
+printf '%s\ngeneration 1111222233334444\ncreated 2026-06-15 12:00\n' "session-drift" >"$f_evu.claim"
+TASKS_SESSION=session-drift t release "$f_evu" --generation 1111222233334444 >/dev/null
+evu_completed="$(t events --task "current/$(basename "$f_evu")" --json | grep 'attempt.completed' | tail -1)"
+[[ "$evu_completed" == *attempt_id* ]] && bad "an unpaired completion omits attempt_id" || ok "an unpaired completion omits attempt_id"
+assert_contains "the unpaired completion still carries its outcome" "$evu_completed" '"outcome":"released"'
+rm -f "$f_evu"
+t render >/dev/null
+
+echo "== typed event ledger: filters and limits =="
+ev_all_json="$(t events --json)"
+ev_all_total="$(grep -oP '"total":\K[0-9]+' <<<"$ev_all_json")"
+ev_ledger_lines="$(wc -l <"$TASKS_DIR/events.log")"
+assert_eq "the JSON total equals the ledger line count (no lost append)" "$ev_ledger_lines" "$ev_all_total"
+ev_cls="$(t events --class audit)"
+[[ -n "$ev_cls" ]] && ok "the class filter matches audit events" || bad "the class filter matches audit events"
+assert_not_contains "the class filter excludes recovery events" "$ev_cls" "claim.acquired"
+ev_typ="$(t events --type attempt.started)"
+assert_contains "the type filter matches its events" "$ev_typ" "attempt.started"
+assert_not_contains "the type filter excludes other events" "$ev_typ" "attempt.completed"
+ev_lim="$(t events --limit 2)"
+ev_lim_rows="$(grep -c '^EVENT' <<<"$ev_lim" || true)"
+assert_eq "--limit shows only the last N matches" "2" "$ev_lim_rows"
+ev_bad_cls="$(t events --class nope 2>&1 >/dev/null || true)"
+refuse "an unknown class refuses" events --class nope
+assert_contains "the class refusal names the vocabulary" "$ev_bad_cls" "recovery, audit, cost"
+ev_mismatch="$(t events --class audit --type claim.acquired 2>&1 >/dev/null || true)"
+refuse "a type outside its class refuses" events --class audit --type claim.acquired
+assert_contains "the cross-class refusal names the mismatch" "$ev_mismatch" "does not belong to class"
+refuse "--limit rejects non-integers" events --limit zero
+refuse "events rejects unknown arguments" events --bogus
+
+echo "== typed event ledger: validation refuses corrupt records =="
+ev_ledger="$TASKS_DIR/events.log"
+ev_backup="$ROOT/events.backup"
+cp "$ev_ledger" "$ev_backup"
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.nonsense","session":"x","task":"current/x.md","generation":"abc"}' >>"$ev_ledger"
+ev_err="$(t events 2>&1 >/dev/null || true)"
+refuse "an unknown event type fails the read" events
+assert_contains "the corruption refusal carries the stable code" "$ev_err" "EVENT_CORRUPT"
+printf '%s\n' '{"schema_version":2,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.acquired","session":"x","task":"current/x.md","generation":"abc"}' >>"$ev_ledger"
+refuse "an unsupported schema_version fails the read" events
+printf '%s\n' '{"schema_version":1,"ts":"not-a-stamp","class":"audit","type":"attempt.started","session":"x","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":""}' >>"$ev_ledger"
+refuse "a non-canonical ts fails the read" events
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"audit","type":"attempt.started","session":"","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":""}' >>"$ev_ledger"
+refuse "an empty session fails the read" events
+printf '%s\n' 'not json at all' >>"$ev_ledger"
+refuse "a non-JSON line fails the read" events
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.acquired","session":"x","task":"current/x.md","generation":"abc",}' >>"$ev_ledger"
+refuse "a trailing comma fails the read" events
+cp -f "$ev_backup" "$ev_ledger"
+# Optional attempt fields (F5): absence stays valid so pre-field ledgers
+# read unchanged, and presence carries a shape check (non-empty string).
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"audit","type":"attempt.started","session":"x","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":""}' >>"$ev_ledger"
+ev_old_rc=0
+t events >/dev/null 2>&1 || ev_old_rc=1
+assert_eq "a pre-field attempt.started still validates" "0" "$ev_old_rc"
+cp -f "$ev_backup" "$ev_ledger"
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"audit","type":"attempt.started","session":"x","task":"current/x.md","worker":"w","branch":"","base_sha":"","checkpoint":"","report":"","attempt_id":""}' >>"$ev_ledger"
+refuse "an empty attempt_id fails the read" events
+cp -f "$ev_backup" "$ev_ledger"
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.released","session":"x","task":"current/x.md","generation":"abc","released_by":""}' >>"$ev_ledger"
+refuse "an empty released_by fails the read" events
+cp -f "$ev_backup" "$ev_ledger"
+printf '%s\n' '{"schema_version":1,"ts":"2026-06-15 12:00","class":"cost","type":"cost.sample","session":"x","task":"","model":"m","tokens_in":1,"tokens_out":2,"duration_ms":3}' >>"$ev_ledger"
+ev_cost_rc=0
+t events >/dev/null 2>&1 || ev_cost_rc=1
+assert_eq "a well-formed cost.sample record validates" "0" "$ev_cost_rc"
+cp -f "$ev_backup" "$ev_ledger"
+torn_line='{"schema_version":1,"ts":"2026-06-15 12:00","class":"recovery","type":"claim.acquired","session":"x","task":"current/x.md","generation":"ab'
+printf '%s' "$torn_line" >>"$ev_ledger"
+ev_torn_err="$(t events 2>&1 >/dev/null || true)"
+assert_not_contains "a torn tail line does not fail the read" "$ev_torn_err" "EVENT_CORRUPT"
+assert_contains "the torn tail announces the drop" "$ev_torn_err" "torn tail"
+cp -f "$ev_backup" "$ev_ledger"
+
+echo "== typed event ledger: concurrent claim cycles lose no append =="
+evc_root="$ROOT/events-concurrent"
+t init --dir "$evc_root/.tasks" >/dev/null
+ev_pids=()
+for i in 1 2 3 4 5 6; do
+	evc_file="$(t new --dir "$evc_root/.tasks" --id "EVC-$i" --name "Concurrent Event Target")"
+	( t claim --dir "$evc_root/.tasks" "$evc_file" --owner "evc-$i" >/dev/null 2>&1 \
+		&& TASKS_SESSION="evc-$i" t release --dir "$evc_root/.tasks" "$evc_file" --generation "$(sed -n 's/^generation //p' "$evc_file.claim")" >/dev/null 2>&1 ) &
+	ev_pids+=("$!")
+done
+wait
+evc_json="$(t events --dir "$evc_root/.tasks" --json)"
+evc_acq="$(grep -o '"type":"claim.acquired"' <<<"$evc_json" | wc -l)"
+evc_rel="$(grep -o '"type":"claim.released"' <<<"$evc_json" | wc -l)"
+evc_att="$(grep -o '"type":"attempt.started"' <<<"$evc_json" | wc -l)"
+assert_eq "six concurrent cycles land six acquisitions" "6" "$evc_acq"
+assert_eq "six concurrent cycles land six releases" "6" "$evc_rel"
+assert_eq "six concurrent cycles land six attempt starts" "6" "$evc_att"
+evc_total="$(grep -oP '"total":\K[0-9]+' <<<"$evc_json")"
+evc_lines="$(wc -l <"$evc_root/.tasks/events.log")"
+assert_eq "every concurrent append survives validation" "$evc_lines" "$evc_total"
+t render --dir "$evc_root/.tasks" >/dev/null
+rm -rf "$evc_root"
 
 echo "== blocked lane =="
 t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
@@ -287,7 +757,7 @@ t set --dir="$escdir" "$(basename "$f_esc1")" Status=Blocked "Status Reason=long
 assert_contains "set --dir= applies to the requested board" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_esc1")" "Blocked"
 t claim --dir="$escdir" "$(basename "$f_esc1")" --owner=sess-longform >/dev/null
 assert_contains "claim --owner= writes the owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_esc1")" "sess-longform"
-t release --dir="$escdir" "$(basename "$f_esc1")" >/dev/null
+TASKS_SESSION=sess-longform t release --dir="$escdir" "$(basename "$f_esc1")" --generation "$(gen_of "$f_esc1")" >/dev/null
 assert_eq "release --dir= clears the owner" "" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_esc1" || true)"
 show_esc="$(t show --dir="$escdir" "$(basename "$f_esc1")")"
 assert_contains "show --dir= reads the requested board" "$show_esc" "# Task: --force"
@@ -480,7 +950,7 @@ assert_contains "Owner deletion refusal names the claim path too" "$own_err" "cl
 assert_eq "Owner refusals leave the file byte-identical" "$own_before" "$(cat "$f_own")"
 if t claim "$f_own" --owner claim-owner >/dev/null 2>&1; then ok "claim stays the ownership write path"; else bad "claim stays the ownership write path"; fi
 assert_contains "claim sets Owner" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_own")" "claim-owner"
-t release "$f_own" >/dev/null
+TASKS_SESSION=claim-owner t release "$f_own" --generation "$(gen_of "$f_own")" >/dev/null
 rm -f "$f_own"
 t render >/dev/null
 
@@ -491,15 +961,32 @@ echo "== terminal status transitions release a live claim =="
 # Completed pair is pinned for the same guarantee).
 f_t1="$(t new --id TRL-1 --name "Terminal Release Target")"
 t claim "$f_t1" --owner sess-terminal >/dev/null
-t set "$f_t1" Status=Cancelled "Status Reason=terminal probe" >/dev/null
+TASKS_SESSION=sess-terminal t set "$f_t1" --generation "$(gen_of "$f_t1")" Status=Cancelled "Status Reason=terminal probe" >/dev/null
 [[ ! -f "$f_t1.claim" ]] && ok "set to Cancelled removes the claim sidecar" || bad "set to Cancelled removes the claim sidecar"
 assert_eq "set to Cancelled leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t1")"
 assert_contains "set to Cancelled lands the status" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_t1")" "Cancelled"
 f_t2="$(t new --id TRL-2 --name "Terminal Completed Target")"
 t claim "$f_t2" --owner sess-completed >/dev/null
-t set "$f_t2" Status=Completed >/dev/null
+TASKS_SESSION=sess-completed t set "$f_t2" --generation "$(gen_of "$f_t2")" Status=Completed >/dev/null
 [[ ! -f "$f_t2.claim" ]] && ok "set to Completed removes the claim sidecar" || bad "set to Completed removes the claim sidecar"
 assert_eq "set to Completed leaves Owner present and empty" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_t2")"
+# The G15 narrowing on the terminal-set arm: a foreign transition into a
+# terminal status refuses on a live claim and routes to reclaim, the
+# owner's own tokenless transition refuses too (identity strings
+# replay), and the owner's own transition with the claim's token
+# releases.
+f_t5="$(t new --id TRL-5 --name "Foreign Terminal Set Target")"
+t claim "$f_t5" --owner sess-holder >/dev/null
+fset_err="$(TASKS_SESSION=sess-foreign t set "$f_t5" Status=Cancelled "Status Reason=foreign probe" 2>&1 >/dev/null || true)"
+[[ -f "$f_t5.claim" ]] && ok "a foreign terminal-set leaves the claim intact" || bad "a foreign terminal-set leaves the claim intact"
+assert_contains "the foreign terminal-set refusal names the recorded owner" "$fset_err" "sess-holder"
+assert_contains "the foreign terminal-set refusal routes recovery to reclaim" "$fset_err" "reclaim"
+assert_contains "the refused foreign set leaves the status open" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_t5")" "Triage"
+fset_tok_err="$(TASKS_SESSION=sess-holder t set "$f_t5" Status=Cancelled "Status Reason=own probe" 2>&1 >/dev/null || true)"
+[[ -f "$f_t5.claim" ]] && ok "the owner's tokenless terminal-set leaves the claim intact" || bad "the owner's tokenless terminal-set leaves the claim intact"
+assert_contains "the owner's tokenless terminal-set is refused with the token requirement" "$fset_tok_err" "--generation"
+TASKS_SESSION=sess-holder t set "$f_t5" --generation "$(gen_of "$f_t5")" Status=Cancelled "Status Reason=own probe" >/dev/null
+[[ ! -f "$f_t5.claim" ]] && ok "the owner's own tokened terminal set releases the claim" || bad "the owner's own tokened terminal set releases the claim"
 f_t3="$(t new --id TRL-3 --name "Stale Claim On Terminal")"
 t set "$f_t3" Status=Cancelled "Status Reason=stale probe" >/dev/null
 printf 'sess-stale\n' >"$f_t3.claim"
@@ -509,8 +996,8 @@ f_t4="$(t new --id TRL-4 --name "Open Set Claim Target")"
 t claim "$f_t4" --owner sess-open >/dev/null
 t set "$f_t4" Priority=High >/dev/null
 [[ -f "$f_t4.claim" ]] && ok "an open-status set keeps the live claim" || bad "an open-status set keeps the live claim"
-t release "$f_t4" >/dev/null
-rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4"
+TASKS_SESSION=sess-open t release "$f_t4" --generation "$(gen_of "$f_t4")" >/dev/null
+rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4" "$f_t5"
 t render >/dev/null
 
 echo "== set: unknown header keys are rejected before any write =="
@@ -597,7 +1084,7 @@ assert_eq "re-set Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_
 owner_seam ""
 t claim "$f_pos" --owner claim-pos >/dev/null
 assert_eq "claimed Owner lands in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
-t release "$f_pos" >/dev/null
+TASKS_SESSION=claim-pos t release "$f_pos" --generation "$(gen_of "$f_pos")" >/dev/null
 assert_eq "release keeps Owner in canonical order" "$POS_CANONICAL_ORDER" "$(pos_order)"
 owner_seam ""
 t release "$f_pos" >/dev/null
@@ -721,15 +1208,21 @@ done
 rm -f "$TASKS_DIR/current/"NUM-*.md "$TASKS_DIR/current/9.md"
 t render >/dev/null
 
-echo "== claim/release with a stale sidecar =="
+echo "== claim recovery with a stale sidecar =="
+# BEHAVIOR CHANGE (G15, same landing as the pin rewrite): the stale sidecar's
+# recovery used to be a bare foreign release; under generation-token claims
+# it is the explicit manager reclaim, and the reclaimed owner's own release
+# then clears the claim.
 printf '%s\n' "stale-session" >"$f_cs.claim"
 refuse "claim under a stale sidecar is rejected" claim "$f_cs" --owner newcomer
 claim_err="$(t claim "$f_cs" --owner newcomer 2>&1 >/dev/null || true)"
 assert_contains "rejection names the stale owner" "$claim_err" "stale-session"
-t release "$f_cs" >/dev/null
-[[ ! -f "$f_cs.claim" ]] && ok "release removes the stale sidecar" || bad "release removes the stale sidecar"
+TASKS_SESSION=manager t reclaim "$f_cs" --owner newcomer >/dev/null
+assert_eq "reclaim takes over the stale claim" "newcomer" "$(sed -n '1p' "$f_cs.claim")"
+TASKS_SESSION=newcomer t release "$f_cs" --generation "$(gen_of "$f_cs")" >/dev/null
+[[ ! -f "$f_cs.claim" ]] && ok "the reclaimed owner's release removes the sidecar" || bad "the reclaimed owner's release removes the sidecar"
 owner_now="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_cs" || true)"
-assert_eq "release clears Owner even for a stale claim" "" "${owner_now:-}"
+assert_eq "the reclaimed owner's release clears Owner" "" "${owner_now:-}"
 	# With no sidecar present, a claim failure must be reported as a create
 	# failure, not conflated with "already claimed". Root is immune to mode
 	# bits, so under root the chmod cannot provoke the failure and the
@@ -747,7 +1240,7 @@ assert_eq "release clears Owner even for a stale claim" "" "${owner_now:-}"
 		assert_not_contains "permission failure is not misreported as claimed" "$perm_err" "already claimed"
 	fi
 if t claim "$f_cs" --owner newcomer >/dev/null 2>&1; then ok "claim succeeds after stale release"; else bad "claim succeeds after stale release"; fi
-t release "$f_cs" >/dev/null
+TASKS_SESSION=newcomer t release "$f_cs" --generation "$(gen_of "$f_cs")" >/dev/null
 
 echo "== render stays byte-identical across repeated runs =="
 before="$(cat "$DASH")"
@@ -878,10 +1371,14 @@ PATH="$mk_shim:$PATH" "$TASKS_BIN" set --dir "$mk_dir" "$mkfile" \
 assert_eq "multi-pair set runs one rewrite awk" "2" "$(count_awks)"
 count_reset
 PATH="$mk_shim:$PATH" "$TASKS_BIN" claim --dir "$mk_dir" "$mkfile" --owner alice >/dev/null
-assert_eq "claim runs one rewrite awk" "2" "$(count_awks)"
+# One rewrite awk + one render assembler awk + two ledger-event awk (the
+# claim lifecycle's acquired/started records, one escaper pass each).
+assert_eq "claim runs one rewrite awk beside its two event awk" "4" "$(count_awks)"
 count_reset
-PATH="$mk_shim:$PATH" "$TASKS_BIN" release --dir "$mk_dir" "$mkfile" >/dev/null
-assert_eq "release runs one rewrite awk" "2" "$(count_awks)"
+PATH="$mk_shim:$PATH" TASKS_SESSION=alice "$TASKS_BIN" release --dir "$mk_dir" "$mkfile" --generation "$(sed -n 's/^generation //p' "$mk_dir/current/$mkfile.claim")" >/dev/null
+# Write + render + the released/completed pair + the single completed-
+# provenance pass over the file + the pairing scan over the ledger tail.
+assert_eq "release runs one rewrite awk beside its event awk" "6" "$(count_awks)"
 # Simultaneously-missing keys must land in canonical template order at
 # their shared insertion anchor, exactly as the old sequential per-key
 # passes did (Completed precedes Duration in TEMPLATE_HEADER_FIELDS).
@@ -2040,7 +2537,7 @@ f_blk="$(t new --id CLS-12 --name "Blocked Closure Probe")"
 sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_blk"
 t set "$f_blk" Status=Blocked "Status Reason=waiting on deps" >/dev/null
 t claim "$f_blk" --owner sess-closer >/dev/null
-TASKS_TEST_CLOCK="2026-06-16 11:00" t close "$f_blk" >/dev/null
+TASKS_TEST_CLOCK="2026-06-16 11:00" TASKS_SESSION=sess-closer t close "$f_blk" --generation "$(gen_of "$f_blk")" >/dev/null
 assert_not_contains "close drops the Status Reason" "$(awk '/^## /{exit}{print}' "$f_blk")" "**Status Reason:**"
 [[ ! -f "$f_blk.claim" ]] && ok "close removes the claim sidecar" || bad "close removes the claim sidecar"
 assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
@@ -2387,7 +2884,7 @@ TASKS_TEST_CLOCK="2026-06-15 09:00" t log "$f_cc" "first anchor" >/dev/null
 TASKS_TEST_CLOCK="2026-06-15 11:00" t log "$f_cc" "second anchor" >/dev/null
 t set "$f_cc" Status=Blocked "Status Reason=waiting on requeue" >/dev/null
 t claim "$f_cc" --owner sess-cancel >/dev/null
-cc_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" t close "$f_cc" --cancelled)"
+cc_out="$(TASKS_TEST_CLOCK="2026-06-16 10:00" TASKS_SESSION=sess-cancel t close "$f_cc" --cancelled --generation "$(gen_of "$f_cc")")"
 assert_contains "close --cancelled reports the cancellation" "$cc_out" "cancelled $(basename "$f_cc")"
 assert_contains "close --cancelled reports the derived duration" "$cc_out" "Duration 2h"
 assert_eq "close --cancelled stamps Status Cancelled" "Cancelled" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cc")"
