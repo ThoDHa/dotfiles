@@ -2,8 +2,11 @@
 # ORCH-4-9-4 representative executions run under this file).
 #
 # Realizes the verifier's zero-diff posture: the live map's `tasks render`
-# allow stays (the role's one sanctioned CLI write), no task reads exist,
-# and the fixture denial tail is appended last.
+# allow stays (the role's one sanctioned CLI write), and the fixture
+# denial tail is appended last. The two task-read allows carry the
+# representative execution's surface (executions.sh's verifier scenario
+# reads the task file and reports it verifies); the live map itself still
+# names no task reads.
 #
 # Rule semantics are opencode's: ordered rules, the LAST matching rule
 # wins, so the denial tail overrides everything above it.
@@ -21,6 +24,8 @@ permissions:
   - { action: shell, resource: "git push*", effect: deny }
   - { action: shell, resource: "make verify", effect: allow }
   - { action: shell, resource: "tasks render", effect: allow }
+  - { action: shell, resource: "tasks show *", effect: allow }
+  - { action: shell, resource: "tasks reports *", effect: allow }
   - { action: shell, resource: "git status *", effect: allow }
   - { action: shell, resource: "git diff *", effect: allow }
   - { action: shell, resource: "git log *", effect: allow }

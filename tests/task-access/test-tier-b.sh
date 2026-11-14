@@ -10,8 +10,10 @@
 # transcript audit red on planted direct-access transcripts and green on a
 # clean one.
 #
-# The representative executions themselves are ORCH-4-9-4's; this suite
-# proves the skeleton they will run under.
+# The representative executions themselves are ORCH-4-9-4's and run in this
+# suite through executions.sh (sourced below): one scripted minimal scenario
+# per role on a seeded fixture board, config-gated, shim-backed, and
+# transcript-audited.
 #
 # Fixture boundary: sufficiency and discipline, not enforcement. The
 # evaluator models the configs' verdicts; the audit detects direct access;
@@ -286,6 +288,11 @@ echo "== transcript audit: an unterminated final line is still scanned =="
 printf '{"tool":"bash","command":"tasks show /tmp/x --json"}\ncat .tasks/final-line.md' > "$ROOT/nonl-transcript.log"
 AUDIT_OUT="$(bash "$AUDIT" "$ROOT/nonl-transcript.log" 2>&1)"; AUDIT_RC=$?
 if ((AUDIT_RC == 1)); then ok "audit catches a violation on an unterminated final line"; else bad "audit catches a violation on an unterminated final line (exit $AUDIT_RC)"; fi
+
+echo "== representative executions (ORCH-4-9-4) =="
+# shellcheck source=/dev/null
+source "$REPO_ROOT/tests/task-access/executions.sh"
+run_representative_executions
 
 print_result
 ((fail == 0)) || exit 1
