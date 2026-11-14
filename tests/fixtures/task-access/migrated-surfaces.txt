@@ -19,3 +19,10 @@
 
 agents/.agents/skills/task-files/SKILL.md
 agents/.agents/skills/delegation/SKILL.md
+opencode/.config/opencode/agents/planner.md @planner
+opencode/.config/opencode/agents/reviewer.md @reviewer
+opencode/.config/opencode/agents/worker.md @worker
+opencode/.config/opencode/agents/advisor.md @advisor
+opencode/.config/opencode/agents/manager.md @manager
+opencode/.config/opencode/agents/scout.md @scout
+opencode/.config/opencode/agents/verifier.md @verifier

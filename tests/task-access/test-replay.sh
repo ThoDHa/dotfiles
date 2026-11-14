@@ -198,6 +198,8 @@ o="$(tasks show "${VALUES[ARCHIVED]}" --section "Technical Approach")"
 assert_contains "advisor evidence anchor readable through show" "$o" "Decision: Seed Anchor"
 o="$(tasks show "${VALUES[ARCHIVED]}" --section "Task Breakdown")"
 assert_contains "nested content survives the section read model" "$o" "Nested heading body PROVEMARK inside"
+o="$(tasks show "${VALUES[ARCHIVED]}" --raw)"
+assert_eq "the raw read round-trips the archived file byte-exactly" "$o" "$(cat "${VALUES[ARCHIVED]}")"
 o="$(tasks show "${VALUES[NEWFILE]}" --json)"
 assert_contains "manager set writes the header field" "$o" '"Progress":"25%"'
 o="$(tasks show "${VALUES[ARCHIVED]}" --json)"

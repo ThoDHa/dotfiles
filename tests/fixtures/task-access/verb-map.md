@@ -15,11 +15,13 @@ Twenty-three verbs exist in the landed binary. Read verbs inspect the board and 
 nothing: `show`, `list`, `reports`, `export`, `lint`, `doctor`, `frontier`, `claims`,
 `events`, plus `help` for usage text. Write verbs mutate the board: `init`, `render`,
 `new`, `set`, `report`, `log`, `edit`, `claim`, `release`, `reclaim`, `archive`, `close`,
-`stamp`. Task files resolve by path; archived tasks resolve by full path under `archive/`
-(bare basenames resolve only inside `current/`). The task-files skill's raw escape hatch
+`stamp`. Task files resolve by path; archived tasks resolve by full path under `archive/`, and a
+bare basename resolves current/-first with an `archive/` fallback (the landed resolver's
+order, probed at ORCH-4-9-3's re-verification gate; the gate reconciled this paragraph,
+whose conservative form named `current/` only). The task-files skill's raw escape hatch
 (`tasks show <taskfile> --raw`) rides the authorized `show` verb's flag space: it is
-admissible wherever a role's set admits `tasks show`, and replay-proven `--raw` forms in
-the per-role sets ride ORCH-4-9-3's fixture work.
+admissible wherever a role's set admits `tasks show`, and the per-role sets carry
+replay-proven `--raw` forms proven by ORCH-4-9-3's replay.
 
 ### Deviations From the Plan's Cited Contract (Reconciliation Record)
 
@@ -48,7 +50,7 @@ replaced, and the parity proof. Command spellings are the landed CLI's, byte-fai
 
 | Aspect | Contract |
 |--------|----------|
-| Authorized reads | `tasks list --json`; `tasks show <taskfile>`; `tasks show <taskfile> --json`; `tasks show <taskfile> --section <heading>`; `tasks reports <taskfile> --json`; `tasks reports <taskfile> --include-body --json` |
+| Authorized reads | `tasks list --json`; `tasks show <taskfile>`; `tasks show <taskfile> --json`; `tasks show <taskfile> --raw`; `tasks show <taskfile> --section <heading>`; `tasks reports <taskfile> --json`; `tasks reports <taskfile> --include-body --json` |
 | Write channels | `tasks log <taskfile> --from planner "<msg>"`; `tasks report <taskfile> --slug <slug> --from planner --digest "<line>"`; `tasks edit <taskfile> --section <heading> [--append]` (the widened planner write channel: planning sections via the CLI edit write model) |
 | Map deltas | Remove `{ action: edit, resource: ".tasks/**", effect: allow }`, replaced by the explicit `{ action: edit, resource: ".tasks/**", effect: deny }`. Add after the shell catch-all deny: `tasks show *`, `tasks list *`, `tasks reports *`, `tasks edit *` allows. Keep the existing `tasks log *` and `tasks report *` allows. `ls`/`cat`/`grep`/`wc` allows remain for territory (repo) reads only; no allow is added that reaches `.tasks` arguments. While the retained exception below stands, the map carries `{ action: edit, resource: ".tasks/reports/research/**", effect: allow }` immediately after that `.tasks` deny: last-match-wins keeps it narrow to the research subtree, `tier-b/planner.yaml` mirrors the pair above its fixture-denial-tail marker, and the allow goes away with the exception when a CLI research-deposit path lands (the explicit deny stays). |
 | Replaced direct access | Rule-1 direct read of the named task file (reads go through `show`); planning-section fills via the task-files skill's planning-mode exception direct edit writes (go through `tasks edit`); `cat`/`grep` reads of `.tasks` paths (go through the read verbs). |
@@ -59,7 +61,7 @@ replaced, and the parity proof. Command spellings are the landed CLI's, byte-fai
 
 | Aspect | Contract |
 |--------|----------|
-| Authorized reads | `tasks show <taskfile> --json` (structured Work Log); `tasks show <taskfile> --section <heading>`; `tasks reports <taskfile> --json`; `tasks reports <taskfile> --include-body --json` (worker report bodies); `tasks list --json` |
+| Authorized reads | `tasks show <taskfile> --json` (structured Work Log); `tasks show <taskfile> --raw`; `tasks show <taskfile> --section <heading>`; `tasks reports <taskfile> --json`; `tasks reports <taskfile> --include-body --json` (worker report bodies); `tasks list --json` |
 | Write channels | `tasks report <taskfile> --slug review --from reviewer --digest "<line>"` (unchanged; already CLI-only) |
 | Map deltas | Add after the shell catch-all deny: `tasks show *`, `tasks list *`, `tasks reports *` allows. No removals: the reviewer never held an edit or `.tasks` write allow. |
 | Replaced direct access | Worker report files read directly under `.tasks/reports/` (go through `reports --include-body`); Work Log entries read directly inside child task files (go through `show --json` and `show --section "Work Log"`); plan-draft planning sections read directly (go through `show --section`). |
@@ -69,7 +71,7 @@ replaced, and the parity proof. Command spellings are the landed CLI's, byte-fai
 
 | Aspect | Contract |
 |--------|----------|
-| Authorized reads | `tasks show <taskfile>`; `tasks show <taskfile> --json` (the dispatched child task file: dispatch entries, Success Criteria, state) |
+| Authorized reads | `tasks show <taskfile>`; `tasks show <taskfile> --json` (the dispatched child task file: dispatch entries, Success Criteria, state); `tasks show <taskfile> --raw` |
 | Write channels | `tasks log <taskfile> --from <agent-id> "<msg>"`; `tasks report <taskfile> --slug <slug> --from <agent-id> --digest "<line>"` (already CLI-only; unchanged). The worker runs under the dispatch's exported `TASKS_SESSION`, the claiming session's, so its `tasks log` and `tasks report` checkpoints refresh the claim's expiry heartbeat (the manager-claims/worker-deposits handshake below); a foreign session's checkpoint does not refresh a claim and says so on stderr. |
 | Map deltas | None: the worker's allow-first map already permits the CLI verbs. The contract text change is wording only (the dual-harness note's "writes under `.tasks/` are plain file writes in both harnesses" framing becomes CLI-channel framing). |
 | Replaced direct access | Direct read of the dispatched task file (goes through `tasks show`); the plain-file-write framing in the dual-harness note (reworded to the two CLI channels). |
@@ -79,9 +81,9 @@ replaced, and the parity proof. Command spellings are the landed CLI's, byte-fai
 
 | Aspect | Contract |
 |--------|----------|
-| Authorized reads | `tasks show <taskfile> --json`; `tasks show <taskfile> --section <heading>` (evidence anchors); `tasks reports <taskfile> --json`; `tasks list --json` |
+| Authorized reads | `tasks show <taskfile> --json`; `tasks show <taskfile> --raw`; `tasks show <taskfile> --section <heading>` (evidence anchors); `tasks reports <taskfile> --json`; `tasks reports <taskfile> --include-body --json` (report bodies); `tasks list --json` |
 | Write channels | `tasks log <taskfile> --from advisor "<msg>"`; `tasks report <taskfile> --slug <slug> --from advisor --digest "<line>"` (unchanged) |
-| Map deltas | Add after the shell catch-all deny: `tasks show *`, `tasks list *`, `tasks reports *` allows. Byte-identical with the planner's added block: lint-corpus check 7 requires the planner and advisor shell-rule blocks to stay identical, so every read-verb addition lands in both files in the same order. |
+| Map deltas | Add after the existing `tasks log *` and `tasks report *` allows the planner's four-allow read-and-write block byte-identically (the planner row carries the spellings; lint-corpus check 7 pins the two shell-rule blocks together, so the addition lands in both files in the same order). The gate reconciled this row, which first named only the three read verbs, to the four-allow block the identity pin and `tier-b/advisor.yaml` carry; the advisor's contract bars any edit write, so the shared write allow stays map-real and contract-unused on the advisor. |
 | Replaced direct access | Evidence anchors read directly from task-file sections via `cat` or the read tool (go through `show --section`); report indexes scanned by directory listing (go through `reports --json`). |
 | Parity proof | Replay suite advisor scenario: reads the seeded Decision Log anchor and report index, logs, deposits, all under the shims. |
 
@@ -89,7 +91,7 @@ replaced, and the parity proof. Command spellings are the landed CLI's, byte-fai
 
 | Aspect | Contract |
 |--------|----------|
-| Authorized reads | All read verbs in their proven replay forms: `tasks show <taskfile> --json`; `tasks show <taskfile> --section <heading>`; `tasks list --json` (with `--lane <lane>` as needed); `tasks reports <taskfile> --include-body --json`; `tasks export --format jsonl --include-reports`; `tasks lint`; `tasks doctor --json`; `tasks frontier --json`; `tasks claims --json`; `tasks events --json` |
+| Authorized reads | All read verbs in their proven replay forms: `tasks show <taskfile> --json`; `tasks show <taskfile> --raw`; `tasks show <taskfile> --section <heading>`; `tasks list --json` (with `--lane <lane>` as needed); `tasks reports <taskfile> --include-body --json`; `tasks export --format jsonl --include-reports`; `tasks lint`; `tasks doctor --json`; `tasks frontier --json`; `tasks claims --json`; `tasks events --json` |
 | Write channels | All write verbs: `tasks new`; `tasks claim`; `tasks edit --section <heading> [--append]`; `tasks set`; `tasks log`; `tasks report`; `tasks release --generation <token>`; `tasks close`; `tasks stamp`; `tasks archive`; `tasks reclaim`; `tasks render`; `tasks init` (the scaffold-time channel, proven on an initialized board by the replay). Instructions Given dispatch entries are appended through `tasks edit --section "Work Log" --append` (indented `#` lines inside the quoted instructions, per the heading-delimiter hazard). The manager-claims/worker-deposits handshake binds claims to dispatches: a dispatch runs with the claiming session's `TASKS_SESSION` (or the claim carries the worker's `--owner` id), so the dispatched worker's `tasks log` and `tasks report` checkpoints refresh the claim's expiry heartbeat; a long-running worker must not be dispatched under a foreign session, or its checkpoints leave the heartbeat silent and the claim expires under active work. A foreign session's checkpoint never refreshes a foreign claim and says so on stderr. Pinned by the replay suite's handshake scenario. |
 | Map deltas | None in this migration: the `edit .tasks/**` allow is RETAINED as the interim recovery channel (parent Decision Log) while the contract text migrates to CLI-only normal operation. The allow's removal is ORCH-4-10's, once the enforced boundary and the controlled-exception mechanism exist. The Tier-B fixture config denies this allow for the representative executions, proving the CLI suffices without it. |
 | Replaced direct access | Instructions Given entries written directly into the Work Log (go through `tasks edit --append`); task-file status writes performed by direct header edits (go through `tasks set`); direct reads of filled-out task files, work logs, and claims (go through the read verbs); direct planning-prose edits (go through `tasks edit`). |

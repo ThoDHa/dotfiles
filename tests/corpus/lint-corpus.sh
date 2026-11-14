@@ -546,15 +546,16 @@ check_line_budgets() {
 # canonical-item assertion (CANONICAL_PERMISSION_ITEM_RE) fails that
 # class before the comparison runs, and a body code fence still cannot
 # stand in for the rules. Only the shell action is
-# extracted because the pair's edit rules deliberately differ and
-# whole-list identity would fail on that deliberate difference. The
+# extracted because the pair's edit rules deliberately differ, and
+# since the verb map's planner deltas land a two-rule .tasks edit pair
+# with no advisor counterpart they legitimately differ in count too, so
+# identity stays scoped to the shell block: one-sided shell drift still
+# fails through the byte comparison and the shell-rule count. The
 # list state also ends at the first non-item line, so shell-pattern
 # lines under a later frontmatter key are never collected. The
 # comparison is unsorted, in file order, byte-identical; a file with
 # no permissions list, or a list with no shell rules, fails as missing
-# or empty instead of passing vacuously, and a one-sided list insertion
-# or deletion fails the whole-list count comparison even when the
-# shell rules still match.
+# or empty instead of passing vacuously.
 check_map_identity() {
 	assert_present "$MAP_ID_PLANNER"
 	assert_present "$MAP_ID_ADVISOR"
@@ -566,8 +567,6 @@ check_map_identity() {
 	in_frontmatter && /^permissions:$/ { in_list = 1 }
 	in_list && $0 !~ /^permissions:$/ && $0 !~ /^  - / && $0 !~ /^  -$/ && $0 !~ /^[[:space:]]*$/ { in_list = 0 }
 	in_list && (/^  - / || /^  -$/) {
-		listn[FILENAME]++
-		itemline[FILENAME, listn[FILENAME]] = FNR
 		if (!(FILENAME in baditem) && ($0 ~ sq || $0 !~ canre)) {
 			baditem[FILENAME] = FNR
 			badtext[FILENAME] = $0
@@ -604,12 +603,6 @@ check_map_identity() {
 		if (count[pf] != count[af]) {
 			shared = (count[pf] < count[af] ? count[pf] : count[af])
 			printf "FAIL: %s:%d: shell permission block diverges from %s:%d at rule %d: blocks have %d vs %d rules\n", pf, start[pf] + shared, af, start[af] + shared, shared + 1, count[pf], count[af]
-			exit 1
-		}
-		if (listn[pf] != listn[af]) {
-			wider = (listn[pf] >= listn[af] ? pf : af)
-			beyond = (listn[pf] < listn[af] ? listn[pf] : listn[af]) + 1
-			printf "FAIL: %s:%d: %s has %d items vs %s %d; the lists diverge in length at item %d, the first item beyond the shorter list; a one-sided list insertion or deletion breaks the shared contract even when the shell rules still match\n", wider, itemline[wider, beyond], pf, listn[pf], af, listn[af], beyond
 			exit 1
 		}
 	}' "$MAP_ID_PLANNER" "$MAP_ID_ADVISOR"

@@ -32,6 +32,7 @@ ROLE_COMMANDS_planner=(
 	'tasks list --json'
 	'tasks show {{PARENT}}'
 	'tasks show {{PARENT}} --json'
+	'tasks show {{PARENT}} --raw'
 	'tasks show {{PARENT}} --section "Technical Approach"'
 	'tasks reports {{PARENT}} --json'
 	'tasks reports {{PARENT}} --include-body --json'
@@ -42,6 +43,7 @@ ROLE_COMMANDS_planner=(
 
 ROLE_COMMANDS_reviewer=(
 	'tasks show {{CHILD}} --json'
+	'tasks show {{CHILD}} --raw'
 	'tasks show {{CHILD}} --section "Work Log"'
 	'tasks reports {{CHILD}} --json'
 	'tasks reports {{CHILD}} --include-body --json'
@@ -51,6 +53,7 @@ ROLE_COMMANDS_reviewer=(
 
 ROLE_COMMANDS_worker=(
 	'tasks show {{CHILD}} --json'
+	'tasks show {{CHILD}} --raw'
 	'tasks log {{CHILD}} --from worker "worker replay interim"'
 	'tasks report {{CHILD}} --slug final --from worker --digest "worker replay final" <<< "Worker final body PROVEMARK."'
 )
@@ -58,7 +61,9 @@ ROLE_COMMANDS_worker=(
 ROLE_COMMANDS_advisor=(
 	'tasks show {{PARENT}} --section "Technical Approach"'
 	'tasks show {{PARENT}} --json'
+	'tasks show {{PARENT}} --raw'
 	'tasks reports {{PARENT}} --json'
+	'tasks reports {{PARENT}} --include-body --json'
 	'tasks list --json'
 	'tasks log {{PARENT}} --from advisor "advisor replay note"'
 	'tasks report {{PARENT}} --slug memo --from advisor --digest "advisor replay memo" <<< "Advisor memo body PROVEMARK."'
@@ -75,6 +80,7 @@ ROLE_COMMANDS_manager=(
 	'tasks show {{NEWFILE}} --json'
 	'tasks list --json --lane "In Progress"'
 	'tasks show {{PARENT}} --section "Technical Approach"'
+	'tasks show {{PARENT}} --raw'
 	'tasks reports {{CHILD}} --include-body --json'
 	'tasks frontier --json'
 	'tasks doctor --json'
