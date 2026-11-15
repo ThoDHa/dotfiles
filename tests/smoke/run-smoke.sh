@@ -12,10 +12,12 @@
 #       Hermetic instrument check: every scenario file parses against the
 #       registry (id, RO key, FL key), every declared fixture exists, the
 #       S6 prompt carries the seven routing class names verbatim (the
-#       names are the pin; file line ranges never are), and the grader
-#       self-test passes over synthetic transcripts. No model calls; this
-#       is the mode chained into make test / make verify-inner as
-#       test-smoke.
+#       names are the pin; file line ranges never are), the rules-body
+#       join is pinned byte-equal between the dir join and the HEAD ref
+#       join (one shared implementation with the AGENTS.md generator),
+#       and the grader self-test passes over synthetic transcripts. No
+#       model calls; this is the mode chained into make test /
+#       make verify-inner as test-smoke.
 #
 #   run-smoke.sh [--scenario S1] [--model provider/id] [--thinking LEVEL]
 #                [--run-dir DIR]
@@ -54,11 +56,12 @@
 #
 # Body under test (scenario header `body:`): `manager` (default) injects
 # the manager charter exactly as before; `rules` injects the four rules
-# files concatenated in the AGENTS.md generator order (core,
-# coding-standards, execution-standards, qhaway-memory) with the manager
-# charter absent, so always-on chain behavior is graded against the same
-# composition contract the paired delta needs. Baseline and tip rules
-# bodies come from the same ref/worktree split as the manager bodies.
+# files in the AGENTS.md generator order (core, coding-standards,
+# execution-standards, qhaway-memory) joined exactly as that generator
+# joins them (one blank line between files, none after the last) with the
+# manager charter absent, so always-on chain behavior is graded against
+# the same composition contract the paired delta needs. Baseline and tip
+# rules bodies come from the same ref/worktree split as the manager bodies.
 #
 # Live composition contract (held constant across baseline and post-edit
 # runs so a delta is attributable to the corpus edit alone): the session is
@@ -94,12 +97,17 @@ RULES_DIR_REL="opencode/.config/opencode/rules"
 # (pi/generate-agents-md.sh): a rules-body scenario's injected corpus is
 # exactly the always-on chain that generation produces.
 RULES_FILES=(core.md coding-standards.md execution-standards.md qhaway-memory.md)
+# The rules-body join is the AGENTS.md generator's join, shared through
+# lib/rules-generator-common.sh so a generator join change cannot desync
+# the injected corpus silently; run_validate pins the dir and ref joins
+# byte-equal.
+source "$REPO_ROOT/lib/rules-generator-common.sh"
 
 # Gating registry: fixed by the calibration ruling (ORCH-4-6-2 task file,
 # Work Log 2026-11-09 23:10) for the manager set S1-S7, extended by
 # ORCH-4-6-3 with its per-touched-row rules-corpus scenarios S11-S13;
 # S8-S10 are advisory until they carry their own baseline plus stability.
-GATING_IDS="S1 S2 S3 S4 S5 S6 S7 S11 S12 S13"
+GATING_IDS="S1 S2 S3 S4 S5 S6 S7 S11 S12 S13 S14 S15 S16 S17"
 
 usage() {
 	echo "usage: run-smoke.sh --validate"
@@ -139,26 +147,73 @@ manager_body_from() {
 
 manager_body() { manager_body_from "$FLEET_MANAGER_MD"; }
 
-# Concatenate the four rules files (generator order) into $1: the
-# always-on chain body a `body: rules` scenario injects.
+# Concatenate the four rules files into $1 the way the AGENTS.md
+# generator (pi/generate-agents-md.sh) joins the rule bodies, through
+# the shared joiner: verbatim files in generator order with exactly one
+# blank line between files and none after the last, so the injected
+# corpus is the always-on chain body byte-for-byte.
 rules_body_from_dir() {
 	local out="$1" f
-	: > "$out"
+	local -a sources=()
 	for f in "${RULES_FILES[@]}"; do
 		[[ -f "$REPO_ROOT/$RULES_DIR_REL/$f" ]] || die "rules source missing: $RULES_DIR_REL/$f"
-		cat "$REPO_ROOT/$RULES_DIR_REL/$f" >> "$out"
+		sources+=("$REPO_ROOT/$RULES_DIR_REL/$f")
 	done
+	: > "$out"
+	rules_generator_join_rules "$out" "${sources[@]}" || die "rules body join failed"
 }
 
-# Same concatenation from a git ref: the pre-edit rules chain the paired
-# delta compares against.
+# Same generator join from a git ref: the pre-edit rules chain the paired
+# delta compares against. The ref blobs are materialized to scratch and
+# joined by the same shared joiner; the scratch is removed on every exit
+# path.
 rules_body_from_ref() {
 	local ref="$1" out="$2" f
-	: > "$out"
+	local scratch
+	scratch="$(mktemp -d)" || die "cannot create the rules join scratch"
+	local -a sources=()
 	for f in "${RULES_FILES[@]}"; do
-		git -C "$REPO_ROOT" show "$ref:$RULES_DIR_REL/$f" >> "$out" \
-			|| die "cannot read $RULES_DIR_REL/$f from $ref"
+		git -C "$REPO_ROOT" show "$ref:$RULES_DIR_REL/$f" > "$scratch/$f" \
+			|| { rm -rf "$scratch"; die "cannot read $RULES_DIR_REL/$f from $ref"; }
+		sources+=("$scratch/$f")
 	done
+	: > "$out"
+	rules_generator_join_rules "$out" "${sources[@]}" \
+		|| { rm -rf "$scratch"; die "rules body join failed"; }
+	rm -rf "$scratch"
+}
+
+# A `body: skill-<name>` scenario injects the named on-demand skill file
+# verbatim, frontmatter included: the Y composition is the skill file plus
+# frontmatter (locked contract section 2). A real summon sits the skill on
+# top of the always-on rules chain, which the skill-only session omits, so
+# rubric pins stay on skill-retained text (the README authoring rule).
+SKILLS_DIR_REL="agents/.agents/skills"
+
+skill_body_from_dir() {
+	local name="$1" out="$2"
+	local src="$REPO_ROOT/$SKILLS_DIR_REL/$name/SKILL.md"
+	[[ -f "$src" ]] || die "skill source missing: $SKILLS_DIR_REL/$name/SKILL.md"
+	[[ -s "$src" ]] || die "skill source is empty: $SKILLS_DIR_REL/$name/SKILL.md"
+	cat "$src" > "$out"
+}
+
+skill_body_from_ref() {
+	local ref="$1" name="$2" out="$3"
+	git -C "$REPO_ROOT" show "$ref:$SKILLS_DIR_REL/$name/SKILL.md" > "$out" \
+		|| die "cannot read $SKILLS_DIR_REL/$name/SKILL.md from $ref"
+	[[ -s "$out" ]] || die "skill body from $ref is empty: $SKILLS_DIR_REL/$name/SKILL.md"
+}
+
+# The distinct skill names the selected scenarios' body kinds name, one
+# per line, sorted: the set of skill bodies a run must build.
+skill_names_for() {
+	local sid kind
+	for sid in "$@"; do
+		kind="$(scenario_body "$(scenario_path "$sid")")" \
+			|| die "scenario $sid failed to parse during body selection"
+		[[ "$kind" == skill-* ]] && printf '%s\n' "${kind#skill-}"
+	done | sort -u
 }
 
 # Which corpus a scenario injects: `manager` (default) or `rules`.
@@ -227,6 +282,16 @@ for path in files:
             fail(f"{sid}: declared fixture missing: {fixture}")
     if sid == "S6":
         s6 = scenario
+    body = scenario.get("body", "manager")
+    if body in ("manager", "rules"):
+        pass
+    elif body.startswith("skill-"):
+        skill_root = os.path.join(scenario_dir, "..", "..", "..", "agents", ".agents", "skills")
+        skill_file = os.path.join(skill_root, body[len("skill-"):], "SKILL.md")
+        if not (os.path.isfile(skill_file) and os.path.getsize(skill_file) > 0):
+            fail(f"{sid}: body {body} names no non-empty skill at agents/.agents/skills/{body[len('skill-'):]}/SKILL.md")
+    else:
+        fail(f"{sid}: unknown body kind: {body} (known: manager, rules, skill-<name>)")
 missing_ids = sorted(set(smoke_lib.REGISTRY) - set(seen))
 if missing_ids:
     fail(f"registry scenarios missing from {scenario_dir}: {missing_ids}")
@@ -246,6 +311,20 @@ PYEOF
 )" || rc=1
 	echo "$check_out"
 	echo "$check_out" | grep -q "VALIDATE FAIL" && rc=1
+	# Join equality pin: the dir join and the ref join share the generator's
+	# join implementation; the pin proves the ref-materialized path yields
+	# the same bytes, so a join desync cannot land silently. A dirty rules
+	# worktree also trips this pin (the message says which); a missing
+	# source or unreadable ref dies in the builders instead.
+	local pin_scratch
+	pin_scratch="$(mktemp -d)" || die "cannot create the join pin scratch"
+	rules_body_from_dir "$pin_scratch/join-dir.md"
+	rules_body_from_ref HEAD "$pin_scratch/join-ref.md"
+	if ! cmp -s "$pin_scratch/join-dir.md" "$pin_scratch/join-ref.md"; then
+		echo "VALIDATE FAIL rules join: the dir join and the HEAD ref join differ (uncommitted rules edits or a join desync)"
+		rc=1
+	fi
+	rm -rf "$pin_scratch"
 	local selftest_out
 	selftest_out="$(python3 "$LIB" --selftest)" || rc=1
 	echo "$selftest_out"
@@ -321,12 +400,13 @@ PYEOF
 	elif ((rc != 0)); then
 		verdict="ERROR (pi exit $rc; see dispatch.err)"
 	else
-		grade_out="$(python3 - "$transcript" "$sfile" "$LIB" <<'PYEOF'
+		grade_out="$(python3 - "$transcript" "$sfile" "$body_file" "$LIB" <<'PYEOF'
 import sys
-sys.path.insert(0, sys.argv[3].rsplit("/", 1)[0])
+sys.path.insert(0, sys.argv[4].rsplit("/", 1)[0])
 import smoke_lib
 scenario = smoke_lib.parse_scenario(sys.argv[2])
-verdict, checks = smoke_lib.grade_scenario(scenario, sys.argv[1])
+body_chars = smoke_lib.body_chars_from_file(sys.argv[3])
+verdict, checks = smoke_lib.grade_scenario(scenario, sys.argv[1], body_chars=body_chars)
 for label, ok, detail in checks:
     print(f"    {'ok' if ok else 'FAIL'}  {label}  [{detail}]")
 print(verdict)
@@ -379,6 +459,12 @@ run_live() {
 	manager_body > "${tip_body_files[manager]}"
 	tip_body_files[rules]="$run_dir/rules-body.md"
 	rules_body_from_dir "${tip_body_files[rules]}"
+	local skill_name
+	while IFS= read -r skill_name; do
+		[[ -n "$skill_name" ]] || continue
+		tip_body_files["skill-$skill_name"]="$run_dir/skill-$skill_name-body.md"
+		skill_body_from_dir "$skill_name" "${tip_body_files[skill-$skill_name]}"
+	done < <(skill_names_for "${scenarios[@]}")
 
 	# Resolve per-scenario bodies up front so a missing corpus or a
 	# malformed scenario dies before any dispatch.
@@ -495,6 +581,18 @@ run_paired() {
 		&& echo "NOTE: baseline and tip rules bodies are byte-identical; the rules rows measure stability, not a corpus delta."
 	local -A baseline_bodies=([manager]="$baseline_body" [rules]="$baseline_rules_body")
 	local -A tip_bodies=([manager]="$tip_body" [rules]="$tip_rules_body")
+	local skill_name bskill tskill
+	while IFS= read -r skill_name; do
+		[[ -n "$skill_name" ]] || continue
+		bskill="$run_dir/skill-$skill_name-body-baseline.md"
+		tskill="$run_dir/skill-$skill_name-body-tip.md"
+		skill_body_from_ref "$baseline_ref" "$skill_name" "$bskill"
+		skill_body_from_dir "$skill_name" "$tskill"
+		cmp -s "$bskill" "$tskill" \
+			&& echo "NOTE: baseline and tip $skill_name skill bodies are byte-identical; those rows measure stability, not a corpus delta."
+		baseline_bodies["skill-$skill_name"]="$bskill"
+		tip_bodies["skill-$skill_name"]="$tskill"
+	done < <(skill_names_for "${scenarios[@]}")
 
 	echo "Paired delta run: ${scenarios[*]}"
 	echo "  run dir: $run_dir"

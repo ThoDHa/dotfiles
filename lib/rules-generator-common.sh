@@ -69,6 +69,34 @@ rules_generator_parse_output_arg() { # default_output usage_word [output_path]
     fi
 }
 
+# Append the rule bodies verbatim to OUTPUT in the given order: exactly
+# one blank line between files and none after the last, so the result
+# carries the AGENTS.md body contract (each rules source ends with a
+# single trailing newline, the separator adds one more, and the last
+# body adds no separator, leaving no trailing blank at EOF). The fleet
+# compiler and the smoke harness's rules-body builders share this one
+# implementation so the generated artifact and the injected corpus
+# cannot desync. The caller owns any truncation of OUTPUT (the fleet
+# compiler writes its header first, the harness starts from an empty
+# file). Returns nonzero on a missing source; fatal handling is the
+# caller's.
+rules_generator_join_rules() { # output file...
+    local out="$1"
+    shift
+    local f idx=0
+    for f in "$@"; do
+        if [ ! -f "$f" ]; then
+            echo "  rules source missing: $f" >&2
+            return 1
+        fi
+        if [ "$idx" -gt 0 ]; then
+            echo "" >> "$out"
+        fi
+        cat "$f" >> "$out"
+        idx=$((idx + 1))
+    done
+}
+
 # Full init contract for the rules compilers: resolve RULES_DIR and
 # OUTPUT_FILE and exit nonzero on an invalid argument list. Composes the
 # two functions above so each half stays independently callable.

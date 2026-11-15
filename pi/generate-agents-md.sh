@@ -41,15 +41,14 @@ Generated from the dotfiles opencode rules by `make sync-agents-md`; verify with
 
 EOF
 
-# Rule bodies verbatim, joined by exactly one blank line: each rule file
-# ends with a single trailing newline and the separator adds one more, so
-# the last body must not be followed by a separator (no trailing blank at EOF).
-for ((i = 0; i < ${#RULE_FILES[@]}; i++)); do
-    cat "$RULES_DIR/${RULE_FILES[$i]}" >> "$OUTPUT_FILE"
-    if ((i < ${#RULE_FILES[@]} - 1)); then
-        echo "" >> "$OUTPUT_FILE"
-    fi
+# Rule bodies verbatim, joined by exactly one blank line: the shared
+# contract lives in lib/rules-generator-common.sh (the last body is not
+# followed by a separator, so there is no trailing blank at EOF).
+rules_sources=()
+for rule_file in "${RULE_FILES[@]}"; do
+    rules_sources+=("$RULES_DIR/$rule_file")
 done
+rules_generator_join_rules "$OUTPUT_FILE" "${rules_sources[@]}"
 
 echo -e "${GREEN}✓ AGENTS.md generated successfully${NC}"
 echo ""

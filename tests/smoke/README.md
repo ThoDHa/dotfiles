@@ -28,20 +28,22 @@ pins; file line ranges never are.
 | S11 | Memory-store check on a tool-less session reports failure and never fabricates recall results | RO-021 | - |
 | S12 | A five-component task pauses with the execution-approach options instead of starting work | RO-101 | - |
 | S13 | The execution-approach pause bars any execution until the user directs the approach | RO-105 | - |
+| S14 | Batch closure: one combined seam review plus the proportional watchdog, teardown scoped to the batch's own deposits | RO-265 | FL-05 |
+| S15 | Unit tiers assigned and presented, floors never drop, design-bearing adds the second memo, no dispatch before sign-off | RO-257 | FL-03 |
+| S16 | Delegation as default: bounded lookup direct, delegable item dispatched, uncertainty defaults to delegation | RO-253 | - |
+| S17 | The sanctioned ordered pair lands fix-first pushed together; red-first never amended; pushed tips never rewritten | RO-064 | - |
 
 S8-S10 are ORCH-4-6-2's per-touched-row scenarios (compression and
 pointer-collapse surfaces the initial registry did not carry); S11-S13
 are ORCH-4-6-3's, one per touched rules-corpus row, run under the rules
-body composition (below). A "-" flash key marks a row with no Flash-era
-candidate.
+body composition (below); S14-S16 are ORCH-4-6-4's per-touched-row
+scenarios for the delegation skill and S17 its git-protocol row, run
+under skill-body compositions (below). A "-" flash key marks a row with
+no Flash-era candidate.
 
 ## Modes
 
-`run-smoke.sh --validate` is the hermetic instrument check chained into
-`make test` and `make verify-inner` as `test-smoke`: every scenario file
-parses against the registry (id, RO key, FL key), declared fixtures exist,
-the S6 prompt carries the seven routing class names verbatim, and the
-grader self-test passes over synthetic transcripts. No model calls.
+`run-smoke.sh --validate` is the hermetic instrument check chained into `make test` and `make verify-inner` as `test-smoke`: every scenario file parses against the registry (id, RO key, FL key), declared fixtures exist, the S6 prompt carries the seven routing class names verbatim, the rules-body join is pinned byte-equal between the worktree-dir join and the HEAD ref join (both share the AGENTS.md generator's join implementation in `lib/rules-generator-common.sh`, so a join desync cannot land silently), and the grader self-test passes over synthetic transcripts. No model calls.
 
 `run-smoke.sh` (optionally `--scenario S1`, `--model provider/id`,
 `--thinking LEVEL`, `--run-dir DIR`) is the live mode, explicit invocation
@@ -71,21 +73,13 @@ on the gating set (stop: rollback is the manager's decision), 2 = no
 gating scenario produced green, vocab, or regression evidence (an
 entirely broken instrument must not exit 0).
 
+Manifest discipline for recovered runs: `manifest.txt` in a run dir carries the union of every completed row. When a run is interrupted and its remaining rows are re-run into the same dir (a session-cap kill mid-queue, for example), the partial manifest is preserved alongside as `manifest-<stamp>-partial-<rows>.txt` and its rows are unioned into `manifest.txt` (or a pointer line inside `manifest.txt` names the partial file), so the run dir stays self-evidencing for audit without cross-referencing files.
+
 ## Two-tier rubric gate and rules-body composition
 
-A scenario rubric may split its checks with `tier:` directives
-(`semantics`, the default, and `literal`): semantics checks are the
-routing/verdict/dispatch assertions the gate exists for; literal checks
-are vocabulary pins. A literal-only miss grades VOCAB, recorded as a
-non-gating vocabulary-drift signal (the paired table carries it as a
-VOCAB row); any semantics miss FAILs and gates at full force, in any
-single window, per the two-tier rule from the ORCH-4-6-2 review's second
-memo. Scenario header `body: rules` swaps the injected corpus: instead
-of the manager charter the session receives the four rules files
-concatenated in the AGENTS.md generator order, so always-on chain
-behavior grades under the same composition contract; `body: manager`
-(default) keeps the charter. Paired mode builds a baseline and tip body
-per kind from the same ref/worktree split.
+A scenario rubric may split its checks with `tier:` directives (`semantics`, the default, and `literal`): semantics checks are the routing/verdict/dispatch assertions the gate exists for; literal checks are vocabulary pins. A literal-only miss grades VOCAB, recorded as a non-gating vocabulary-drift signal (the paired table carries it as a VOCAB row); any semantics miss FAILs and gates at full force, in any single window, per the two-tier rule from the ORCH-4-6-2 review's second memo. Scenario header `body: rules` swaps the injected corpus: instead of the manager charter the session receives the four rules files in the AGENTS.md generator order, joined exactly as that generator joins them (one blank line between files, none after the last), so the injected corpus is the always-on chain body byte-for-byte; `body: manager` (default) keeps the charter; `body: skill-<name>` injects the named on-demand skill's SKILL.md verbatim, frontmatter included; a real summon sits that skill on top of the always-on rules chain, which the skill-only session omits. Paired mode builds a baseline and tip body per kind from the same ref/worktree split.
+
+Rubric authoring rule for skill-body scenarios (ORCH-4-6-4 review DC2): a content-tier pin may only cover text the skill retains after a collapse. The skill-only composition omits the rules chain, so a pin on text a collapse moved into the rules false-reds under the skill-only body while the real composed session behaves fine; pin retained skill text or the reply-stated decision instead. A composed rules+skill body kind for content-tier checks is declined (ORCH-4-6-4 review, same disposition): it adds harness surface and lets rules edits perturb skill rows.
 
 ## Live composition contract
 
@@ -107,18 +101,7 @@ the wrong charter.
 
 ## Scenario file grammar
 
-Header lines (`id`, `title`, `ro-key`, `flash`, `timeout`, repeatable
-`fixture:`, `body:`), then `--- prompt ---` with the verbatim dispatch,
-then `--- rubric ---` with the mechanical checks: `require:`, `forbid:`,
-`require-if: A=>B`, `require-any: A|B`, `tool-require: AGENT`,
-`tool-forbid: AGENT`, `tool-max: AGENT N`, `tool-min: AGENT N`,
-`tools-max: NAME N` (any toolCall block, subagent included, N >= 0),
-`reply-max-lines: N`, and `tier: semantics|literal` directives. Matching
-is literal and case-insensitive with whitespace-run tolerance; rubrics
-grade the routing decision the reply states, never clause quoting, so a
-pass says the behavior survived and a fail says it did not. The prompt's
-output-contract lines (labeled decision lines) are what make the grading
-deterministic.
+Header lines (`id`, `title`, `ro-key`, `flash`, `timeout`, repeatable `fixture:`, `body:`), then `--- prompt ---` with the verbatim dispatch, then `--- rubric ---` with the mechanical checks: `require:`, `forbid:`, `require-if: A=>B`, `require-any: A|B`, `tool-require: AGENT`, `tool-forbid: AGENT`, `tool-max: AGENT N` (where `AGENT` may be the reserved word `total`, bounding the sum of all named dispatch slots), `tool-min: AGENT N`, `tools-max: NAME N` (any toolCall block, subagent included, N >= 0), `reply-max-lines: N`, and `tier: semantics|literal` directives. Matching is literal and case-insensitive with whitespace-run tolerance; rubrics grade the routing decision the reply states, never clause quoting, so a pass says the behavior survived and a fail says it did not. The prompt's output-contract lines (labeled decision lines) are what make the grading deterministic.
 
 ## Extending
 

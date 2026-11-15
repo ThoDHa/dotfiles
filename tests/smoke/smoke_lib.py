@@ -19,9 +19,11 @@ Scenario file grammar (no YAML dependency):
   timeout: 900            `body:` selects the injected corpus under test
   fixture: s1-thing.md    (`manager`, the default, injects the manager
   body: rules             charter; `rules` injects the four rules files
-  --- prompt ---          concatenated in the AGENTS.md generator order)
-  ...multi-line dispatch the manager receives verbatim...
-  --- rubric ---
+  --- prompt ---          concatenated in the AGENTS.md generator order;
+  ...multi-line dispatch the manager receives verbatim...  `skill-<name>`
+  --- rubric ---          injects that on-demand skill's SKILL.md verbatim,
+                          frontmatter included, the summon-equivalent
+                          composition)
   tier: semantics                 directive: assigns the tier of every
   tier: literal                   following rubric line (default semantics)
   require: LITERAL                reply must contain LITERAL (case-insensitive)
@@ -30,7 +32,9 @@ Scenario file grammar (no YAML dependency):
   require-any: A|B|C              reply must contain at least one of A|B|C
   tool-require: AGENT             transcript must dispatch subagent AGENT
   tool-forbid: AGENT              transcript must not dispatch subagent AGENT
-  tool-max: AGENT N               transcript dispatches AGENT at most N times
+  tool-max: AGENT N               transcript dispatches AGENT at most N times;
+                                  AGENT may be the reserved word `total`,
+                                  bounding the sum of all named dispatch slots
   tool-min: AGENT N               transcript dispatches AGENT at least N times
   tools-max: NAME N               transcript uses tool NAME at most N times
                                   (any toolCall block, subagent included)
@@ -81,6 +85,18 @@ REGISTRY = {
     "S11": ("RO-021", "-"),
     "S12": ("RO-101", "-"),
     "S13": ("RO-105", "-"),
+    # ORCH-4-6-4's per-touched-row scenarios for the three smaller skills
+    # (delegation, git-protocol, simplify-review), same registry-grows-only-
+    # for-touched-rows rule. All four run under skill-body compositions
+    # (body: skill-<name>): the on-demand skill file is the corpus under
+    # test, injected summon-equivalent with frontmatter included. The
+    # delegation skill carries one flash-era coupling candidate (FL-05 rides
+    # the batch-closure rows; S7 already grades the watchdog); git-protocol
+    # and the touched delegation rows carry no flash candidate of their own.
+    "S14": ("RO-265", "FL-05"),
+    "S15": ("RO-257", "FL-03"),
+    "S16": ("RO-253", "-"),
+    "S17": ("RO-064", "-"),
 }
 
 # The seven-class routing pin (08-consolidation-6 section 5, the corpus's
@@ -99,7 +115,20 @@ SEVEN_CLASS_NAMES = [
 PROMPT_MARKER = "--- prompt ---"
 RUBRIC_MARKER = "--- rubric ---"
 HEADER_KEYS = ("id", "title", "ro-key", "flash", "timeout", "fixture", "body")
+# Fixed kinds plus the `skill-<name>` family: a skill-kind value injects
+# the named on-demand skill file verbatim (frontmatter included) as the
+# summon-equivalent corpus under test. The name is validated against the
+# repo's skill tree by the runner's validate mode, which is the only place
+# that can see the repo layout.
 BODY_KINDS = ("manager", "rules")
+BODY_SKILL_PREFIX = "skill-"
+
+
+def is_valid_body_kind(value):
+    """True when value is a fixed body kind or a well-formed skill kind."""
+    return value in BODY_KINDS or (
+        isinstance(value, str) and value.startswith(BODY_SKILL_PREFIX)
+        and len(value) > len(BODY_SKILL_PREFIX))
 TIER_KINDS = ("semantics", "literal")
 DEFAULT_TIER = "semantics"
 
@@ -107,17 +136,39 @@ RUBRIC_KINDS = ("require", "forbid", "require-if", "require-any",
                 "tool-require", "tool-forbid", "tool-max", "tool-min",
                 "tools-max", "reply-max-lines")
 
+# Reserved tool-max AGENT name bounding the SUM of all named dispatch
+# slots rather than one agent's count: composition-agnostic
+# over-dispatch sensitivity, for scenarios where a retry moves the
+# extra dispatch between agents.
+TOTAL_DISPATCH_PIN = "total"
+
 # Dispatch counting is per subagent toolCall event, so a parallel or chain
 # dispatch naming an agent twice in one call counts once per named slot;
 # the prior-memo bar's mechanical leg needs total call events, not slots,
 # and the transcript records one toolCall per dispatch act either way.
 
-# The live run injects the manager body under test as pi's appended system
+# The live run injects the body under test as pi's appended system
 # prompt, which lands in the transcript's system message "addendum"
 # section. The instrument check bounds its size instead of matching body
-# prose, so the check survives corpus rewraps (the manager body is tens of
-# KB; a missing injection leaves the pi default addendum far below this).
+# prose, so the check survives corpus rewraps. The caller passes the
+# injected body's size in chars and the floor is 90% of it: a missing injection
+# leaves the pi default addendum far below any body's floor, and the
+# bound holds for every body kind (manager tens of KB, rules concat,
+# skill files around 5-35 KB) without a per-kind table. When the caller
+# passes no size, the historic fixed floor applies (the manager floor
+# the selftest pins).
 MIN_INJECTED_ADDENDUM_CHARS = 15000
+INJECTED_ADDENDUM_FLOOR_RATIO = 0.9
+
+
+def body_chars_from_file(path):
+    """Character count of an injected body file, decoded as UTF-8: the
+    proportional floor compares chars against chars, so the body is
+    sized by decoding it. A byte count would overstate a multibyte-heavy
+    body and can push the floor above what any injection of that body
+    can reach."""
+    with open(path, encoding="utf-8") as fh:
+        return len(fh.read())
 
 
 class ScenarioError(Exception):
@@ -157,9 +208,10 @@ def parse_scenario(path):
                     raise ScenarioError(f"{path}:{lineno}: empty fixture name")
                 scenario["fixtures"].append(value)
             elif key == "body":
-                if value not in BODY_KINDS:
+                if not is_valid_body_kind(value):
                     raise ScenarioError(
-                        f"{path}:{lineno}: body must be one of {BODY_KINDS}: {raw!r}")
+                        f"{path}:{lineno}: body must be one of {BODY_KINDS} "
+                        f"or {BODY_SKILL_PREFIX}<name>: {raw!r}")
                 scenario[key] = value
             else:
                 scenario[key] = value
@@ -318,7 +370,7 @@ def extract_transcript(transcript_path):
     return addendum_chars, reply, agents, agent_calls, tool_calls, errors
 
 
-def grade_scenario(scenario, transcript_path):
+def grade_scenario(scenario, transcript_path, body_chars=None):
     """Grade one live transcript against the scenario rubric; returns
     (verdict, checks) where checks is a list of (label, ok, detail).
     Verdicts: PASS (instrument and semantics tier green), VOCAB (every
@@ -329,10 +381,14 @@ def grade_scenario(scenario, transcript_path):
      errors) = extract_transcript(transcript_path)
     checks = []
     checks.append(("instrument: session started", not errors, "; ".join(errors)))
+    if body_chars is not None:
+        min_addendum = max(1, int(body_chars * INJECTED_ADDENDUM_FLOOR_RATIO))
+    else:
+        min_addendum = MIN_INJECTED_ADDENDUM_CHARS
     checks.append((
         "instrument: body under test injected into the system addendum",
-        addendum_chars >= MIN_INJECTED_ADDENDUM_CHARS,
-        f"addendum {addendum_chars} chars (minimum {MIN_INJECTED_ADDENDUM_CHARS})"))
+        addendum_chars >= min_addendum,
+        f"addendum {addendum_chars} chars (minimum {min_addendum})"))
     checks.append(("instrument: non-empty final reply", bool(reply.strip()),
                    f"{len(reply.strip())} chars"))
     instrument_failed = any(not ok for label, ok, _ in checks
@@ -373,9 +429,13 @@ def grade_scenario(scenario, transcript_path):
             detail = (f"dispatched agents: {sorted(agents) or 'none'}")
         elif kind == "tool-max":
             agent_name, cap = rest.split()
-            calls = agent_calls.get(agent_name, 0)
+            if agent_name == TOTAL_DISPATCH_PIN:
+                calls = sum(agent_calls.values())
+                detail = f"total dispatches {calls} time(s), cap {cap}"
+            else:
+                calls = agent_calls.get(agent_name, 0)
+                detail = f"{agent_name} dispatched {calls} time(s), cap {cap}"
             ok = calls <= int(cap)
-            detail = f"{agent_name} dispatched {calls} time(s), cap {cap}"
         elif kind == "tool-min":
             agent_name, floor = rest.split()
             calls = agent_calls.get(agent_name, 0)
@@ -487,6 +547,35 @@ def run_selftest():
         record("grade: passing transcript passes",
                verdict == "PASS" and all(ok for _, ok, _ in checks))
 
+        # Instrument floor scales with the body under test: a skill-sized
+        # body (about 11 KB, far below the manager-body floor) passes when
+        # the addendum carries it and fails when the injection is missing.
+        # The caller passes the injected body's size; without it the
+        # historic fixed floor applies.
+        small_sysmsg = {"type": "message_start",
+                        "message": {"role": "system",
+                                    "sections": {"addendum": "x" * 10500}}}
+        small = os.path.join(tmp, "small.jsonl")
+        with open(small, "w", encoding="utf-8") as fh:
+            for event in (session, small_sysmsg, assistant):
+                fh.write(json.dumps(event) + "\n")
+        verdict, checks = grade_scenario(scenario, small, body_chars=11000)
+        record("grade: skill-sized body injection passes at the proportional floor",
+               verdict == "PASS")
+        verdict, checks = grade_scenario(scenario, small, body_chars=110000)
+        record("grade: short addendum against a bigger body fails the floor",
+               any("addendum" in label and not ok for label, ok, _ in checks))
+
+        # The floor compares chars against chars: the caller sizes the
+        # body by decoding the file, so a multibyte-heavy body counts
+        # characters, not bytes (bytes would overstate the body and
+        # push the floor out of reach).
+        multibyte = os.path.join(tmp, "multibyte.md")
+        with open(multibyte, "w", encoding="utf-8") as fh:
+            fh.write("x" * 100 + "é" * 50)
+        record("grade: body sizing decodes before counting (chars not bytes)",
+               body_chars_from_file(multibyte) == 150)
+
         # Grader: a second dispatch to the capped agent trips tool-max.
         assistant_twice = {"type": "message_end", "message": {"role": "assistant",
                            "content": [
@@ -504,6 +593,50 @@ def run_selftest():
         verdict, checks = grade_scenario(scenario, twice)
         record("grade: tool-max cap trip caught",
                any("tool-max:" in label and not ok for label, ok, _ in checks))
+
+        # tool-max with the reserved `total` name bounds the sum of all
+        # named dispatch slots, whatever composition carries them: a
+        # retry may absorb the second agent's slot into a third dispatch
+        # of the first, and the calibrated total still holds while any
+        # composition totalling over the cap trips.
+        total_scenario_text = base.replace("tool-max: advisor 1",
+                                           "tool-max: total 3")
+        path_total = os.path.join(tmp, "total.md")
+        with open(path_total, "w", encoding="utf-8") as fh:
+            fh.write(total_scenario_text)
+        total_scenario = parse_scenario(path_total)
+
+        def total_checks(name, named_slots):
+            assistant_total = {
+                "type": "message_end",
+                "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "name": "subagent",
+                     "arguments": {"tasks": [{"agent": a} for a in named_slots]}},
+                    {"type": "text", "text": "ITEM 1: retry once\nROUTE advisor\n"
+                                             "lane-a\nADVANCE: no"}]}}
+            out = os.path.join(tmp, name)
+            with open(out, "w", encoding="utf-8") as fh:
+                for event in (session, sysmsg, assistant_total):
+                    fh.write(json.dumps(event) + "\n")
+            return grade_scenario(total_scenario, out)[1]
+
+        checks_mixed3 = total_checks("total-mixed3.jsonl",
+                                     ["advisor", "reviewer", "reviewer"])
+        record("grade: total dispatch bound holds on the mixed calibrated composition",
+               all(ok for label, ok, _ in checks_mixed3
+                   if "tool-max: total" in label))
+        checks_solo3 = total_checks("total-solo3.jsonl",
+                                    ["advisor", "advisor", "advisor"])
+        record("grade: total dispatch bound holds when one agent absorbs the slots",
+               all(ok for label, ok, _ in checks_solo3
+                   if "tool-max: total" in label))
+        checks_mixed4 = total_checks("total-mixed4.jsonl",
+                                     ["advisor", "reviewer", "reviewer", "reviewer"])
+        record("grade: total dispatch bound trips over the cap in any composition",
+               any("tool-max: total" in label and not ok
+                   for label, ok, _ in checks_mixed4)
+               and any("total dispatches 4 time(s), cap 3" in detail
+                       for _, _, detail in checks_mixed4))
 
         # Two-tier rubric: literal-only miss grades VOCAB, semantics miss
         # grades FAIL, and a no-tier scenario keeps the historic FAIL.
