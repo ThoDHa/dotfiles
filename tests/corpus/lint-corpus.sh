@@ -23,10 +23,12 @@
 #                             non-markdown helpers in the same tree stay
 #                             out of the corpus; corpus-docs class:
 #                             tracked .md outside the excluded trees)
-#   6. line budgets           per-file agent budgets (manager 390,
-#                             worker 150, verifier 120, reviewer 150,
+#   6. line budgets           per-file agent budgets (manager 385,
+#                             worker 130, verifier 120, reviewer 150,
 #                             planner 125, advisor 95, scout 70), rules 190,
-#                             SKILL.md 950, README/DESIGN under 500
+#                             SKILL.md 935, README/DESIGN under 335;
+#                             this enumeration is parsed and compared
+#                             against the map, failing on disagreement
 #   7. shell rule identity    the planner and advisor permissions lists
 #                             carry byte-identical shell-rule blocks
 #                             (unsorted, in file order); a missing or
@@ -108,26 +110,33 @@ CORPUS_SCOPES=("$SKILL_SCOPE" "$AGENTS_SCOPE" "$RULES_SCOPE" "README.md" "openco
 # the derived tracked-markdown source set instead of git ls-files.
 CORPUS_DOCS_DIR="."
 
-# Line budgets from the corpus review; sized to the current corpus with
-# headroom, binding only future drift. Agent files budget per file, not
-# as a class: each entry equals that file's current line count plus
-# headroom of max(10 lines, ten percent), rounded up to a multiple of 5,
-# so one file's growth cannot spend another file's slack (manager.md sat
-# at 319 of the shared 320). manager.md's entry is the one deliberate
-# exception: its 390 is a hard cap at the file's current line count
-# (moved from 395 by the V2 frontmatter conversion, which shrank the
-# frontmatter five lines: the dropped name key and four map headers),
-# superseding the headroom formula for that one file so the anti-drift
-# pressure stays binding; additive policy work there must pay a dedup
-# pass or raise the cap explicitly. The map is the only registry: a
-# tracked agent file without an entry, or an entry without a tracked
-# file, fails the budget check.
+# Line budgets, the close-out ratchet mirror (ORCH-4-6-7): every entry is
+# set from the phase's measured post-slimming state with headroom of
+# max(10 lines, ten percent) rounded up to a multiple of 5, and never
+# looser than the prior registry's value for the same file or class. The
+# token-layer ceilings this mirror holds live in the close-out digest
+# deposit (.tasks/reports/ORCH-4-6-7-.../02-digest.md): X[always-on]
+# 10,411 input-side tokens (rules chain composition), Y per-skill
+# summon-equivalent delegation 8,914 / git-protocol 4,524 / task-files
+# 17,663-17,727 band; line budgets stay the byte-level drift guard and
+# never substitute for the measured layer. Agent files budget per file,
+# not as a class, so one file's growth cannot spend another file's
+# slack; where the headroom formula exceeds the prior value the prior
+# value stands (reviewer 150, advisor 95, scout 70). manager.md's entry
+# is the one deliberate exception: a hard cap at the file's measured
+# line count (385; the cap has tracked the file down from 395 through
+# the V2 frontmatter conversion and the slimming phase), superseding
+# the headroom formula so the anti-drift pressure stays binding;
+# additive policy work there must pay a dedup pass or raise the cap
+# explicitly. The map is the only registry: a tracked agent file
+# without an entry, or an entry without a tracked file, fails the
+# budget check.
 BUDGET_RULE_LINES=190
-BUDGET_SKILL_LINES=950
-BUDGET_CORPUS_DOC_LINES=500
+BUDGET_SKILL_LINES=935
+BUDGET_CORPUS_DOC_LINES=335
 declare -A BUDGET_AGENT_FILE_LINES=(
-	[opencode/.config/opencode/agents/manager.md]=390
-	[opencode/.config/opencode/agents/worker.md]=150
+	[opencode/.config/opencode/agents/manager.md]=385
+	[opencode/.config/opencode/agents/worker.md]=130
 	[opencode/.config/opencode/agents/verifier.md]=120
 	[opencode/.config/opencode/agents/reviewer.md]=150
 	[opencode/.config/opencode/agents/planner.md]=125
@@ -493,8 +502,49 @@ check_inventory_membership() {
 	echo "  5/10 INVENTORY membership: clean"
 }
 
+# Budget-header truth check: the file header's check-6 enumeration
+# restates the budget map in prose, and the two are maintained by hand,
+# so this check parses the enumeration out of this script's own header
+# and compares every named figure against the map, failing on any
+# disagreement (or on a missing or incomplete enumeration, which would
+# otherwise let the prose silently stop describing the map). The map
+# stays the deliberate policy object; the check only enforces that the
+# prose tells the truth about it.
+header_figures() { # text needle; the number stated after the needle's first occurrence, empty when absent
+	# the || true keeps an absent enumeration from tripping set -e pipefail; the miss must surface as the named FAIL below
+	printf '%s' "$1" | grep -oE "$2 [0-9]+" | head -n 1 | grep -oE '[0-9]+$' || true
+}
+
+check_budget_header_truth() {
+	local self_rel="tests/corpus/lint-corpus.sh"
+	local self_file="$REPO_ROOT/$self_rel"
+	local header_line joined needle expected actual
+	header_line="$(awk '/^#   6\. line budgets/ {print NR; exit}' "$self_file")"
+	joined="$(awk '
+		/^#   6\. line budgets/ {inblock=1; print; next}
+		inblock && /^#   [0-9]+\. / {exit}
+		inblock {print}
+	' "$self_file")"
+	joined="${joined//$'\n'/ }"
+	for needle in manager worker verifier reviewer planner advisor scout \
+		rules "SKILL.md" "README/DESIGN under"; do
+		case "$needle" in
+			rules) expected=$BUDGET_RULE_LINES ;;
+			"SKILL.md") expected=$BUDGET_SKILL_LINES ;;
+			"README/DESIGN under") expected=$BUDGET_CORPUS_DOC_LINES ;;
+			*) expected="${BUDGET_AGENT_FILE_LINES[$AGENTS_SCOPE/$needle.md]-}" ;;
+		esac
+		actual="$(header_figures "$joined" "$needle")"
+		if [[ -z "$expected" || "$actual" != "$expected" ]]; then
+			fail_at "$self_rel" "${header_line:-1}" \
+				"header enumeration names $needle ${actual:-<missing>}; the budget map sets ${expected:-<unset>}; the header must state the map"
+		fi
+	done
+}
+
 check_line_budgets() {
 	local file lines budget
+	check_budget_header_truth
 	while IFS= read -r file; do
 		budget=""
 		case "$file" in
