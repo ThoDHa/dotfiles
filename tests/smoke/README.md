@@ -32,14 +32,22 @@ pins; file line ranges never are.
 | S15 | Unit tiers assigned and presented, floors never drop, design-bearing adds the second memo, no dispatch before sign-off | RO-257 | FL-03 |
 | S16 | Delegation as default: bounded lookup direct, delegable item dispatched, uncertainty defaults to delegation | RO-253 | - |
 | S17 | The sanctioned ordered pair lands fix-first pushed together; red-first never amended; pushed tips never rewritten | RO-064 | - |
+| S18 | Board changes route through the tasks CLI, hand-editing the dashboard is refused, an existing deposit target is never overwritten | RO-197 | - |
+| S19 | Ambiguous cleanup never triggers deletion and placeholder labels never substitute for real hierarchical IDs | RO-205 | - |
+| S20 | The report body lives verbatim in the deposited report file and the Work Log carries only the link and the digest | RO-236 | - |
+| S21 | The premature completion is refused until the criteria are met, the loop has converged, and the testing record holds | RO-094 | - |
 
 S8-S10 are ORCH-4-6-2's per-touched-row scenarios (compression and
 pointer-collapse surfaces the initial registry did not carry); S11-S13
 are ORCH-4-6-3's, one per touched rules-corpus row, run under the rules
 body composition (below); S14-S16 are ORCH-4-6-4's per-touched-row
 scenarios for the delegation skill and S17 its git-protocol row, run
-under skill-body compositions (below). A "-" flash key marks a row with
-no Flash-era candidate.
+under skill-body compositions (below); S18-S21 are ORCH-4-6-4's
+task-files pass scenarios for the compression families and inbound
+collapses (S18 aggregates RO-197 with its RO-186 facet, S19 RO-205 with
+its RO-221 facet, S20 grades RO-236, S21 aggregates RO-094's trigger
+token with the RO-215/216/217 family), run under the skill-task-files
+body. A "-" flash key marks a row with no Flash-era candidate.
 
 ## Modes
 
@@ -81,6 +89,8 @@ A scenario rubric may split its checks with `tier:` directives (`semantics`, the
 
 Rubric authoring rule for skill-body scenarios (ORCH-4-6-4 review DC2): a content-tier pin may only cover text the skill retains after a collapse. The skill-only composition omits the rules chain, so a pin on text a collapse moved into the rules false-reds under the skill-only body while the real composed session behaves fine; pin retained skill text or the reply-stated decision instead. A composed rules+skill body kind for content-tier checks is declined (ORCH-4-6-4 review, same disposition): it adds harness surface and lets rules edits perturb skill rows.
 
+Standing vocabulary disposition for S21 (ORCH-4-6-4 tf-fix round): the completion-gate scenario's literal-tier `simplif` pin checks the reply for the simplify-review vocabulary, and the pin missed on 2 of 4 observed tip runs of the task-files battery while every semantics check passed; that is a stable vocabulary-drift signal, a literal-only miss grades VOCAB under the rule above, and future batteries record the VOCAB row without re-classifying it manually.
+
 ## Live composition contract
 
 The live session is pi preamble plus the fleet manager body extracted from
@@ -98,6 +108,8 @@ and post-edit runs so a delta is attributable to the corpus edit alone.
 The runner asserts the injection mechanically (system-addendum size), so a
 stale or missing injection fails as an instrument error instead of grading
 the wrong charter.
+
+Addendum figures quoted in run reports are the runner's wrapper measurement and sit a constant +22 chars over the injected body file's own `wc -m` count (the ORCH-4-6-4 verifier reconciled 70846 wrapper against 70824 body on the same injection); reconcile deltas, not absolutes, against census figures.
 
 ## Scenario file grammar
 

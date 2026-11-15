@@ -13,9 +13,8 @@ This specification defines requirements for creating and managing task files dur
 
 ### Tone and Voice Policy
 
-- All sections MUST use professional, formal tone with no character voice, per the `core` rule's Formal Output Standards.
+- All sections follow the `core` rule's Formal Output Standards: professional, formal tone, no character voice.
 - Exception: agent-authored content in the report flow records agent output verbatim, regardless of tone: the agent's digest line in its Work Log entry ([Agent Report Entries](#agent-report-entries)) and the linked report file under `reports/` ([Reports Namespace](#reports-namespace)).
-- Every other section MUST remain formal.
 
 ---
 
@@ -244,7 +243,7 @@ Direct edit-tool writes to a task-file body are barred for every writer: body pr
 
 The planner's planning-section writes ride the same `tasks edit` channel, defined once in the [Agent Write Path](#agent-write-path)'s planner channel, which applies while its own planning dispatch is in flight.
 
-Replace mode reconciles with [Content Preservation](#content-preservation) the same way the [Latest Update field](#latest-update-field) does: replacing a section body is sanctioned for planning-prose revision only (the planning sections named in the [planner channel](#agent-write-path), which carries the canonical list), with superseded decisions preserved in the Decision Log; cumulative sections (Work Log, Execution Log, Failed Approaches, and deposited report content) are append-only and MUST be written only with `--append`, never replaced.
+Replace mode reconciles with [Content Preservation](#content-preservation) the same way the [Latest Update field](#latest-update-field) does: the one sanctioned class, its planning-prose bound, and the append-only rule for cumulative sections live there.
 
 ### External Tooling Dependency
 
@@ -265,7 +264,7 @@ In this environment the tool is the `tasks` command (on `PATH` at `~/.local/bin/
 - `tasks report <taskfile> --slug <slug> [--from <worker>] --digest "<line>" [<file>|-]` deposits a report file under `.tasks/reports/` and appends its link+digest Work Log entry, refreshing header fields and rendering, all as one serialized operation under the same lock; dispatched agents pass `--from` with their agent identifier to deposit their final report (see [Agent Write Path](#agent-write-path))
 - `tasks show <taskfile> [--tail N] [--json] [--section <heading>] [--raw]` prints header fields, Latest Update, and the last N Work Log entries (default 10); `--json` prints the full structured snapshot, `--section` prints one section's canonical body, and `--raw` prints the whole file byte-exact, the escape hatch when no projection fits; strictly read-only: no lock, no render, no header refresh
 
-Sessions MUST route every dashboard change through `tasks` rather than editing `dashboard.md` directly. Serialization does not weaken [Real-Time Updates](#real-time-updates): write the owning task file as work occurs, then trigger a regeneration at once.
+Serialization does not weaken [Real-Time Updates](#real-time-updates): write the owning task file as work occurs, then trigger a regeneration at once, under the [no-direct-edits rule](#derived-dashboard-with-serialized-mutation) and the `tasks` verbs above.
 
 ---
 
@@ -305,7 +304,7 @@ It is a live pointer, refreshed in place whenever a more recent notable change o
 
 ### Child Task Files
 
-A Task Breakdown subtask MAY be tracked inline or as a *child task file*: a link to a separately-tracked task file. Child task files nest to any depth, are ordinary task files, and MUST be identified by a proper hierarchical Task ID (`PREFIX-N-N`, see [Task ID Format](#task-id-format)) and a descriptive name. Placeholder labels (`A`, `B`, `C`, `Task 1`) or dot-suffixes (`PREFIX-N.A`) MUST NOT be used.
+A Task Breakdown subtask MAY be tracked inline or as a *child task file*: a link to a separately-tracked task file. Child task files nest to any depth, are ordinary task files, and MUST be identified by a proper hierarchical Task ID (`PREFIX-N-N`, see [Task ID Format](#task-id-format), which owns the placeholder prohibition) and a descriptive name.
 
 A child task file MUST be registered in the master index dashboard and move between tables as its own state changes, exactly like a standalone task; implementations MUST NOT track a child solely within its parent's breakdown. The parent entering In Progress does NOT cascade: each child remains in Ready until execution of that child actually begins, at which moment the manager MUST transition it Ready → In Progress. A child MUST reach Completed or Cancelled before the parent may close (see [Completion Protocol](#completion-protocol)). The parent declares its child task files on a dedicated dependency surface (the `## Dependencies` section, a `**Dependencies:**` field line, or a `**Child tasks:**` declaration line); the closure gate reads those surfaces only, so citing a child by ID in prose is never a dependency declaration.
 
@@ -436,7 +435,7 @@ A child task file MUST be registered in the master index dashboard and move betw
 
 ### Simplify and Review Loop
 
-After tests pass, implementations MUST run the Simplify and Review Loop defined in the `simplify-review` skill to convergence before the task may be marked Completed: load the skill for the pass structure, fix semantics, loop control, convergence criteria, and the cap behavior when convergence is not reached.
+After tests pass, implementations run the Simplify and Review Loop to convergence before completion: the `execution-standards` rule's Completion Requirement owns the trigger, and the `simplify-review` skill defines the loop, so load it for the pass structure, fix semantics, loop control, convergence criteria, and the cap behavior when convergence is not reached.
 
 **Each iteration MUST be recorded in the Work Log:**
 
@@ -742,7 +741,7 @@ Dispatched agent reports follow the reports-as-files mechanism:
 - The agent deposits its full report through `tasks report` as a file under `.tasks/reports/`, following the [Reports Namespace](#reports-namespace) layout and the [Report File Template](#report-file-template).
 - When the deposit is made via `tasks report`, the command appends the Work Log entry itself: a heading of the form `### [Timestamp]: [Agent Name]: Report` carrying exactly the agent-supplied digest and the `../reports/...` link, then refreshes the header fields and renders the dashboard.
 - When the report is recorded in a manager-written dispatch entry ([Task File Template](#task-file-template)), the **Report:** and **Digest:** fields carry the same two things: the relative link and the digest line, spelled exactly as the `tasks report` command writes them; the link is opaque provenance whose body is read through `tasks reports <taskfile> --include-body --json`.
-- The manager MUST NOT copy or paraphrase the report body into the Work Log. **Manager Analysis** is the manager's independent reading of the report and the check on the agent's digest, not a restatement.
+- **Manager Analysis** is the manager's independent reading of the report and the check on the agent's digest, never a restatement; the [Verbatim Recording Requirement](#verbatim-recording-requirement) owns the no-copy rule.
 
 ### Agent Write Path
 
@@ -754,7 +753,7 @@ A dispatched agent's `.tasks/` writes are exactly the tasks CLI channels below (
 - A reviewer's findings deposit rides the final-report channel unchanged, `tasks report` with `--slug review --from reviewer`: it is report delivery, not a third channel or a new exception, and everything outside that one deposit stays read-only to the reviewer.
 - Agents MUST NOT edit task files, header fields, the dashboard, or any other board artifact outside the writes this section defines: task-file writes belong to the manager's `tasks edit` and `tasks set` channels, and dashboard mutations belong to the `tasks` command.
 - **Planner channel.** The planner dispatched to plan a Triage task file MAY write exactly the planning sections of that named task file through `tasks edit <taskfile> --section <heading> [--append] [<file>|-]` while its own planning dispatch is in flight: Objective, Success Criteria, Technical Approach, Risk Assessment, Testing Strategy, Task Breakdown, and Decision Log. This is the canonical planning-section list; every other rule referencing planning sections points here instead of restating the list. The channel covers nothing else: header fields, acceptance-criteria checkboxes, Progress, and the dashboard stay manager-owned, no status transition (including Triage → Ready) belongs to the planner, every planner write rides the CLI edit channel's serialized lock and never a direct edit-tool write, and execution-phase writes return to the two channels above.
-- **Research-deposit exception.** A research agent dispatched without a task file MAY write its report file directly at the canonical `research/` path under `.tasks/reports/` ([Reports Namespace](#reports-namespace)), the one case the two channels cannot serve because `tasks report` requires a resolvable task file; the exception covers that report file alone, and the write MUST NOT overwrite an existing file <!-- task-access-sanctioned: retained direct write until a CLI research-deposit path lands (verb map, deviation table trigger b) -->. Every other `.tasks/` write returns to the CLI channels above.
+- **Research-deposit exception.** A research agent dispatched without a task file MAY write its report file directly at the canonical `research/` path under `.tasks/reports/` ([Reports Namespace](#reports-namespace)), the one case the two channels cannot serve because `tasks report` requires a resolvable task file; the exception covers that report file alone, under that section's no-overwrite write rule <!-- task-access-sanctioned: retained direct write until a CLI research-deposit path lands (verb map, deviation table trigger b) -->. Every other `.tasks/` write returns to the CLI channels above.
 - The manager MAY also call both commands for its own structured deposits; the agent calling `tasks report` for its own report is the normal path.
 - Body prose outside the planner channel is the manager's alone, through `tasks edit <taskfile> --section <heading> [--append] [<file>|-]`, serialized under the lock exactly like the channels above; agents MUST NOT call it (see [Serialized Task-File Body Edits](#serialized-task-file-body-edits)).
 
@@ -762,11 +761,11 @@ A dispatched agent's `.tasks/` writes are exactly the tasks CLI channels below (
 
 The agent write path requires the `tasks` CLI: `tasks log` and `tasks report` are the only interim-progress and final-report channels, and no hand-written substitute exists at any time. The fallback for content the default views do not surface is a rawer CLI read, never a direct file write: `tasks show <taskfile> --raw` prints the whole task file byte-exact when no projection fits, and `tasks reports <taskfile> --include-body --json` carries report bodies. Both reads key on a resolvable task file, so one read carve-out stands symmetric with the write exception: research deposits under `.tasks/reports/research/` are keyed to no task file, neither read reaches them, and a hand read of that marker-covered class is sanctioned until a CLI research path lands <!-- task-access-sanctioned: retained direct read until a CLI research-deposit path lands (verb map, deviation table trigger b); the first-class research read rides that landing -->. Implementations MUST NOT fall back to writing `.tasks/` files by hand: the channels' serialized lock, header refresh, and dashboard render are the record's integrity, and the retained research-deposit exception ([Agent Write Path](#agent-write-path)) is the sole direct write, reserved for the task-file-less research case the CLI cannot serve yet.
 
-**Heading-delimiter hazard.** The `tasks` CLI's section parsing is heading-delimited, not fence-aware: a line beginning with `#` inside a code fence or quoted block still matches the `^## ` and `^### ` section delimiters. Verbatim content embedded in a task file (quoted dispatch instructions, pasted excerpts) MUST indent every line that begins with `#` so it cannot match a delimiter. An unindented `## ` line inside the Work Log section ends that section early in the parser's eyes: `tasks show` tails stop there, hiding every later entry, and appended entries are inserted above that line instead of at the section's end, so every entry below it drops out of the tail.
+**Heading-delimiter hazard.** The `tasks` CLI's section parsing is heading-delimited, not fence-aware: a line beginning with `#` inside a code fence still matches the `^## ` and `^### ` section delimiters, while a quoted block is inert (its `>` prefix blocks the match). Verbatim content embedded in a task file (quoted dispatch instructions, pasted excerpts) MUST indent every line that begins with `#` so it cannot match a delimiter. An unindented `## ` line inside the Work Log section ends that section early in the parser's eyes: `tasks show` tails stop there, hiding every later entry, and appended entries are inserted above that line instead of at the section's end, so every entry below it drops out of the tail.
 
 ### Verbatim Recording Requirement
 
-Agent report content MUST be recorded verbatim in the report file the agent's `tasks report` deposit creates under `.tasks/reports/` ([Reports Namespace](#reports-namespace)); the Work Log agent entry carries the link and the agent's digest, never a summary of the body. Implementations MUST NOT summarize or paraphrase agent report content into Work Log entries or elsewhere; full context remains one `tasks reports --include-body` read away for debugging, accountability, and traceability. **Instructions Given** entries stay inline verbatim in the Work Log: they are the authoritative record of dispatch instructions and MUST be appended through `tasks edit <taskfile> --section "Work Log" --append` before the agent is dispatched (see Dispatch by Reference in the `delegation` skill). Manager entries MUST accurately document actions, findings, and outcomes.
+Agent report content MUST be recorded verbatim in the report file the agent's `tasks report` deposit creates under `.tasks/reports/` ([Reports Namespace](#reports-namespace)); the Work Log agent entry carries the link and the agent's digest, never a summary of the body. Implementations MUST NOT copy, summarize or paraphrase agent report content into Work Log entries or elsewhere; full context remains one `tasks reports --include-body` read away for debugging, accountability, and traceability. **Instructions Given** entries stay inline verbatim in the Work Log: they are the authoritative record of dispatch instructions and MUST be appended through `tasks edit <taskfile> --section "Work Log" --append` before the agent is dispatched (see Dispatch by Reference in the `delegation` skill). Manager entries MUST accurately document actions, findings, and outcomes.
 
 ### Decision Documentation Requirement
 
@@ -800,7 +799,7 @@ As with the [Latest Update field](#latest-update-field), whose in-place refresh 
 
 This applies to every task closure, Solo and Delegating. Before a task may be marked Completed, implementations MUST capture every piece of identified-but-undone work: deferred improvements, follow-ups and "nice-to-haves", anything discovered but ruled out of scope, and simpler-solution tradeoffs recorded per the `coding-standards` rule's Simple Solution Documentation.
 
-For each item: create a new task file in Triage state with a proper Task ID and descriptive name; register it in the dashboard; link it from the closing task's Final Summary "Remaining Work" entry. Placeholder labels MUST NOT be used.
+For each item: create a new task file in Triage state with a proper Task ID and descriptive name per [Task ID Format](#task-id-format); register it in the dashboard; link it from the closing task's Final Summary "Remaining Work" entry.
 
 Deferred work MUST NOT survive closure as prose, a TODO, or a Work Log note: any work that outlives the task becomes its own task file. A task MUST NOT be marked Completed while identified deferred work remains uncaptured. When closing as Cancelled, still-desired work is likewise captured; unwanted work needs no capture.
 

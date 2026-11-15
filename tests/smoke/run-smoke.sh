@@ -35,7 +35,7 @@
 #       same time window (baseline bodies from --baseline-ref, default
 #       main; tip bodies from the worktree) and grade both, then emit a
 #       per-scenario delta table. Gate semantics are delta-based over the
-#       gating registry S1-S7 + S11-S13 (S8-S10 are advisory): RED only
+#       gating registry S1-S7 + S11-S21 (S8-S10 are advisory): RED only
 #       on tip FAIL where baseline PASS (a regression the corpus edit
 #       caused); both-FAIL is instrument-inconclusive drift, recorded but
 #       not red; otherwise green. Exit 0 green-by-delta, 1 regression, 2
@@ -105,9 +105,10 @@ source "$REPO_ROOT/lib/rules-generator-common.sh"
 
 # Gating registry: fixed by the calibration ruling (ORCH-4-6-2 task file,
 # Work Log 2026-11-09 23:10) for the manager set S1-S7, extended by
-# ORCH-4-6-3 with its per-touched-row rules-corpus scenarios S11-S13;
+# ORCH-4-6-3 with its per-touched-row rules-corpus scenarios S11-S13 and
+# by ORCH-4-6-4 with its per-touched-row skill-body scenarios S14-S21;
 # S8-S10 are advisory until they carry their own baseline plus stability.
-GATING_IDS="S1 S2 S3 S4 S5 S6 S7 S11 S12 S13 S14 S15 S16 S17"
+GATING_IDS="S1 S2 S3 S4 S5 S6 S7 S11 S12 S13 S14 S15 S16 S17 S18 S19 S20 S21"
 
 usage() {
 	echo "usage: run-smoke.sh --validate"

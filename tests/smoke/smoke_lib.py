@@ -97,6 +97,17 @@ REGISTRY = {
     "S15": ("RO-257", "FL-03"),
     "S16": ("RO-253", "-"),
     "S17": ("RO-064", "-"),
+    # ORCH-4-6-4's task-files pass: per-touched-row scenarios for the
+    # task-files skill's compression families, same registry-grows-only-
+    # for-touched-rows rule, all four under the skill-task-files body
+    # composition. Zero flash-era candidates (the sizing assessment
+    # verified the flagged set carries none). S18 aggregates RO-197 with
+    # its RO-186 facet, S19 RO-205 with its RO-221 facet, S21 aggregates
+    # RO-094's trigger token with the RO-215/216/217 family.
+    "S18": ("RO-197", "-"),
+    "S19": ("RO-205", "-"),
+    "S20": ("RO-236", "-"),
+    "S21": ("RO-094", "-"),
 }
 
 # The seven-class routing pin (08-consolidation-6 section 5, the corpus's
