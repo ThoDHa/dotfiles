@@ -25,7 +25,7 @@
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 385,
 #                             worker 130, verifier 120, reviewer 150,
-#                             planner 125, advisor 95, scout 70), rules 190,
+#                             planner 125, advisor 95, scout 105), rules 190,
 #                             SKILL.md 935, README/DESIGN under 335;
 #                             this enumeration is parsed and compared
 #                             against the map, failing on disagreement
@@ -122,8 +122,16 @@ CORPUS_DOCS_DIR="."
 # never substitute for the measured layer. Agent files budget per file,
 # not as a class, so one file's growth cannot spend another file's
 # slack; where the headroom formula exceeds the prior value the prior
-# value stands (reviewer 150, advisor 95, scout 70). manager.md's entry
-# is the one deliberate exception: a hard cap at the file's measured
+# value stands (reviewer 150, advisor 95). The one exception to that
+# floor is the additive raise: a raise requires a growth event
+# sanctioned by a dispatch or parent plan, with the sanctioning unit
+# recorded in this registry; absent that record the prior value
+# stands. scout.md's
+# entry was reset by the same formula from its post-ORCH-4-5-3
+# measured state (93 lines) when the sanctioned stuck-investigation
+# dispatch block grew the file (sanctioning unit ORCH-4-5-3), the
+# registry's first sanctioned additive raise.
+# manager.md's entry is the one deliberate exception: a hard cap at the file's measured
 # line count (385; the cap has tracked the file down from 395 through
 # the V2 frontmatter conversion and the slimming phase), superseding
 # the headroom formula so the anti-drift pressure stays binding;
@@ -141,7 +149,7 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/reviewer.md]=150
 	[opencode/.config/opencode/agents/planner.md]=125
 	[opencode/.config/opencode/agents/advisor.md]=95
-	[opencode/.config/opencode/agents/scout.md]=70
+	[opencode/.config/opencode/agents/scout.md]=105
 )
 
 # The two agent files that share one read-only shell permission block,

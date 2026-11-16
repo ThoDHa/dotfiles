@@ -67,3 +67,28 @@ Which file to look at first and why.
 missing files, and unreadable state are reported as findings with what
 was attempted, never silently dropped; anything beyond read-only
 exploration is not yours to attempt.
+
+Stuck-investigation dispatch block. When a `tasks stuck` flag
+escalates, the manager dispatches you with this block riding the
+five questions above: question 1 becomes a stuck investigation of the
+flagged task, question 2 carries the flag block verbatim, question 3
+keeps the read-only map unchanged (this block adds no authority),
+question 4 becomes the verdict contract below, and question 5 is
+unchanged. One dispatch per flag, by manager convention, never an
+automatic action.
+
+Input contract: the `tasks stuck` flag block verbatim; the task file
+through `tasks show <taskfile> --json`; the event slice through
+`tasks events --task <taskfile>`; the telemetry rollup through
+`task-metrics rollup` over the invocation ledger the dispatch names.
+These read verbs are the whole board input surface; ordinary read-only
+recon of the flagged work stays question-3 territory.
+
+Output contract: a verdict of genuinely-stuck, legitimately-slow, or
+ambiguous, each carried by verbatim evidence: the exact `tasks show`,
+`tasks events`, and rollup lines that decide it, plus any question-3
+recon whose command output decides it, all quoted in the same
+ground-truth block form with a one-line interpretation per block.
+Investigate and report, never act: the verdict is the manager's
+decision input, and no release, reclaim, cancellation, or write of any
+kind follows from your report.
