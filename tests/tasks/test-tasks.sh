@@ -4839,16 +4839,27 @@ echo "== stuck: usage, read-only contract, and degradation notes ==="
 # layers print their degradation notes.
 usage_out="$(t help)"
 assert_contains "usage lists the stuck command" "$usage_out" "stuck [--dir DIR]"
-for seam in TASKS_STUCK_LOGGED_EVENTS TASKS_STUCK_STALL_MINUTES TASKS_STUCK_REPEAT_IDENTICAL TASKS_STUCK_UNCHANGED_FAILURE; do
+for seam in TASKS_STUCK_LOGGED_EVENTS TASKS_STUCK_STALL_MINUTES TASKS_STUCK_REPEAT_IDENTICAL TASKS_STUCK_UNCHANGED_FAILURE TASKS_STUCK_H3_HORIZON_MINUTES TASKS_STUCK_TOKEN_BUDGET TASKS_STUCK_METRICS_LEDGER; do
 	assert_contains "usage documents $seam" "$usage_out" "$seam"
 done
 assert_contains "usage documents the logged-events default" "$usage_out" "LOGGED_EVENTS=5"
-assert_contains "usage documents the stall default" "$usage_out" "STALL_MINUTES=120"
+assert_contains "usage documents the calibrated stall default" "$usage_out" "STALL_MINUTES=1440"
+assert_contains "usage documents the token budget default" "$usage_out" "TOKEN_BUDGET=2000000"
+assert_contains "usage documents the provisional horizon minutes" "$usage_out" "H3_HORIZON_MINUTES=5760"
 refuse "stuck refuses unknown arguments" stuck --bogus
 refuse "stuck: --logged-events requires a value" stuck --logged-events
 refuse "stuck: a zero threshold is refused" stuck --logged-events 0
+refuse "stuck: --token-budget requires a value" stuck --token-budget
+refuse "stuck: a zero token budget is refused" stuck --token-budget 0
+refuse "stuck: --h3-horizon-minutes requires a value" stuck --h3-horizon-minutes
+refuse "stuck: a zero horizon is refused" stuck --h3-horizon-minutes 0
+refuse "stuck: --metrics-ledger requires a value" stuck --metrics-ledger
 stuck_out="$(TASKS_STUCK_STALL_MINUTES=notanumber t stuck 2>&1 >/dev/null || true)"
 assert_contains "a malformed env threshold names the seam" "$stuck_out" "TASKS_STUCK_STALL_MINUTES"
+stuck_out="$(TASKS_STUCK_TOKEN_BUDGET=notanumber t stuck 2>&1 >/dev/null || true)"
+assert_contains "a malformed token budget names the seam" "$stuck_out" "TASKS_STUCK_TOKEN_BUDGET"
+stuck_out="$(TASKS_STUCK_H3_HORIZON_MINUTES=notanumber t stuck 2>&1 >/dev/null || true)"
+assert_contains "a malformed horizon names the seam" "$stuck_out" "TASKS_STUCK_H3_HORIZON_MINUTES"
 
 # Fixture plumbing: insert raw entry text before the scaffold's Execution Log
 # heading (the Work Log section's slot), consuming the entries file so reuse
@@ -4891,37 +4902,43 @@ assert_eq "stuck leaves the board byte-identical" "$stuck_before" "$stuck_after"
 stuck_out="$(t stuck 2>&1; echo "rc=$?")"
 assert_contains "stuck exits 0 with or without flags" "$(grep -o 'rc=0' <<<"$stuck_out" | head -1)" "rc=0"
 assert_contains "stuck prints a summary line" "$stuck_out" "task file(s) scanned"
-assert_contains "stuck notes the absent telemetry layer" "$stuck_out" "tokens-without-state-change detection inactive"
+assert_contains "stuck notes the unset telemetry seam" "$stuck_out" "telemetry layer inactive: TASKS_STUCK_METRICS_LEDGER unset"
+assert_contains "the unset-seam note names H4" "$stuck_out" "tokens-without-state-change (H4) idle"
+stuck_out="$(t stuck --metrics-ledger "$ROOT/no-such-ledger.jsonl" 2>&1)"
+assert_contains "an absent metrics ledger degrades with a note" "$stuck_out" "missing, unreadable, empty, or not a regular file"
+assert_contains "the absent-ledger note names the path" "$stuck_out" "$ROOT/no-such-ledger.jsonl"
+stuck_out="$(t stuck --metrics-ledger "$ROOT" 2>&1)"
+assert_contains "a directory at the metrics seam degrades with a note" "$stuck_out" "missing, unreadable, empty, or not a regular file"
 
 echo "== stuck: H1 no-checkpoint-progress ==="
 # Positive: a claimed In Progress task churning five distinct entries inside
 # the claim window (opened by its claim.acquired event) while nothing
 # progress-shaped has landed since Created.
 f_h1="$(t new --id STUCK-1 --name "H1 Churn Target" --status "In Progress")"
-t set "$f_h1" Created="2026-06-15 09:00" Updated="2026-06-15 09:00" >/dev/null
-claim_fixture "$f_h1" "worker-h1" "0123456789abcdef"
-stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h1#"$TASKS_DIR/"}" '"generation":"0123456789abcdef"'
-: >"$stuck_entries"
+t set "$f_h1" Created="2026-06-14 09:00" Updated="2026-06-14 09:00" >/dev/null
+claim_fixture "$f_h1" "worker-h1" "0123456789abcdef" "2026-06-15 08:00"
+stuck_ev "2026-06-14 09:00" "claim.acquired" "${f_h1#"$TASKS_DIR/"}" '"generation":"0123456789abcdef"'
+:>"$stuck_entries"
 for m in 09 10 11 12 13; do
-	t set "$f_h1" Updated="2026-06-15 $m:30" >/dev/null
-	printf '### 2026-06-15 %s:30: worker-h1: churning pass %s\n\nstill grinding\n\n' "$m" "$m" >>"$stuck_entries"
+	t set "$f_h1" Updated="2026-06-14 $m:30" >/dev/null
+	printf '### 2026-06-14 %s:30: worker-h1: churning pass %s\n\nstill grinding\n\n' "$m" "$m" >>"$stuck_entries"
 done
 worklog_insert "$f_h1" "$stuck_entries"
 stuck_out="$(t stuck; echo "rc=$?")"
 assert_contains "H1 flags churn without progress" "$stuck_out" "H1 ${f_h1#"$TASKS_DIR/"}: churn without progress"
-assert_contains "H1 window opens at the claim.acquired event" "$stuck_out" "since 2026-06-15 09:00"
-assert_contains "H1 evidence cites the churn stamps" "$stuck_out" "entries at 2026-06-15 09:30"
-assert_contains "H1 names the window-open floor" "$stuck_out" "stall measured from the window open 2026-06-15 09:00"
+assert_contains "H1 window opens at the claim.acquired event" "$stuck_out" "since 2026-06-14 09:00"
+assert_contains "H1 evidence cites the churn stamps" "$stuck_out" "entries at 2026-06-14 09:30"
+assert_contains "H1 names the window-open floor" "$stuck_out" "stall measured from the window open 2026-06-14 09:00"
 assert_contains "the H1 positive exits 0 with findings" "$(grep -o 'rc=0' <<<"$stuck_out" | head -1)" "rc=0"
 # Negative: churn above the floor but the milestone is recent (a report-link
 # entry ten minutes old), the long-verify guard.
 f_h1b="$(t new --id STUCK-2 --name "H1 Fresh Milestone" --status "In Progress")"
-t set "$f_h1b" Created="2026-06-15 09:00" >/dev/null
-claim_fixture "$f_h1b" "worker-h1b" "aaaaaaaaaaaaaaaa"
-stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h1b#"$TASKS_DIR/"}" '"generation":"aaaaaaaaaaaaaaaa"'
-: >"$stuck_entries"
+t set "$f_h1b" Created="2026-06-14 09:00" >/dev/null
+claim_fixture "$f_h1b" "worker-h1b" "aaaaaaaaaaaaaaaa" "2026-06-15 08:00"
+stuck_ev "2026-06-14 09:00" "claim.acquired" "${f_h1b#"$TASKS_DIR/"}" '"generation":"aaaaaaaaaaaaaaaa"'
+:>"$stuck_entries"
 for m in 09 10 11 12; do
-	printf '### 2026-06-15 %s:30: worker-h1b: distinct churn %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
+	printf '### 2026-06-14 %s:30: worker-h1b: distinct churn %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
 done
 printf '### 2026-06-15 11:50: worker-h1b: deposited a report\n\n[findings](../reports/STUCK-2-20260615-1200-h1-fresh-milestone.md/01-x.md)\n\n' >>"$stuck_entries"
 worklog_insert "$f_h1b" "$stuck_entries"
@@ -4929,37 +4946,39 @@ stuck_out="$(t stuck)"
 assert_not_contains "a recent report milestone keeps H1 quiet" "$stuck_out" "H1 ${f_h1b#"$TASKS_DIR/"}"
 # Negative: a completed child dependency inside the window is progress.
 f_h1c="$(t new --id STUCK-3 --name "H1 Completed Child" --status "In Progress")"
-t set "$f_h1c" Created="2026-06-15 09:00" >/dev/null
-claim_fixture "$f_h1c" "worker-h1c" "bbbbbbbbbbbbbbbb"
-stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h1c#"$TASKS_DIR/"}" '"generation":"bbbbbbbbbbbbbbbb"'
-: >"$stuck_entries"
-for m in 09 10 11 12; do
-	printf '### 2026-06-15 %s:40: worker-h1c: waiting on the child %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
+t set "$f_h1c" Created="2026-06-14 09:00" >/dev/null
+claim_fixture "$f_h1c" "worker-h1c" "bbbbbbbbbbbbbbbb" "2026-06-15 08:00"
+stuck_ev "2026-06-14 09:00" "claim.acquired" "${f_h1c#"$TASKS_DIR/"}" '"generation":"bbbbbbbbbbbbbbbb"'
+:>"$stuck_entries"
+for m in 09 10 11 12 13; do
+	printf '### 2026-06-14 %s:40: worker-h1c: waiting on the child %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
 done
 worklog_insert "$f_h1c" "$stuck_entries"
 tmp_mk="$(mktemp)"
 awk '
-	/^## Work Log$/ && !done { printf "## Dependencies\n\nSTUCK-DEP\n\n"; done = 1 }
+	/^## Work Log$/ && !done { printf "## Dependencies\n\nSTUCK-15\n\n"; done = 1 }
 	{ print }
 ' "$f_h1c" >"$tmp_mk" && mv "$tmp_mk" "$f_h1c"
-f_dep="$(t new --id STUCK-DEP --name "H1 Dep Child")"
+# A task id is PREFIX-N, so the dep child is STUCK-15 (the STUCK-DEP form
+# the prose section names is not a legal id and new refuses it).
+f_dep="$(t new --id STUCK-15 --name "H1 Dep Child")"
 TASKS_TEST_CLOCK="2026-06-15 11:00" t set "$(basename "$f_dep")" Status=Completed Completed="2026-06-15 11:00" >/dev/null
 stuck_out="$(t stuck)"
 assert_not_contains "a completed child milestone keeps H1 quiet" "$stuck_out" "H1 ${f_h1c#"$TASKS_DIR/"}"
 # Boundary: exactly five entries fires, four does not, and the threshold
 # moves through both the flag and the env seam with the flag winning.
 f_h1d="$(t new --id STUCK-4 --name "H1 Boundary" --status "In Progress")"
-t set "$f_h1d" Created="2026-06-15 09:00" >/dev/null
-claim_fixture "$f_h1d" "worker-h1d" "cccccccccccccccc"
-stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h1d#"$TASKS_DIR/"}" '"generation":"cccccccccccccccc"'
-: >"$stuck_entries"
+t set "$f_h1d" Created="2026-06-14 09:00" >/dev/null
+claim_fixture "$f_h1d" "worker-h1d" "cccccccccccccccc" "2026-06-15 08:00"
+stuck_ev "2026-06-14 09:00" "claim.acquired" "${f_h1d#"$TASKS_DIR/"}" '"generation":"cccccccccccccccc"'
+:>"$stuck_entries"
 for m in 09 10 11 12; do
-	printf '### 2026-06-15 %s:50: worker-h1d: boundary churn %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
+	printf '### 2026-06-14 %s:50: worker-h1d: boundary churn %s\n\nstill grinding %s\n\n' "$m" "$m" "$m" >>"$stuck_entries"
 done
 worklog_insert "$f_h1d" "$stuck_entries"
 stuck_out="$(t stuck)"
 assert_not_contains "four churn entries stay under the H1 floor" "$stuck_out" "H1 ${f_h1d#"$TASKS_DIR/"}"
-printf '### 2026-06-15 13:00: worker-h1d: boundary churn five\n\nstill grinding\n\n' >>"$stuck_entries"
+printf '### 2026-06-14 13:00: worker-h1d: boundary churn five\n\nstill grinding\n\n' >>"$stuck_entries"
 worklog_insert "$f_h1d" "$stuck_entries"
 stuck_out="$(t stuck --logged-events 5)"
 assert_contains "the fifth churn entry crosses the H1 floor" "$stuck_out" "H1 ${f_h1d#"$TASKS_DIR/"}"
@@ -4975,18 +4994,26 @@ assert_contains "the flag mirror beats the env override" "$stuck_out" "H1 ${f_h1
 # window is young and fire only once the window itself ages past the
 # stall floor (the falsifiable pair: the pre-clamp code fired the quiet
 # run).
+# The DC1 clamp: an ancient file under a fresh claim cannot inherit the
+# file's age; five entries minutes after the claim stay quiet while the
+# window is young and fire only once the window itself ages past the
+# calibrated stall floor (the falsifiable pair: the pre-clamp code fired
+# the quiet run). The sidecar heartbeat rewrite between the two runs
+# stands in for the interim-log cadence that keeps a real churning claim
+# alive past its 24h TTL.
 f_dc1="$(t new --id STUCK-10 --name "H1 Fresh Claim Ancient File" --status "In Progress")"
 t set "$f_dc1" Created="2026-06-12 10:30" Updated="2026-06-12 10:30" >/dev/null
 claim_fixture "$f_dc1" "worker-dc1" "5555555555555555" "2026-06-15 10:30"
 stuck_ev "2026-06-15 10:30" "claim.acquired" "${f_dc1#"$TASKS_DIR/"}" '"generation":"5555555555555555"'
-: >"$stuck_entries"
+:>"$stuck_entries"
 for m in 31 32 33 34 35; do
 	printf '### 2026-06-15 10:%s: worker-dc1: fast churn %s\n\nfast entry\n\n' "$m" "$m" >>"$stuck_entries"
 done
 worklog_insert "$f_dc1" "$stuck_entries"
 stuck_out="$(t stuck)"
 assert_not_contains "an ancient file under a fresh claim stays quiet before the floor" "$stuck_out" "H1 ${f_dc1#"$TASKS_DIR/"}"
-stuck_out="$(TASKS_TEST_CLOCK="2026-06-15 12:30" t stuck)"
+claim_fixture "$f_dc1" "worker-dc1" "5555555555555555" "2026-06-15 12:00"
+stuck_out="$(TASKS_TEST_CLOCK="2026-06-16 10:30" t stuck)"
 assert_contains "the fresh-claim window fires once it ages past the floor" "$stuck_out" "H1 ${f_dc1#"$TASKS_DIR/"}: churn without progress"
 assert_contains "the clamp measures the stall from the window open" "$stuck_out" "stall measured from the window open 2026-06-15 10:30"
 
@@ -5065,10 +5092,11 @@ t set "$f_h3c" Status=Completed Completed="2026-06-15 11:30" >/dev/null
 stuck_out="$(t stuck)"
 assert_not_contains "a terminal task never takes an H3 flag" "$stuck_out" "H3 $f_h3c_rel"
 
-# The DC3 recency horizon: a failure run whose newest failure predates
-# TASKS_STUCK_STALL_MINUTES x STUCK_H3_HORIZON_MULTIPLE is stale history,
-# not an active loop, and stays quiet; a run with fresh failures fires,
-# and the horizon moves with the stall knob.
+# The recency horizon: a failure run whose newest failure predates
+# TASKS_STUCK_H3_HORIZON_MINUTES is stale history, not an active loop,
+# and stays quiet; a run with fresh failures fires, and the horizon
+# stays put when the stall knob moves (the absolute seam is decoupled
+# from the stall floor).
 f_h3d="$(t new --id STUCK-11 --name "H3 Recency Horizon" --status "In Progress")"
 t set "$f_h3d" Created="2026-06-15 09:00" >/dev/null
 f_h3d_rel="${f_h3d#"$TASKS_DIR/"}"
@@ -5083,7 +5111,168 @@ done
 stuck_out="$(t stuck)"
 assert_contains "a run whose newest failure is inside the horizon fires" "$stuck_out" "H3 $f_h3d_rel: 3 failed attempts against an unchanged failure signature"
 stuck_out="$(t stuck --stall-minutes 100)"
-assert_not_contains "the horizon moves with the stall knob" "$stuck_out" "H3 $f_h3d_rel"
+assert_contains "the horizon stays put when the stall knob moves" "$stuck_out" "H3 $f_h3d_rel: 3 failed attempts against an unchanged failure signature"
+
+echo "== stuck: H4 tokens-without-state-change =="
+# H4 rides the task-metrics invocation ledger named by the seam (env
+# TASKS_STUCK_METRICS_LEDGER, flag mirror --metrics-ledger). Ledger stamps
+# are RFC3339 UTC instants while board stamps are naive local wall-clock,
+# so mrec converts its local wall-clock intent to the true UTC instant via
+# an epoch round-trip (date -u -d relabels naive input instead of
+# converting, which breaks every ordering on a non-UTC host); instants
+# order identically on every machine, so the battery stays timezone-proof.
+# The board mutation reference: a fresh claim with no work log entries
+# counts from the claim window open; an entry inside the window advances
+# the reference and the pre-entry tokens stop counting.
+H4LEDGER="$ROOT/h4-ledger.jsonl"
+mrec() { # <local-stamp> <input> <output> <unit-or-empty> [fractional-digits]
+	local useg="" ts frac=""
+	ts="$(date -u -d "@$(date -d "$1" +%s)" '+%Y-%m-%dT%H:%M:%S')"
+	[[ -n "${5:-}" ]] && frac=".${5}"
+	[[ -n "$4" ]] && useg="\"unit_id\":\"$4\","
+	printf '{"schema_version":"1.0","record_type":"invocation","timestamp":"%s%sZ","harness":"pi","session_id":"sess","message_id":"m-%s","agent_role":null,"model":"m","provider":"p","tokens":{"input":%s,"output":%s,"cache_read":0,"cache_write":0,"reasoning":null},"cost":{"amount":null,"source":"none"},"duration_ms":1,"stop_reason":"toolUse","retry":{"count":0,"evidence":null},"restart":{"of_session_id":null,"engine_log":null},"nested":{"child_count":0,"children":[]},"attribution":{"method":"cwd-match","confidence":"exact",%s"batch_id":null}}\n' \
+		"$ts" "$frac" "$2-$3-$RANDOM" "$2" "$3" "$useg" >>"$H4LEDGER"
+}
+mrec_child() { # <local-stamp> <host-in> <host-out> <unit> <child-in> <child-out> <child-cache-read> <child-cache-write>
+	local ts
+	ts="$(date -u -d "@$(date -d "$1" +%s)" '+%Y-%m-%dT%H:%M:%SZ')"
+	printf '{"schema_version":"1.0","record_type":"invocation","timestamp":"%s","harness":"pi","session_id":"sess","message_id":"mc-%s","agent_role":null,"model":"m","provider":"p","tokens":{"input":%s,"output":%s,"cache_read":0,"cache_write":0,"reasoning":null},"cost":{"amount":null,"source":"none"},"duration_ms":1,"stop_reason":"toolUse","retry":{"count":0,"evidence":null},"restart":{"of_session_id":null,"engine_log":null},"nested":{"child_count":1,"children":[{"agent":"subagent","agent_role":null,"model":"m","exit_code":0,"stop_reason":"stop","tokens":{"input":%s,"output":%s,"cache_read":%s,"cache_write":%s},"cost":{"amount":null,"source":"none"},"turns":1,"source":"pi-subagent-details"}]},"attribution":{"method":"cwd-match","confidence":"exact","unit_id":"%s","batch_id":null}}\n' \
+		"$ts" "$2-$5-$RANDOM" "$2" "$3" "$5" "$6" "$7" "$8" "$4" >>"$H4LEDGER"
+}
+f_h4="$(t new --id STUCK-12 --name "H4 Token Target" --status "In Progress")"
+t set "$f_h4" Created="2026-06-15 09:00" >/dev/null
+claim_fixture "$f_h4" "worker-h4" "f111111111111111" "2026-06-15 08:00"
+stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h4#"$TASKS_DIR/"}" '"generation":"f111111111111111"'
+:>"$H4LEDGER"
+mrec "2026-06-15 10:00" 1300000 100000 "STUCK-12"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER"; echo "rc=$?")"
+assert_not_contains "one 1.4M attributed leg stays under the budget" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+mrec "2026-06-15 11:00" 800000 50000 "STUCK-12"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER"; echo "rc=$?")"
+assert_contains "2.25M tokens without a mutation cross the H4 budget" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}: 2250000 tokens (input+output) accumulated with no board mutation since the claim window open 2026-06-15 09:00"
+assert_contains "H4 evidence cites the record count and newest stamp" "$stuck_out" "2 invocation record(s) attributed to STUCK-12"
+assert_contains "the summary names the telemetry layer when active" "$stuck_out" "telemetry layer active: $H4LEDGER (2 invocation record(s))"
+assert_contains "the H4 positive exits 0 with findings" "$(grep -o 'rc=0' <<<"$stuck_out" | head -1)" "rc=0"
+h4_board_before="$(find "$TASKS_DIR" -type f -exec md5sum {} \; | LC_ALL=C sort)"
+t stuck --metrics-ledger "$H4LEDGER" >/dev/null 2>&1
+h4_board_after="$(find "$TASKS_DIR" -type f -exec md5sum {} \; | LC_ALL=C sort)"
+assert_eq "stuck stays byte-identical with the telemetry layer active" "$h4_board_before" "$h4_board_after"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER" --token-budget 300000000)"
+assert_not_contains "the token-budget flag override keeps the run quiet" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+stuck_out="$(TASKS_STUCK_TOKEN_BUDGET=300000000 t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "the token-budget env override keeps the run quiet" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+stuck_out="$(TASKS_STUCK_TOKEN_BUDGET=300000000 t stuck --metrics-ledger "$H4LEDGER" --token-budget 2000000)"
+assert_contains "the flag mirror beats the env token budget" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER" --token-budget 2250000)"
+assert_contains "the budget boundary is inclusive at the sum" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER" --token-budget 2250001)"
+assert_not_contains "one token under the sum stays quiet" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+# A window mutation resets the H4 token window; the pre-entry tokens
+# stop counting and the task goes quiet.
+:>"$stuck_entries"
+printf '### 2026-06-15 11:30: worker-h4: checkpoint committed\n\nstate changed\n\n' >>"$stuck_entries"
+worklog_insert "$f_h4" "$stuck_entries"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "a window mutation resets the H4 token window" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+# A fractional-second stamp at the reference instant truncates to the
+# reference second (the scanner reads HH:MM:SS only): the record at
+# 11:30:00.500Z never postdates the 11:30 mutation and stays out of the
+# sum.
+mrec "2026-06-15 11:30" 999999 999999 "STUCK-12" 500
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "a fractional-second stamp at the reference instant stays out" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+# A fresh silent burn after the mutation fires against the newest
+# mutation, the reference the heuristic is named for; the fractional
+# record never entered the sum or the count.
+mrec "2026-06-15 12:30" 2000000 50000 "STUCK-12"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_contains "a post-mutation silent burn crosses the budget" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}: 2050000 tokens (input+output) accumulated with no board mutation since the newest board mutation 2026-06-15 11:30"
+assert_contains "the excluded fractional-second record leaves the count at one" "$stuck_out" "1 invocation record(s) attributed to STUCK-12"
+# Foreign and unattributed records never stack onto the task's total.
+f_h4b="$(t new --id STUCK-13 --name "H4 Foreign Tokens" --status "In Progress")"
+t set "$f_h4b" Created="2026-06-15 09:00" >/dev/null
+claim_fixture "$f_h4b" "worker-h4b" "f222222222222222" "2026-06-15 08:00"
+stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h4b#"$TASKS_DIR/"}" '"generation":"f222222222222222"'
+:>"$H4LEDGER"
+mrec "2026-06-15 10:00" 5000000 500000 "SOME-OTHER-1"
+mrec "2026-06-15 10:30" 5000000 500000 ""
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "a foreign unit's tokens never flag the task" "$stuck_out" "H4 ${f_h4b#"$TASKS_DIR/"}"
+assert_not_contains "unattributed tokens never flag the task" "$stuck_out" "H4 ${f_h4#"$TASKS_DIR/"}"
+# Malformed lines are skipped and counted into a note; rollups are
+# ledger-valid non-invocation records; neither is a hard error.
+printf 'not json\n' >>"$H4LEDGER"
+printf '{"schema_version":"1.0","record_type":"batch_rollup","batch_id":"b"}\n' >>"$H4LEDGER"
+printf '{"schema_version":"1.0","record_type":"invocation","timestamp":"bad","tokens":{"input":1,"output":1},"attribution":{"unit_id":"STUCK-13"}}\n' >>"$H4LEDGER"
+printf '{"schema_version":"1.0","record_type":"invocation","timestamp":"2026-06-15T15:00:00.000Z","tokens":{"input":-5,"output":1},"attribution":{"unit_id":"STUCK-13"}}\n' >>"$H4LEDGER"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER"; echo "rc=$?")"
+assert_contains "malformed ledger lines are skipped with a note" "$stuck_out" "3 malformed line(s) skipped"
+assert_contains "the malformed-ledger run still exits clean" "$(grep -o 'rc=0' <<<"$stuck_out" | head -1)" "rc=0"
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "rollup records never count as invocations" "$stuck_out" "(4 invocation record(s)"
+assert_contains "only invocation records carry tokens" "$stuck_out" "(2 invocation record(s)"
+rm -f "$H4LEDGER"
+
+# A child-burning runaway (the review's HIGH finding, fixed by counting
+# children): the host record's own fresh tokens stay far under the budget
+# while its nested children carry the burn, the dispatch-loop shape both
+# extractors produce (every subagent leg folds into the parent record's
+# nested.children). Child cache fields stay excluded: the sums below are
+# input+output only, so including cache would move both past the budget.
+f_h4r="$(t new --id STUCK-17 --name "H4 Child Burning Runaway" --status "In Progress")"
+t set "$f_h4r" Created="2026-06-15 09:00" >/dev/null
+claim_fixture "$f_h4r" "worker-h4r" "f555555555555555" "2026-06-15 08:00"
+stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h4r#"$TASKS_DIR/"}" '"generation":"f555555555555555"'
+:>"$H4LEDGER"
+mrec_child "2026-06-15 10:00" 300000 50000 "STUCK-17" 1500000 100000 999999 888888
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_not_contains "a child-burning run under the budget stays quiet" "$stuck_out" "H4 ${f_h4r#"$TASKS_DIR/"}"
+mrec_child "2026-06-15 11:00" 300000 50000 "STUCK-17" 1900000 150000 777777 666666
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")"
+assert_contains "a child-burning runaway fires with children counted" "$stuck_out" "H4 ${f_h4r#"$TASKS_DIR/"}: 4350000 tokens (input+output) accumulated with no board mutation since the claim window open 2026-06-15 09:00"
+rm -f "$H4LEDGER"
+
+# A single-letter-prefix task id (valid per tasks new: PREFIX-N allows a
+# one-character PREFIX): the id parse must catch the prefix's dash at
+# index 1, and the reference maps must never take an empty key (a
+# basename that parses to no id would crash the scan with a bad array
+# subscript and empty stdout, so the scan is pinned on exit code too).
+f_h4z="$(t new --id Z-1 --name "H4 Single Letter Prefix" --status "In Progress")"
+t set "$f_h4z" Created="2026-06-15 09:00" >/dev/null
+claim_fixture "$f_h4z" "worker-h4z" "f666666666666666" "2026-06-15 08:00"
+stuck_ev "2026-06-15 09:00" "claim.acquired" "${f_h4z#"$TASKS_DIR/"}" '"generation":"f666666666666666"'
+:>"$H4LEDGER"
+mrec "2026-06-15 10:00" 1500000 100000 "Z-1"
+mrec "2026-06-15 11:00" 1500000 100000 "Z-1"
+stuck_rc=0
+stuck_out="$(t stuck --metrics-ledger "$H4LEDGER")" || stuck_rc=$?
+assert_eq "a single-letter-prefix task id keeps the scan exit 0" "0" "$stuck_rc"
+assert_contains "a single-letter-prefix task takes its H4 flag" "$stuck_out" "H4 ${f_h4z#"$TASKS_DIR/"}: 3200000 tokens (input+output) accumulated with no board mutation since the claim window open 2026-06-15 09:00"
+rm -f "$H4LEDGER"
+
+echo "== stuck: the H3 horizon seam =="
+# The recency horizon is an absolute minute count (default 5760, 96h),
+# decoupled from the stall floor: the coupled form silently moved the
+# horizon 8h to 96h when the stall recalibrated, so the stall knob must
+# not move it. The seam carries its own env mirror and one-shot flag
+# (flag > env > default). A three-failure run fifty-five hours old sits
+# inside the default 96h horizon and outside a tightened 24h.
+f_hz="$(t new --id STUCK-14 --name "H3 Horizon Seam" --status "In Progress")"
+t set "$f_hz" Created="2026-06-13 04:00" >/dev/null
+f_hz_rel="${f_hz#"$TASKS_DIR/"}"
+for m in "2026-06-13 04:00" "2026-06-13 04:30" "2026-06-13 05:00"; do
+	stuck_ev "$m" "attempt.completed" "$f_hz_rel" '"worker":"w1"' '"branch":"main"' '"base_sha":"abc"' '"checkpoint":""' '"report":""' '"outcome":"fail"'
+done
+stuck_out="$(t stuck)"
+assert_contains "the default 96h horizon keeps a two-day-old failure run live" "$stuck_out" "H3 $f_hz_rel: 3 failed attempts against an unchanged failure signature"
+stuck_out="$(t stuck --h3-horizon-minutes 1440)"
+assert_not_contains "the horizon flag tightens the run quiet" "$stuck_out" "H3 $f_hz_rel"
+stuck_out="$(TASKS_STUCK_H3_HORIZON_MINUTES=1440 t stuck)"
+assert_not_contains "the horizon env seam tightens the run quiet" "$stuck_out" "H3 $f_hz_rel"
+stuck_out="$(TASKS_STUCK_H3_HORIZON_MINUTES=1440 t stuck --h3-horizon-minutes 5760)"
+assert_contains "the horizon flag beats the env seam" "$stuck_out" "H3 $f_hz_rel: 3 failed attempts against an unchanged failure signature"
+stuck_out="$(t stuck --stall-minutes 100)"
+assert_contains "the horizon stays put when the stall knob moves" "$stuck_out" "H3 $f_hz_rel: 3 failed attempts against an unchanged failure signature"
 
 echo "== stuck: per-layer degradation on a ledger-less board ==="
 # A fresh board with claims but no event ledger: H1/H2 still run (the window
@@ -5093,13 +5282,17 @@ stuck_board="$(mktemp -d)/.tasks"
 t init --dir "$stuck_board" >/dev/null
 f_deg="$(t new --dir "$stuck_board" --id STUCK-9 --name "Degradation Target" --status "In Progress")"
 t set --dir "$stuck_board" "$(basename "$f_deg")" Created="2026-06-15 09:00" >/dev/null
-claim_fixture "$f_deg" "worker-deg" "9999999999999999"
-: >"$stuck_entries"
+claim_fixture "$f_deg" "worker-deg" "9999999999999999" "2026-06-15 09:00"
+:>"$stuck_entries"
 for m in 09 10 11 12 13; do
 	printf '### 2026-06-15 %s:30: worker-deg: degraded churn %s\n\nstill grinding\n\n' "$m" "$m" >>"$stuck_entries"
 done
 worklog_insert "$f_deg" "$stuck_entries"
-stuck_out="$(t stuck --dir "$stuck_board" 2>&1; echo "rc=$?")"
+# With no event ledger the window falls back to the sidecar created stamp;
+# the claim-TTL override stands in for the owner heartbeat a real churning
+# worker's `tasks log` performs, keeping the claim alive while the
+# fallback window ages past the calibrated stall floor.
+stuck_out="$(TASKS_CLAIM_TTL_MINUTES=4320 TASKS_TEST_CLOCK="2026-06-16 09:30" t stuck --dir "$stuck_board" 2>&1; echo "rc=$?")"
 assert_contains "a sidecar-only window still runs H1" "$stuck_out" "H1 ${f_deg#"$stuck_board/"}: churn without progress"
 assert_contains "the H1 window falls back to the sidecar stamp" "$stuck_out" "since 2026-06-15 09:00"
 assert_contains "an absent ledger degrades H3 with a note" "$stuck_out" "H3 unchanged-failure-retries inactive"

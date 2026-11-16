@@ -213,6 +213,19 @@ if cmp -s "$ROOT/det1.jsonl" "$ROOT/env.jsonl"; then
 else
 	bad "env-selected store extracts identically to --session-dir"
 fi
+# The producer-side UTC contract pin (the H4 ordering depends on it): the
+# store's stamps pass through verbatim, so a full re-extraction under a
+# non-UTC TZ must be byte-identical to the baseline run; a producer change
+# that relabeled naive local wall-clock as UTC would break this comparison
+# on any non-UTC host.
+TZ=Asia/Tokyo "$EXTRACTOR" pi --session-dir "$SESSIONS" --engine-log "$ENGINE_LOG" \
+	> "$ROOT/tz.jsonl" 2> "$ROOT/tz.jsonl.err"
+assert_eq "pi extractor exits 0 under a non-UTC TZ" "0" "$?"
+if cmp -s "$ROOT/det1.jsonl" "$ROOT/tz.jsonl"; then
+	ok "pi extractor stamps are byte-identical under a non-UTC TZ (true UTC passthrough)"
+else
+	bad "pi extractor stamps are byte-identical under a non-UTC TZ (true UTC passthrough)"
+fi
 run_extractor "$ROOT/append.jsonl" "$ROOT/append.rc" --session-dir "$SESSIONS" --engine-log "$ENGINE_LOG" --output "$ROOT/append.jsonl"
 run_extractor "$ROOT/append2.jsonl" "$ROOT/append.rc" --session-dir "$SESSIONS" --engine-log "$ENGINE_LOG" --output "$ROOT/append.jsonl"
 assert_eq "second --output run appends rather than rewrites" "14" "$(wc -l < "$ROOT/append.jsonl" | tr -d ' ')"

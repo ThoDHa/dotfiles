@@ -643,6 +643,23 @@ python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
 assert_eq "oc extractor exits 0 on the fixture database" "0" "$extract_rc"
 validate_ok "oc extractor output validates against the ledger contract" "$EXTRACTED" "invocation: 10"
 
+# The producer-side UTC contract pin (the H4 ordering depends on it): the
+# rendered timestamps must be true UTC instants, not local wall-clock
+# relabeled Z, so a full re-extraction under a non-UTC TZ is byte-identical
+# to the baseline run. rfc3339_utc renders from epoch with an explicit UTC
+# timezone; a regression to naive fromtimestamp would render local time and
+# break this comparison on any non-UTC host.
+tz_rc=0
+TZ=Asia/Tokyo python3 "$EXTRACTOR" oc --db "$FIXDB" --engine-log "$FIXLOG" \
+	--cwd /repo --unit ORCH-4-3-3 --batch ORCH-4-3 \
+	--out "$ROOT/oc-tz.jsonl" 2>"$ROOT/oc-tz-stderr" || tz_rc=$?
+assert_eq "oc extractor exits 0 under a non-UTC TZ" "0" "$tz_rc"
+if cmp -s "$EXTRACTED" "$ROOT/oc-tz.jsonl"; then
+	ok "oc extractor stamps are byte-identical under a non-UTC TZ (true UTC rendering)"
+else
+	bad "oc extractor stamps are byte-identical under a non-UTC TZ (true UTC rendering)"
+fi
+
 extracted_version="$(python3 -c \
 	'import json, sys; print(json.loads(open(sys.argv[1], encoding="utf-8").readline())["schema_version"])' \
 	"$EXTRACTED")"

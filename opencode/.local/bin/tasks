@@ -74,25 +74,65 @@ readonly CLAIM_TTL_MINUTES_VAR="TASKS_CLAIM_TTL_MINUTES"
 
 # Stuck-detection thresholds (ORCH-4-5): named constants, env-overridable
 # through the TASKS_STUCK_* seams with one-shot flag mirrors on the stuck
-# command (flag > env > default). Defaults are provisional until ORCH-4-5-2
-# calibrates them against ORCH-4-3's recorded baselines. A malformed
-# override is refused rather than silently ignored, the claim-TTL
-# discipline: a typo must never quietly disable a detector.
+# command (flag > env > default). Defaults calibrated 2026-11-15 (ORCH-4-5-2)
+# against the fleet's recorded history: 11 healthy wave-1/wave-2 claim
+# windows replayed per-instant against the pi session store's token ledger
+# and the board's work log plus event stamps; the run-by-run evidence lives
+# in the unit's calibration report. A malformed override is refused rather
+# than silently ignored, the claim-TTL discipline: a typo must never
+# quietly disable a detector.
+#
+# H1's stall floor: healthy legs churn 5-43 interim entries while their
+# first in-window milestone lands 1-14h late, and usage-limit parks create
+# 564-1118m mutation silences, so anything under 1440m false-fires (the
+# per-instant replay put 6/11 healthy windows over a 120m floor); 1440m
+# matches the claim TTL, so pure-silence parks expire unflagged while a
+# claim that keeps churning without any milestone stays alive long enough
+# to be caught. LOGGED_EVENTS stays the churn floor (healthy windows churn
+# 6-43 entries); REPEAT_IDENTICAL keeps a 2-identification margin over the
+# observed healthy maximum of one identical digest per claim window.
 readonly STUCK_LOGGED_EVENTS_DEFAULT=5
-readonly STUCK_STALL_MINUTES_DEFAULT=120
+readonly STUCK_STALL_MINUTES_DEFAULT=1440
 readonly STUCK_REPEAT_IDENTICAL_DEFAULT=3
 readonly STUCK_UNCHANGED_FAILURE_DEFAULT=3
 readonly STUCK_LOGGED_EVENTS_VAR="TASKS_STUCK_LOGGED_EVENTS"
 readonly STUCK_STALL_MINUTES_VAR="TASKS_STUCK_STALL_MINUTES"
 readonly STUCK_REPEAT_IDENTICAL_VAR="TASKS_STUCK_REPEAT_IDENTICAL"
 readonly STUCK_UNCHANGED_FAILURE_VAR="TASKS_STUCK_UNCHANGED_FAILURE"
+# H4's token budget (ORCH-4-5-2): the cumulative input+output tokens (the
+# ledger contract's budget denominator, cache traffic excluded, each
+# record's nested children tokens counted on the parent record) attributed
+# to one task since its newest board mutation before H4 flags. Calibrated:
+# the worst healthy mutation-less burn in the recorded history, replayed
+# with children counted, is 500,563 tokens (a time-based proxy; worker
+# legs are underpersisted in the store and no healthy in-window record
+# carries children, so the floor is the same under both countings), 4.0x
+# under this budget. The runaway evidence class crosses the budget through
+# its children: both extractors fold every subagent leg into the parent
+# record's nested children, so a dispatch-loop runaway accumulates past
+# 2M on this denominator regardless of how cache-efficient the host's own
+# turns stay.
+readonly STUCK_TOKEN_BUDGET_DEFAULT=2000000
+readonly STUCK_TOKEN_BUDGET_VAR="TASKS_STUCK_TOKEN_BUDGET"
+# The L2 input path (ORCH-4-5-2): the task-metrics invocation ledger the
+# H4 scan reads. It lives outside the board (extractor output, typically
+# scratch), so no default path exists; unset or absent means H4 is
+# inactive with a printed note, the honest degradation.
+readonly STUCK_METRICS_LEDGER_VAR="TASKS_STUCK_METRICS_LEDGER"
 # The most stamps one evidence line cites before a "+N more" tail.
 readonly STUCK_EVIDENCE_CAP=5
 # H3's recency horizon: a failure run fires only while its newest stamp is
-# within TASKS_STUCK_STALL_MINUTES x this multiple of now, so stale
-# failure history never re-flags (provisional until ORCH-4-5-2 calibrates
-# it against the recorded baselines).
-readonly STUCK_H3_HORIZON_MULTIPLE=4
+# within this many absolute minutes of now, so stale failure history never
+# re-flags. Absolute minutes rather than a stall-floor multiple: the
+# coupled form silently moved the horizon 480m to 5760m (8h to 96h) when
+# the stall floor recalibrated 120 to 1440, and neither calibration
+# reasoned about the moved window; 5760 keeps the effective value the
+# wave ran with, and the stall knob no longer moves it. Provisional: the
+# typed event ledger holds no failed attempt yet, so no real failure run
+# exists to calibrate against; the seam makes the first real run tunable
+# without a code change.
+readonly STUCK_H3_HORIZON_MINUTES_DEFAULT=5760
+readonly STUCK_H3_HORIZON_MINUTES_VAR="TASKS_STUCK_H3_HORIZON_MINUTES"
 
 # The typed append-only event ledger at the board root: one JSON object per
 # line, appended under the board lock at the sanctioned lifecycle points
@@ -1038,6 +1078,8 @@ Commands:
                                        (tasks plus the from->to dep edges).
   stuck [--dir DIR] [--logged-events N] [--stall-minutes N]
         [--repeat-identical N] [--unchanged-failure N]
+        [--h3-horizon-minutes N] [--token-budget N]
+        [--metrics-ledger PATH]
                                        Read-only stuck detection, flag and evidence only
                                        (no cancellation, no claim mutation, no write of
                                        any kind): H1 no-checkpoint-progress (a claimed In
@@ -1053,25 +1095,44 @@ Commands:
                                        whitespace-identical entries from one author in
                                        one claim window), H3 unchanged-failure-retries
                                        (TASKS_STUCK_UNCHANGED_FAILURE failed attempts
-                                       against one unchanged failure signature within a
-                                       recency horizon of TASKS_STUCK_STALL_MINUTES x 4;
-                                       older failure history stays quiet). Claim windows
+                                       against one unchanged failure signature within
+                                       an absolute recency horizon of
+                                       TASKS_STUCK_H3_HORIZON_MINUTES minutes; older
+                                       failure
+                                       history stays quiet), H4
+                                       tokens-without-state-change (input+output tokens
+                                       including each invocation record's nested
+                                       children tokens, cache traffic excluded,
+                                       attributed to the task in the TASKS_STUCK_METRICS_LEDGER
+                                       invocation ledger accumulating past
+                                       TASKS_STUCK_TOKEN_BUDGET since the task's newest
+                                       board mutation, the mutation reference clamped to
+                                       the claim window open; the ledger is written by
+                                       the task-metrics extractor and lives outside the
+                                       board, so with the seam unset or the file absent
+                                       H4 is inactive with a printed note). Claim windows
                                        open at the claim lifecycle event matching the
                                        sidecar's generation, falling back to the sidecar
                                        created stamp, a fallback window owner heartbeats
                                        advance (ledger-less boards expose only
                                        post-checkpoint churn to H1/H2). Every TASKS_STUCK_*
                                        threshold carries a one-shot flag mirror (flag >
-                                       env > default); defaults are provisional until
-                                       calibrated (LOGGED_EVENTS=5,
-                                       STALL_MINUTES=120, REPEAT_IDENTICAL=3,
-                                       UNCHANGED_FAILURE=3). Missing layers degrade
-                                       with printed notes (an absent or empty ledger makes H3
-                                       inactive; the telemetry layer is ORCH-4-5-2's).
-                                       Exits 0 with or without flags, 1 on hard errors
-                                       only (the doctor's contract); a flag escalates to
-                                       a one-shot scout investigation by manager
-                                       convention, never an automatic action.
+                                       env > default); defaults calibrated against the
+                                       fleet's recorded history (LOGGED_EVENTS=5,
+                                       STALL_MINUTES=1440, REPEAT_IDENTICAL=3,
+                                       UNCHANGED_FAILURE=3, TOKEN_BUDGET=2000000;
+                                       H3_HORIZON_MINUTES=5760 provisional - no real
+                                       failure run exists yet to calibrate it against).
+                                       Missing layers degrade
+                                       with printed notes (an absent or empty event ledger
+                                       makes H3 inactive; an unset or absent metrics
+                                       ledger makes H4 inactive; malformed metrics-ledger
+                                       lines are skipped with a note, never silently).
+                                       The summary line names the telemetry layer when it
+                                       is active. Exits 0 with or without flags, 1 on
+                                       hard errors only (the doctor's contract); a flag
+                                       escalates to a one-shot scout investigation by
+                                       manager convention, never an automatic action.
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar carrying a
                                        generation token), render. A live foreign claim
                                        refuses; an expired one routes recovery to the
@@ -2787,7 +2848,7 @@ cmd_archive() {
 # optional slug. Prints nothing when no boundary qualifies.
 task_id_of_basename() {
 	local fb="$1" p rest cand remainder len
-	for ((p = ${#fb} - 1; p > 1; p--)); do
+	for ((p = ${#fb} - 1; p >= 1; p--)); do
 		[[ "${fb:p:1}" == "-" ]] || continue
 		rest="${fb:p}"
 		[[ "$rest" =~ ^-[0-9]+ ]] || continue
@@ -4747,21 +4808,174 @@ stuck_events_scan() { # ledger-file
 	' "$1"
 }
 
+# One awk pass over the task-metrics invocation ledger (the L2 seam,
+# ORCH-4-5-2): emits one
+# "M<TAB>epoch<TAB>input<TAB>output<TAB>unit_id<TAB>timestamp" record per
+# invocation record H4 can consume and one final
+# "MS<TAB>invocations<TAB>other<TAB>malformed" stats line. Only the four
+# fields H4 consumes are read (record_type, timestamp, tokens.input,
+# tokens.output, plus attribution.unit_id) with the record's nested
+# children tokens folded in: each child's tokens.input and tokens.output
+# add to the parent record's fields (cache traffic stays excluded on
+# both), because both extractors fold every subagent leg into the parent
+# record's nested.children and the parent-record attribution is what
+# makes a dispatch-loop runaway's burn visible to H4. The ledger
+# contract's full validation stays in tests/task-metrics/validate-ledger.py,
+# and this scanner's problems degrade H4 with notes instead of
+# hard-failing the command (external telemetry, unlike the board-owned
+# event ledger). Records with another record_type are the contract's
+# rollups and snapshots: ledger-valid, counted as other, never tokens. A
+# line that is not a brace-balanced object, or an invocation record whose
+# timestamp is not RFC3339 UTC or whose tokens.input/output are not
+# nonnegative integers, is malformed and skipped; a nested value that is
+# absent or not an object contributes zero children (the parent record
+# still counts, its own tokens are readable); unit_id absent or null
+# travels as "-" (an empty field cannot survive the consumer's IFS-tab
+# split, and "-" never matches a task id, so unattributed records
+# attribute to nothing). Timestamps convert with mktime's UTC flag: the
+# ledger's RFC3339 UTC stamps and the board's naive stamps (parsed by
+# date in the host timezone) both yield true instants, so the comparison
+# is instant-exact on any host timezone.
+# Tolerant of the additive-evolution whitespace variants: field matches
+# allow optional space around the colon.
+#
+# Unit ids never contain tabs, the unit field is passed through verbatim
+# (the caller compares exact strings against the task id), and the
+# timestamp travels on the record so the evidence line can cite it
+# verbatim.
+stuck_metrics_scan() { # ledger-file
+	awk '
+		function m_unq(v,    s) {
+			sub(/^"/, "", v); sub(/"$/, "", v)
+			s = sprintf("%c", 30)
+			gsub(/\\\\/, s, v)
+			gsub(/\\n/, " ", v)
+			gsub(/\\r/, " ", v)
+			gsub(/\\t/, " ", v)
+			gsub(/\\"/, "\"", v)
+			gsub(s, "\\\\", v)
+			return v
+		}
+		function m_field(seg,    col, i, c, inq, esc, depth, k, v) {
+			if (seg == "") return 0
+			inq = 0; esc = 0; depth = 0; col = 0
+			for (i = 1; i <= length(seg); i++) {
+				c = substr(seg, i, 1)
+				if (esc) { esc = 0; continue }
+				if (inq && c == "\\") { esc = 1; continue }
+				if (c == "\"") { inq = !inq; continue }
+				if (!inq) {
+					if (c == "{" || c == "[") { depth++; continue }
+					if (c == "}" || c == "]") { depth--; continue }
+					if (c == ":" && depth == 0) { col = i; break }
+				}
+			}
+			if (col == 0) return 0
+			k = substr(seg, 1, col - 1); v = substr(seg, col + 1)
+			if (k !~ /^"(\\.|[^"\\])*"$/) return 0
+			FK[k] = v
+			return 1
+		}
+		function m_split(line,    n, i, c, inq, esc, depth, seg, k) {
+			for (k in FK) delete FK[k]
+			sub(/^[ \t\r]+/, "", line); sub(/[ \t\r]+$/, "", line)
+			if (substr(line, 1, 1) != "{" || substr(line, length(line), 1) != "}") return 0
+			seg = ""; inq = 0; esc = 0; depth = 0
+			for (i = 2; i < length(line); i++) {
+				c = substr(line, i, 1)
+				if (esc) { seg = seg c; esc = 0; continue }
+				if (inq && c == "\\") { seg = seg c; esc = 1; continue }
+				if (c == "\"") { inq = !inq; seg = seg c; continue }
+				if (!inq) {
+					if (c == "{" || c == "[") { depth++ }
+					else if (c == "}" || c == "]") { depth-- }
+					else if (c == "," && depth == 0) { if (!m_field(seg)) return 0; seg = ""; continue }
+				}
+				seg = seg c
+			}
+			if (seg != "") return m_field(seg)
+			return 1
+		}
+		function m_int_of(raw, key,    s) {
+			if (!match(raw, key "[ \t]*:[ \t]*[0-9]+")) return -1
+			s = substr(raw, RSTART, RLENGTH)
+			sub(/.*:[ \t]*/, "", s)
+			return s + 0
+		}
+		function m_children_key_sum(raw, key,    rest, s, total) {
+			# Every "<key>":N inside the nested value is a child token field:
+			# the nested object carries child_count and children, and per the
+			# contract the only numeric input/output keys on a child are its
+			# tokens fields (cache fields have other names, cost has
+			# amount/source). Quoted-key anchoring keeps "cache_input"-style
+			# names from matching.
+			total = 0; rest = raw
+			while (match(rest, "\"" key "\"[ \t]*:[ \t]*[0-9]+")) {
+				s = substr(rest, RSTART, RLENGTH)
+				sub(/.*:[ \t]*/, "", s)
+				total += s + 0
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+			return total
+		}
+		function m_epoch(ts,    d, t) {
+			split(substr(ts, 1, 10), d, "-")
+			split(substr(ts, 12, 8), t, ":")
+			return mktime(sprintf("%04d %02d %02d %02d %02d %02d", d[1], d[2], d[3], t[1], t[2], t[3]), 1)
+		}
+		{
+			if (!m_split($0)) { bad++; next }
+			typ = FK["\"record_type\""]
+			if (typ == "") { bad++; next }
+			if (typ != "\"invocation\"") { other++; next }
+			ts = FK["\"timestamp\""]
+			if (ts !~ /^"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\.[0-9]+)?Z"$/) { bad++; next }
+			tk = FK["\"tokens\""]
+			if (tk !~ /^\{.*\}$/) { bad++; next }
+			tin = m_int_of(tk, "\"input\""); tout = m_int_of(tk, "\"output\"")
+			if (tin < 0 || tout < 0) { bad++; next }
+			at = FK["\"attribution\""]
+			unit = ""
+			if (at ~ /^\{.*\}$/) {
+				if (match(at, /"unit_id"[ \t]*:[ \t]*"(\\.|[^"\\])*"/)) {
+					u = substr(at, RSTART, RLENGTH)
+					sub(/^"unit_id"[ \t]*:[ \t]*/, "", u)
+					unit = m_unq(u)
+				}
+			}
+			ne = FK["\"nested\""]
+			if (ne ~ /^\{.*\}$/) {
+				tin += m_children_key_sum(ne, "input")
+				tout += m_children_key_sum(ne, "output")
+			}
+			ep = m_epoch(m_unq(ts))
+			if (ep < 0) { bad++; next }
+			if (unit == "") unit = "-"
+			inv++
+			printf "M\t%d\t%d\t%d\t%s\t%s\n", ep, tin, tout, unit, m_unq(ts)
+		}
+		END { printf "MS\t%d\t%d\t%d\n", inv, other, bad }
+	' "$1"
+}
+
 # Read-only stuck detection (ORCH-4-5): one scan pass over the task files
-# (L0) and the typed event ledger (L1), flagging suspected-stuck work by
-# three recorded-activity heuristics. Flag and evidence only: no lock, no
+# (L0) and the typed event ledger (L1), plus the task-metrics invocation
+# ledger (L2) when its seam names one, flagging suspected-stuck work by
+# four recorded-activity heuristics. Flag and evidence only: no lock, no
 # render, no header refresh, no write path of any kind, and no automatic
 # response to a flag (escalation is a one-shot scout investigation the
 # manager dispatches by convention). Exit contract mirrors the doctor's:
 # findings never gate the exit; hard errors (no board, bad usage, corrupt
-# ledger) exit 1. Missing layers degrade with printed notes: an absent or
-# empty ledger leaves H1/H2 running on L0 with the window boundary falling
-# back to the claim sidecar stamp, a fallback window owner heartbeats
-# advance (each owning log or report resets it, so ledger-less boards
-# expose only post-checkpoint churn), and makes H3 inactive (its only
-# attempt-outcome stream is the ledger); the telemetry layer's
-# tokens-without-state-change heuristic is ORCH-4-5-2's and its absence is
-# noted. The heuristics, per the parent plan's Decision Log naming:
+# event ledger) exit 1. Missing layers degrade with printed notes: an
+# absent or empty event ledger leaves H1/H2 running on L0 with the window
+# boundary falling back to the claim sidecar stamp, a fallback window
+# owner heartbeats advance (each owning log or report resets it, so
+# ledger-less boards expose only post-checkpoint churn), and makes H3
+# inactive (its only attempt-outcome stream is the ledger); an unset or
+# absent metrics-ledger seam makes H4 inactive; malformed metrics-ledger
+# lines are skipped and counted into a note, never silently dropped (the
+# metrics ledger is external telemetry, so its problems degrade instead of
+# hard-failing). The heuristics, per the parent plan's Decision Log naming:
 #   H1 no-checkpoint-progress: a claimed In Progress task with at least
 #       TASKS_STUCK_LOGGED_EVENTS logged/reported Work Log entries in the
 #      current claim window and at least TASKS_STUCK_STALL_MINUTES since
@@ -4782,12 +4996,30 @@ stuck_events_scan() { # ledger-file
 #      (outcome, checkpoint, report) signature; a changed signature, a
 #      non-failure completion, or an intervening
 #      claim.expired/recovered/migrated event resets the run. The run
-#      fires only while its newest failure sits within the recency
-#      horizon of TASKS_STUCK_STALL_MINUTES x
-#      STUCK_H3_HORIZON_MULTIPLE minutes (stale history is not an active
-#      loop; ORCH-4-5-2 calibrates).
+#      fires only while its newest failure sits within the absolute
+#      recency horizon of TASKS_STUCK_H3_HORIZON_MINUTES minutes (stale
+#      history is not an
+#      active loop; the horizon is provisional until a real failure run
+#      exists to calibrate it against, and it is decoupled from the stall
+#      floor so a stall recalibration cannot silently move it).
+#   H4 tokens-without-state-change (ORCH-4-5-2): the input+output tokens
+#      (the metrics contract's budget denominator, cache traffic excluded)
+#      of invocation records whose attribution.unit_id equals the task id
+#      plus each record's nested children tokens counted on the parent
+#      record (the extractors fold every subagent leg into the parent's
+#      nested children, so a dispatch-loop runaway's burn is visible),
+#      and whose timestamp postdates the task's newest recorded board
+#      mutation (work log entries plus event-ledger records, any date,
+#      the reference clamped to the claim window open so a fresh claim
+#      never inherits its file's history), summed and flagged at
+#      TASKS_STUCK_TOKEN_BUDGET. The reference is the newest mutation
+#      rather than the parent's original zero-mutations-in-window
+#      wording, which goes permanently blind after the window's first
+#      mutation (a leg that logs once and then silently burns is exactly
+#      the failure class); the recorded deviation keeps the measured
+#      healthy surface identical while closing that gap.
 cmd_stuck() {
-	local dir="" f_logged="" f_stall="" f_repeat="" f_unchanged=""
+	local dir="" f_logged="" f_stall="" f_repeat="" f_unchanged="" f_horizon="" f_budget="" f_metrics=""
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "stuck: --dir requires a value"; dir="$2"; shift 2 ;;
@@ -4800,14 +5032,23 @@ cmd_stuck() {
 			--repeat-identical=*) f_repeat="${1#*=}"; shift ;;
 			--unchanged-failure) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "stuck: --unchanged-failure requires a value"; f_unchanged="$2"; shift 2 ;;
 			--unchanged-failure=*) f_unchanged="${1#*=}"; shift ;;
+			--h3-horizon-minutes) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "stuck: --h3-horizon-minutes requires a value"; f_horizon="$2"; shift 2 ;;
+			--h3-horizon-minutes=*) f_horizon="${1#*=}"; shift ;;
+			--token-budget) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "stuck: --token-budget requires a value"; f_budget="$2"; shift 2 ;;
+			--token-budget=*) f_budget="${1#*=}"; shift ;;
+			--metrics-ledger) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "stuck: --metrics-ledger requires a value"; f_metrics="$2"; shift 2 ;;
+			--metrics-ledger=*) f_metrics="${1#*=}"; shift ;;
 			*) diec "$CODE_USAGE" "stuck: unknown argument: $1" ;;
 		esac
 	done
-	local logged_events stall_minutes repeat_identical unchanged_failure
+	local logged_events stall_minutes repeat_identical unchanged_failure horizon_minutes token_budget metrics_ledger
 	logged_events="$(stuck_threshold "$STUCK_LOGGED_EVENTS_VAR" "$STUCK_LOGGED_EVENTS_DEFAULT" "$f_logged" "--logged-events")"
 	stall_minutes="$(stuck_threshold "$STUCK_STALL_MINUTES_VAR" "$STUCK_STALL_MINUTES_DEFAULT" "$f_stall" "--stall-minutes")"
 	repeat_identical="$(stuck_threshold "$STUCK_REPEAT_IDENTICAL_VAR" "$STUCK_REPEAT_IDENTICAL_DEFAULT" "$f_repeat" "--repeat-identical")"
 	unchanged_failure="$(stuck_threshold "$STUCK_UNCHANGED_FAILURE_VAR" "$STUCK_UNCHANGED_FAILURE_DEFAULT" "$f_unchanged" "--unchanged-failure")"
+	horizon_minutes="$(stuck_threshold "$STUCK_H3_HORIZON_MINUTES_VAR" "$STUCK_H3_HORIZON_MINUTES_DEFAULT" "$f_horizon" "--h3-horizon-minutes")"
+	token_budget="$(stuck_threshold "$STUCK_TOKEN_BUDGET_VAR" "$STUCK_TOKEN_BUDGET_DEFAULT" "$f_budget" "--token-budget")"
+	metrics_ledger="${f_metrics:-${!STUCK_METRICS_LEDGER_VAR:-}}"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	warn_fallback_tasks_dir "$tasks_dir"
@@ -4850,9 +5091,37 @@ cmd_stuck() {
 		have_ledger=1
 	fi
 
+	# ---- pass 2b: L2 scan (task-metrics invocation ledger, seam-gated) ------
+	# The seam (env TASKS_STUCK_METRICS_LEDGER or --metrics-ledger) names the
+	# extractor's invocation ledger; unset or absent means H4 is inactive
+	# with a printed note (the honest degradation - the ledger lives outside
+	# the board, so no default path exists to guess). A present ledger is
+	# read through the torn-tail protocol; its malformed lines are skipped
+	# and counted, never silently dropped and never a hard error (external
+	# telemetry).
+	local have_metrics=0 metrics_inv=0 metrics_bad=0
+	local -a tok_recs=()
+	if [[ -z "$metrics_ledger" ]]; then
+		printf 'note: telemetry layer inactive: %s unset; tokens-without-state-change (H4) idle\n' "$STUCK_METRICS_LEDGER_VAR"
+	elif [[ ! -f "$metrics_ledger" || ! -r "$metrics_ledger" || ! -s "$metrics_ledger" ]]; then
+		printf 'note: telemetry layer inactive: metrics ledger %s missing, unreadable, empty, or not a regular file; tokens-without-state-change (H4) idle\n' "$metrics_ledger"
+	else
+		local mread_from mline
+		ledger_read_source "$metrics_ledger" mread_from metrics
+		[[ "$mread_from" == "$metrics_ledger" ]] || arm_tmp_cleanup_trap "$mread_from"
+		while IFS= read -r mline; do
+			case "$mline" in
+				MS$'\t'*) IFS=$'\t' read -r _ metrics_inv _ metrics_bad <<<"$mline" ;;
+				M$'\t'*) tok_recs+=("${mline#M$'\t'}") ;;
+			esac
+			done < <(stuck_metrics_scan "$mread_from")
+		have_metrics=1
+	fi
+
 	# The newest acquisition event per task and generation, the L1 claim
-	# window boundary; append order means the last match is the newest.
-	local -A acq_of=()
+	# window boundary, and each task's newest event stamp for H4's mutation
+	# reference; append order means the last match is the newest.
+	local -A acq_of=() newest_ev_of=()
 	local ev_ts ev_type ev_task ev_gen ev_outc ev_chk ev_rep
 	if ((have_ledger)); then
 		for rec in "${ev_recs[@]+${ev_recs[@]}}"; do
@@ -4860,18 +5129,20 @@ cmd_stuck() {
 			case "$ev_type" in
 				claim.acquired | claim.recovered | claim.migrated) acq_of["$ev_task"$'\034'"$ev_gen"]="$ev_ts" ;;
 			esac
+			[[ -z "${newest_ev_of[$ev_task]:-}" || "$ev_ts" > "${newest_ev_of[$ev_task]}" ]] && newest_ev_of["$ev_task"]="$ev_ts"
 		done
 	fi
 
 	# ---- pass 3: classification -------------------------------------------------
 	local -a claims=() flag_out=() toks=()
 	local live_claims=0 flag_count=0
-	local file claim_rel task_rel ws tok crel i h2_stamp_str
+	local file claim_rel task_rel ws tok crel i h2_stamp_str newest_entry
 	local -a w_ts=() w_from=() w_dig=() h2_keys=() h2_stamps=() fired_rels=() h3_ev_stamps=()
-	local -A h2_n=() h2_st=() h3_run=() h3_sig=() h3_stamps=() h3_fired=() h3_fire=()
+	local -A h2_n=() h2_st=() h3_run=() h3_sig=() h3_stamps=() h3_fired=() h3_fire=() h4_refepoch_of=() h4_refstamp_of=() h4_wsof=() h4_relof=()
 	local key h2_from h2_dig h2_prev mstone ref mstone_desc
 	local ref_epoch age_min stall_ok sig acq_key h3_newest_epoch
 	local h3_cnt h3_outc h3_chk h3_rep h3_stamps_str h3_rel f
+	local h4_unit
 	for file in "$tasks_dir/$CURRENT_DIR"/*.md.claim; do
 		[[ -e "$file" ]] || continue
 		claims+=("${file#"$tasks_dir/"}")
@@ -4897,9 +5168,11 @@ cmd_stuck() {
 		[[ -n "$ws" ]] || continue
 		w_ts=(); w_from=(); w_dig=()
 		mstone=""
+		newest_entry=""
 		# One pass over the task's entries builds the claim-window arrays for
-		# H1/H2 and the newest report-link milestone candidate for H1's stall
-		# (milestones count across all dates, the window only bounds churn).
+		# H1/H2, the newest report-link milestone candidate for H1's stall
+		# (milestones count across all dates, the window only bounds churn), and
+		# the task's newest entry stamp for H4's mutation reference (any date).
 		for rec in "${entry_recs[@]+${entry_recs[@]}}"; do
 			IFS=$'\034' read -r ev_rel e_ts e_from e_rep e_dig <<<"$rec"
 			[[ "$ev_rel" == "$task_rel" ]] || continue
@@ -4907,6 +5180,7 @@ cmd_stuck() {
 				w_ts+=("$e_ts"); w_from+=("$e_from"); w_dig+=("$e_dig")
 			fi
 			[[ "$e_rep" == "1" && "$e_ts" > "$mstone" ]] && mstone="$e_ts"
+			[[ -z "$newest_entry" || "$e_ts" > "$newest_entry" ]] && newest_entry="$e_ts"
 		done
 		if [[ "$st" == "$STATUS_IN_PROGRESS" ]]; then
 			# H1: churn without progress. The milestone set is the L0
@@ -4975,6 +5249,32 @@ cmd_stuck() {
 			flag_out+=("$(stuck_evidence_line "entries at" "${h2_stamps[@]}")")
 			flag_count=$((flag_count + 1))
 		done
+		# H4 reference: the task's newest recorded board mutation (work log
+		# entries plus event-ledger records, any date; the canonical stamp
+		# format sorts lexicographically in chronological order), clamped to
+		# the claim window open so a fresh claim never inherits its file's
+		# history. Tokens accumulate from here, so every mutation resets the
+		# token window: the without-state-change reference the heuristic is
+		# named for. The reference lands directly in the per-unit maps the
+		# aggregation pass reads, so no re-parse step exists.
+		if ((have_metrics)); then
+			ref="$ws"
+			[[ -n "$newest_entry" && "$newest_entry" > "$ref" ]] && ref="$newest_entry"
+			[[ -n "${newest_ev_of[$task_rel]:-}" && "${newest_ev_of[$task_rel]}" > "$ref" ]] && ref="${newest_ev_of[$task_rel]}"
+			ref_epoch="$(stamp_epoch "$ref")"
+			if [[ -n "$ref_epoch" ]]; then
+				h4_unit="$(task_id_of_basename "${task_rel##*/}")"
+				# A basename that parses to no task id (no stamp boundary
+				# qualifies) has no unit to attribute records to; writing
+				# the empty key would crash the associative maps (bad array
+				# subscript) and kills the whole scan.
+				[[ -n "$h4_unit" ]] || continue
+				h4_refepoch_of["$h4_unit"]="$ref_epoch"
+				h4_refstamp_of["$h4_unit"]="$ref"
+				h4_wsof["$h4_unit"]="$ws"
+				h4_relof["$h4_unit"]="$task_rel"
+			fi
+		fi
 	done
 
 	# H3: unchanged failure retries over the ledger's failed attempts,
@@ -5009,7 +5309,7 @@ cmd_stuck() {
 						if (( ${h3_run[$ev_task]} >= unchanged_failure )) && [[ -z "${h3_fired[$ev_task]:-}" ]]; then
 							h3_newest_epoch="$(stamp_epoch "$ev_ts")"
 							if [[ -n "$h3_newest_epoch" && -n "$now_epoch" ]] \
-								&& (( (now_epoch - h3_newest_epoch) / 60 <= stall_minutes * STUCK_H3_HORIZON_MULTIPLE )); then
+								&& (( (now_epoch - h3_newest_epoch) / 60 <= horizon_minutes )); then
 								h3_fired["$ev_task"]=1
 								h3_fire["$ev_task"]="$unchanged_failure"$'\034'"$ev_outc"$'\034'"$ev_chk"$'\034'"$ev_rep"$'\034'"${h3_stamps[$ev_task]}"
 							fi
@@ -5033,12 +5333,56 @@ cmd_stuck() {
 		done
 	fi
 
+	# H4: tokens-without-state-change, one aggregation pass over the
+	# invocation records against every live claim's mutation reference.
+	# A reference epoch that never parsed never fires (unprovable staleness,
+	# the claim-expiry philosophy); the flag carries the reference so the
+	# reading tells the investigator exactly which silent stretch crossed
+	# the budget.
+	if ((have_metrics && ${#h4_relof[@]} > 0)); then
+		local -A h4_sum=() h4_cnt=() h4_newest=()
+		local h4_rel h4_ep h4_in h4_out h4_ts h4_refdesc
+		for h4_rec in "${tok_recs[@]+${tok_recs[@]}}"; do
+			IFS=$'\t' read -r h4_ep h4_in h4_out h4_unit h4_ts <<<"$h4_rec"
+			[[ -n "${h4_relof[$h4_unit]:-}" ]] || continue
+			(( h4_ep > ${h4_refepoch_of[$h4_unit]} )) || continue
+			h4_sum["$h4_unit"]=$(( ${h4_sum["$h4_unit"]:-0} + h4_in + h4_out ))
+			h4_cnt["$h4_unit"]=$(( ${h4_cnt["$h4_unit"]:-0} + 1 ))
+			h4_newest["$h4_unit"]="$h4_ts"
+		done
+		fired_rels=()
+		for h4_unit in "${!h4_sum[@]}"; do fired_rels+=("$h4_unit"); done
+		if ((${#fired_rels[@]} > 0)); then
+			mapfile -t fired_rels < <(printf '%s\n' "${fired_rels[@]}" | LC_ALL=C sort)
+		fi
+		for h4_unit in "${fired_rels[@]+${fired_rels[@]}}"; do
+			(( h4_sum["$h4_unit"] >= token_budget )) || continue
+			h4_rel="${h4_relof[$h4_unit]}"
+			if [[ "${h4_refstamp_of[$h4_unit]}" == "${h4_wsof[$h4_unit]}" ]]; then
+				h4_refdesc="the claim window open ${h4_wsof[$h4_unit]}"
+			else
+				h4_refdesc="the newest board mutation ${h4_refstamp_of[$h4_unit]}"
+			fi
+			flag_out+=("H4 $h4_rel: ${h4_sum[$h4_unit]} tokens (input+output) accumulated with no board mutation since $h4_refdesc (budget $token_budget)")
+			flag_out+=("  evidence: ${h4_cnt[$h4_unit]} invocation record(s) attributed to $h4_unit since the reference, newest at ${h4_newest[$h4_unit]}")
+			flag_count=$((flag_count + 1))
+		done
+	fi
+
 	# ---- report: flags, degradation notes, summary; flags never gate the exit ---
 	for f in "${flag_out[@]+${flag_out[@]}}"; do printf '%s\n' "$f"; done
 	(( have_ledger )) || printf 'note: event ledger absent or empty: H3 unchanged-failure-retries inactive; H1/H2 claim windows fall back to claim sidecar stamps, which owner heartbeats advance, so only post-checkpoint churn is visible\n'
-	printf 'note: telemetry layer absent: tokens-without-state-change detection inactive\n'
-	printf 'stuck: %d flag(s), %d live claim(s), %d task file(s) scanned\n' \
-		"$flag_count" "$live_claims" "${#files[@]}"
+	# The summary names the telemetry layer when it is active (ORCH-4-5-2);
+	# the inactive notes printed at the seam check carry the degradation.
+	if ((have_metrics)); then
+		local metrics_bad_tail=""
+		(( metrics_bad > 0 )) && metrics_bad_tail=", $metrics_bad malformed line(s) skipped"
+		printf 'stuck: %d flag(s), %d live claim(s), %d task file(s) scanned; telemetry layer active: %s (%d invocation record(s)%s)\n' \
+			"$flag_count" "$live_claims" "${#files[@]}" "$metrics_ledger" "$metrics_inv" "$metrics_bad_tail"
+	else
+		printf 'stuck: %d flag(s), %d live claim(s), %d task file(s) scanned\n' \
+			"$flag_count" "$live_claims" "${#files[@]}"
+	fi
 }
 
 # Print the final N entries of a task's Work Log section, verbatim, from a
