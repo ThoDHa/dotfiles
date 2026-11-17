@@ -337,6 +337,9 @@ RECORD_SPECS = {
 			"unreported_count": req(IntNonNeg()),
 		})),
 		"duration_ms_total": req(IntNonNeg()),
+		"window_ms": opt(Nullable(IntNonNeg())),
+		"window_start_ms": opt(IntNonNeg()),
+		"window_end_ms": opt(IntNonNeg()),
 		"budget": req(Obj({
 			"declared": req(Obj({
 				"tokens": req(Nullable(Num())),
@@ -417,14 +420,21 @@ def check_invariants(rec, errors):
 		actuals = {
 			"tokens": rec["tokens"]["input"] + rec["tokens"]["output"],
 			"cost": rec["cost"]["amount_sum"],
-			"wall_clock": rec["duration_ms_total"],
+			# window_ms: absent means an old-form record whose wall_clock
+			# actual falls back to the duration sum; explicit null means no
+			# in-window record, and a null actual never flags.
+			"wall_clock": rec["window_ms"] if "window_ms" in rec
+				else rec["duration_ms_total"],
 			"requests": rec["invocation_count"],
 		}
 		for flag in flags:
 			if declared.get(declared_key[flag]) is None:
 				errors.append(("budget.over_budget",
 					f"dimension {flag} flagged over budget but its declared value is null"))
-			elif actuals[flag] is not None and actuals[flag] <= declared[declared_key[flag]]:
+			elif actuals[flag] is None:
+				errors.append(("budget.over_budget",
+					f"dimension {flag} flagged over budget but its actual is null"))
+			elif actuals[flag] <= declared[declared_key[flag]]:
 				errors.append(("budget.over_budget",
 					f"dimension {flag} flagged over budget but actual {actuals[flag]} "
 					f"does not exceed declared {declared[declared_key[flag]]}"))

@@ -1214,7 +1214,9 @@ def invocation(record_id, hour, duration, batch):
 # sums 75h of active time inside a 29h window (must not flag: the
 # envelope is the declared semantic), and the clamp batch carries two
 # in-window records 4h apart plus strays 10h before and 100h after
-# them (must flag unbounded, then clamp to 4h).
+# them (must flag unbounded, then clamp to 4h). B-OUTSIDE sits wholly
+# before the declared window: a 5h span unbounded, no in-window record
+# (null window_ms) under it.
 records = (
 	[invocation(f"sparse-{h:02d}", h, 60000, "B-SPARSE") for h in range(80)]
 	+ [invocation(f"dense-{h:02d}", h, 9000000, "B-DENSE") for h in range(30)]
@@ -1222,6 +1224,8 @@ records = (
 		invocation("clamp-first", 0.5, 1000, "B-CLAMP"),
 		invocation("clamp-last", 4.5, 1000, "B-CLAMP"),
 		invocation("clamp-late", 100, 1000, "B-CLAMP")]
+	+ [invocation("outside-first", -10, 1000, "B-OUTSIDE"),
+		invocation("outside-last", -5, 1000, "B-OUTSIDE")]
 )
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
 	for record in records:
@@ -1240,6 +1244,7 @@ expected = {
 	"B-SPARSE": (["wall_clock"], 284400000, 4800000),
 	"B-DENSE": ([], 104400000, 270000000),
 	"B-CLAMP": (["wall_clock"], 396000000, 4000),
+	"B-OUTSIDE": ([], 18000000, 2000),
 }
 for batch_id, (flags, window_ms, duration_total) in expected.items():
 	batch = batches.get(batch_id)
@@ -1252,6 +1257,9 @@ for batch_id, (flags, window_ms, duration_total) in expected.items():
 		problems.append(f"{batch_id} window_ms {batch.get('window_ms')!r} != {window_ms}")
 	if batch["duration_ms_total"] != duration_total:
 		problems.append(f"{batch_id} duration_ms_total {batch['duration_ms_total']} != {duration_total}")
+	if "window_start_ms" in batch or "window_end_ms" in batch:
+		problems.append(f"{batch_id} carries window bounds on an unbounded window: "
+			f"{batch.get('window_start_ms')!r}/{batch.get('window_end_ms')!r}")
 print("\n".join(problems))
 PYEOF
 )" || window_gaps_rc=$?
@@ -1259,6 +1267,9 @@ window_gaps="$(crash_sentinel "$window_gaps_rc" "$window_gaps")"
 assert_no_output "wall_clock flags the window span, not the duration sum, across the three batches" "$window_gaps"
 assert_contains "the digest routes over-budget(wall_clock) for the sparse wave" \
 	"$(cat "$ROOT/window-open.jsonl.err")" "over-budget(wall_clock)"
+assert_contains "the digest explains the wall_clock flag with its window span and envelope" \
+	"$(cat "$ROOT/window-open.jsonl.err")" \
+	"over-budget(wall_clock) window 284400000 ms > 259200000 ms"
 python3 "$VALIDATOR" "$ROOT/window-open.jsonl" > /dev/null 2>&1
 assert_eq "unbounded-window rollups validate" "0" "$?"
 
@@ -1270,15 +1281,25 @@ assert_eq "declared-window rollup exits 0" "0" "$(cat "$ROOT/window-clamped.rc")
 window_clamp_gaps_rc=0
 window_clamp_gaps="$(python3 - "$ROOT/window-clamped.jsonl" <<'PYEOF'
 import json, sys
+from datetime import datetime, timezone
 records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
 batches = {r["batch_id"]: r for r in records if r["record_type"] == "batch_rollup"}
 problems = []
-if sorted(batches) != ["B-CLAMP", "B-DENSE", "B-SPARSE"]:
-	problems.append(f"expected the three batches, got {sorted(batches)!r}")
+window_start = int(datetime(2026, 12, 1, tzinfo=timezone.utc).timestamp() * 1000)
+window_end = window_start + 5 * 3600 * 1000
+if sorted(batches) != ["B-CLAMP", "B-DENSE", "B-OUTSIDE", "B-SPARSE"]:
+	problems.append(f"expected the four batches, got {sorted(batches)!r}")
 for batch_id, batch in batches.items():
 	if batch["budget"]["over_budget"] != []:
 		problems.append(f"{batch_id} flagged inside a declared window: {batch['budget']['over_budget']!r}")
-	if batch.get("window_ms") != 14400000:
+	if batch.get("window_start_ms") != window_start or batch.get("window_end_ms") != window_end:
+		problems.append(f"{batch_id} window provenance {batch.get('window_start_ms')!r}/"
+			f"{batch.get('window_end_ms')!r} != {window_start}/{window_end}")
+	if batch_id == "B-OUTSIDE":
+		if batch.get("window_ms") is not None:
+			problems.append(f"B-OUTSIDE window_ms {batch.get('window_ms')!r} != null "
+				"(no record fell inside the declared window)")
+	elif batch.get("window_ms") != 14400000:
 		problems.append(f"{batch_id} clamped window_ms {batch.get('window_ms')!r} != 14400000 "
 			"(out-of-window records excluded, window end exclusive)")
 print("\n".join(problems))
@@ -1288,6 +1309,63 @@ window_clamp_gaps="$(crash_sentinel "$window_clamp_gaps_rc" "$window_clamp_gaps"
 assert_no_output "the declared window clamps every batch to its in-window span" "$window_clamp_gaps"
 python3 "$VALIDATOR" "$ROOT/window-clamped.jsonl" > /dev/null 2>&1
 assert_eq "declared-window rollups validate" "0" "$?"
+
+run_rollup "$ROOT/window-half-open.jsonl" "$ROOT/window-half-open.rc" \
+	--ledger "$ROOT/window-ledger.jsonl" --budget wall_clock_ms=259200000 \
+	--window-start "$window_start_ms"
+assert_eq "start-only window rollup exits 0" "0" "$(cat "$ROOT/window-half-open.rc")"
+window_half_gaps_rc=0
+window_half_gaps="$(python3 - "$ROOT/window-half-open.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+batches = [r for r in records if r["record_type"] == "batch_rollup"]
+problems = []
+for batch in batches:
+	if "window_start_ms" not in batch or "window_end_ms" in batch:
+		problems.append(f"{batch['batch_id']} start-only provenance wrong: "
+			f"{batch.get('window_start_ms')!r}/{batch.get('window_end_ms')!r}")
+print("\n".join(problems))
+PYEOF
+)" || window_half_gaps_rc=$?
+window_half_gaps="$(crash_sentinel "$window_half_gaps_rc" "$window_half_gaps")"
+assert_no_output "a start-only window records its declared start and leaves the unbounded end absent" "$window_half_gaps"
+python3 "$VALIDATOR" "$ROOT/window-half-open.jsonl" > /dev/null 2>&1
+assert_eq "start-only window rollups validate" "0" "$?"
+
+python3 - "$ROOT/window-ledger.jsonl" "$ROOT/window-badts-ledger.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+record = records[0]
+record["message_id"] = "badts-0"
+record["attribution"]["batch_id"] = "B-BADTS"
+record["timestamp"] = "not-a-timestamp"
+open(sys.argv[2], "w", encoding="utf-8").write(json.dumps(record, separators=(",", ":")) + "\n")
+PYEOF
+run_rollup "$ROOT/window-badts.jsonl" "$ROOT/window-badts.rc" \
+	--ledger "$ROOT/window-badts-ledger.jsonl" --budget wall_clock_ms=259200000
+assert_eq "a rollup over an unusable-timestamp record exits 0" "0" "$(cat "$ROOT/window-badts.rc")"
+assert_contains "an unusable timestamp warns instead of silently shrinking the window span" \
+	"$(cat "$ROOT/window-badts.jsonl.err")" \
+	"without a usable timestamp, excluded from the window span"
+window_badts_gaps_rc=0
+window_badts_gaps="$(python3 - "$ROOT/window-badts.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+batches = [r for r in records if r["record_type"] == "batch_rollup"]
+problems = []
+if len(batches) != 1:
+	problems.append(f"expected one batch rollup, got {len(batches)}")
+else:
+	batch = batches[0]
+	if batch.get("window_ms") is not None:
+		problems.append(f"unusable timestamp left window_ms {batch.get('window_ms')!r} != null")
+	if batch["budget"]["over_budget"] != []:
+		problems.append(f"unusable timestamp flagged {batch['budget']['over_budget']!r}")
+print("\n".join(problems))
+PYEOF
+)" || window_badts_gaps_rc=$?
+window_badts_gaps="$(crash_sentinel "$window_badts_gaps_rc" "$window_badts_gaps")"
+assert_no_output "a record with an unusable timestamp leaves the window span null and unflagged" "$window_badts_gaps"
 
 python3 "$EXTRACTOR" rollup --ledger "$ROOT/window-ledger.jsonl" \
 	--window-start 2026-12-01T05:00:00Z --window-end 2026-12-01T00:00:00Z >/dev/null 2>&1
@@ -1321,6 +1399,86 @@ validate_err "a wall_clock flag contradicting window_ms is rejected" \
 tamper "$t" "$ROOT/window-rollup-base.jsonl" batch_rollup 'rec["window_ms"] = None'
 validate_err "a wall_clock flag on a null window span is rejected" \
 	"$t" "budget.over_budget"
+
+# Multi-pass latest-record-wins: the same ledger rolled twice with
+# different declared bounds appends into one ledger the validator
+# accepts, each batch_rollup keeping its own span, provenance, and
+# flags, and each pass's digest explaining its own span.
+python3 - "$ROOT/multi-ledger.jsonl" <<'PYEOF'
+import json, sys
+from datetime import datetime, timedelta, timezone
+
+def stamp(hour):
+	base = datetime(2026, 12, 1, tzinfo=timezone.utc)
+	return (base + timedelta(hours=hour)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+records = []
+for index, hour in enumerate((0, 2, 10)):
+	records.append({
+		"schema_version": "1.0", "record_type": "invocation",
+		"timestamp": stamp(hour), "harness": "pi", "session_id": "s",
+		"message_id": f"multi-{index}", "agent_role": None, "model": "glm-5.3",
+		"provider": "zai",
+		"tokens": {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "reasoning": 0},
+		"cost": {"amount": 0.01, "source": "reported"},
+		"duration_ms": 1000, "stop_reason": "stop",
+		"retry": {"count": 0, "evidence": None},
+		"restart": {"of_session_id": None, "engine_log": None},
+		"nested": {"child_count": 0, "children": []},
+		"attribution": {"method": "none", "confidence": "unattributed",
+			"unit_id": None, "batch_id": "B-MULTI"},
+	})
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+	for record in records:
+		handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+PYEOF
+run_rollup "$ROOT/multi-unbounded.jsonl" "$ROOT/multi-unbounded.rc" \
+	--ledger "$ROOT/multi-ledger.jsonl" --budget wall_clock_ms=30000000
+assert_eq "the unbounded pass of the multi-pin ledger exits 0" "0" "$(cat "$ROOT/multi-unbounded.rc")"
+run_rollup "$ROOT/multi-declared.jsonl" "$ROOT/multi-declared.rc" \
+	--ledger "$ROOT/multi-ledger.jsonl" --budget wall_clock_ms=3600000 \
+	--window-start "$window_start_ms" --window-end 2026-12-01T05:00:00Z
+assert_eq "the declared-window pass of the multi-pin ledger exits 0" "0" "$(cat "$ROOT/multi-declared.rc")"
+cat "$ROOT/multi-unbounded.jsonl" "$ROOT/multi-declared.jsonl" > "$ROOT/multi-combined.jsonl"
+python3 "$VALIDATOR" "$ROOT/multi-combined.jsonl" > /dev/null 2>&1
+assert_eq "the two-pass ledger with both B-MULTI records validates" "0" "$?"
+assert_contains "the unbounded pass's digest explains its own span" \
+	"$(cat "$ROOT/multi-unbounded.jsonl.err")" \
+	"over-budget(wall_clock) window 36000000 ms > 30000000 ms"
+assert_contains "the declared-window pass's digest explains its own clamped span" \
+	"$(cat "$ROOT/multi-declared.jsonl.err")" \
+	"over-budget(wall_clock) window 7200000 ms > 3600000 ms"
+multi_gaps_rc=0
+multi_gaps="$(python3 - "$ROOT/multi-combined.jsonl" <<'PYEOF'
+import json, sys
+from datetime import datetime, timezone
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+batches = [r for r in records if r["record_type"] == "batch_rollup"]
+problems = []
+window_start = int(datetime(2026, 12, 1, tzinfo=timezone.utc).timestamp() * 1000)
+window_end = window_start + 5 * 3600 * 1000
+if len(batches) != 2 or sorted(r["batch_id"] for r in batches) != ["B-MULTI", "B-MULTI"]:
+	problems.append(f"expected two B-MULTI records, got "
+		f"{[(r['batch_id'], r.get('window_ms')) for r in batches]!r}")
+else:
+	unbounded, latest = batches
+	if (unbounded.get("window_ms"), unbounded.get("budget", {}).get("over_budget")) != (36000000, ["wall_clock"]):
+		problems.append(f"the unbounded pass lost its own span or flag: "
+			f"window_ms {unbounded.get('window_ms')!r}, flags {unbounded.get('budget', {}).get('over_budget')!r}")
+	if "window_start_ms" in unbounded or "window_end_ms" in unbounded:
+		problems.append(f"the unbounded pass carries provenance on an unbounded window: "
+			f"{unbounded.get('window_start_ms')!r}/{unbounded.get('window_end_ms')!r}")
+	if (latest.get("window_ms"), latest.get("budget", {}).get("over_budget")) != (7200000, ["wall_clock"]):
+		problems.append(f"the declared-window pass lost its own span or flag: "
+			f"window_ms {latest.get('window_ms')!r}, flags {latest.get('budget', {}).get('over_budget')!r}")
+	if (latest.get("window_start_ms"), latest.get("window_end_ms")) != (window_start, window_end):
+		problems.append(f"the declared-window pass carries the wrong provenance: "
+			f"{latest.get('window_start_ms')!r}/{latest.get('window_end_ms')!r} != {window_start}/{window_end}")
+print("\n".join(problems))
+PYEOF
+)" || multi_gaps_rc=$?
+multi_gaps="$(crash_sentinel "$multi_gaps_rc" "$multi_gaps")"
+assert_no_output "each pass keeps its own span, provenance, and flags in the combined ledger" "$multi_gaps"
 
 echo "== rollup mode: grouping, cursors, yield tally =="
 python3 - "$ROOT/mixed-ledger.jsonl" <<'PYEOF'

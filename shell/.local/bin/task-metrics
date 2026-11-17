@@ -152,12 +152,26 @@ rollup mode aggregation contract:
 - Budgets: --budget dimension=value declares a batch's soft budgets;
   a dimension is flagged in budget.over_budget, and emitted as
   over-budget(<dimension>) in the digest, only when its declared value
-  is non-null and its actual exceeds it. Actuals are pinned by the
-  contract: tokens compares tokens.input + tokens.output (cache traffic
-  excluded), cost compares cost.amount_sum (a null sum never flags),
-  wall_clock compares duration_ms_total, requests compares
-  invocation_count. Flags route to manager investigation or user
-  escalation; no code path terminates processes or edits task state.
+  is non-null and its actual exceeds it; the wall_clock flag renders
+  as over-budget(wall_clock) window <span> ms > <declared> ms so the
+  gating actual is explainable beside the duration aggregate. Actuals
+  are pinned by the contract: tokens compares tokens.input +
+  tokens.output (cache traffic excluded), cost compares
+  cost.amount_sum (a null sum never flags), wall_clock compares the
+  batch window (max minus min record timestamp of in-window records,
+  emitted as window_ms; a null span never flags), requests compares
+  invocation_count. duration_ms_total stays a reported aggregate and
+  never gates wall_clock. --window-start/--window-end declare the
+  extraction window the pass rolled (start inclusive, end exclusive,
+  mirroring the extractors' --since/--until); records outside it are
+  excluded from the batch window, and an undeclared window is
+  unbounded. The declared bounds ride each batch rollup as additive
+  window_start_ms/window_end_ms (absent when unbounded), so a record
+  is self-describing about where its span came from; when a batch is
+  rolled more than once, consumers read the latest record for the
+  batch_id (latest record wins). Flags route to manager investigation
+  or user escalation; no code path terminates processes or edits task
+  state.
 - --yield-tally FILE embeds the batch's verification-yield tally
   (artifact 20 DC1) in every emitted batch rollup; the file must carry
   every contract field including at least one source link.
@@ -1315,6 +1329,8 @@ def new_rollup_accumulator():
 		"cost_reported": 0,
 		"cost_unreported": 0,
 		"duration_ms_total": 0,
+		"window_first_ms": None,
+		"window_last_ms": None,
 		"attribution_confidence_histogram": {name: 0 for name in CONFIDENCE_CLASSES},
 		"unit_ids": set(),
 		"unit_invocation_counts": {},
@@ -1328,13 +1344,28 @@ def sum_tokens_field(source_tokens, name):
 	return 0
 
 
-def accumulate_invocation(accumulator, record, label):
+def window_span_ms(accumulator):
+	"""The batch window span (window_last_ms - window_first_ms), None with no in-window record."""
+	first = accumulator["window_first_ms"]
+	last = accumulator["window_last_ms"]
+	if first is None or last is None:
+		return None
+	return last - first
+
+
+def accumulate_invocation(accumulator, record, label, window_start_ms=None,
+		window_end_ms=None):
 	"""Fold one invocation record into an accumulator.
 
 	Permissive on absent fields (they contribute zero) but loud on
-	anything that would distort a sum: unusable cost amounts, records
-	without a usable stop reason, and unclassifiable confidences all
-	warn so the digest can be traced back to its inputs.
+	anything that would distort a sum or the batch window span:
+	unusable cost amounts, records without a usable stop reason or
+	timestamp, and unclassifiable confidences all warn so the digest
+	can be traced back to its inputs. A record whose
+	timestamp falls inside the declared extraction window bounds
+	(start inclusive, end exclusive; unbounded when undeclared) also
+	advances the window_first_ms/window_last_ms pair the batch window
+	span derives from; records outside it stay out of the span.
 	"""
 	accumulator["invocation_count"] += 1
 	retry = record.get("retry")
@@ -1374,6 +1405,15 @@ def accumulate_invocation(accumulator, record, label):
 	duration = record.get("duration_ms")
 	if is_count(duration):
 		accumulator["duration_ms_total"] += duration
+	timestamp = iso_to_epoch_ms(record.get("timestamp"))
+	if timestamp is None:
+		warn(f"{label}: invocation without a usable timestamp, excluded from the window span")
+	elif (window_start_ms is None or timestamp >= window_start_ms) \
+			and (window_end_ms is None or timestamp < window_end_ms):
+		first = accumulator["window_first_ms"]
+		last = accumulator["window_last_ms"]
+		accumulator["window_first_ms"] = timestamp if first is None else min(first, timestamp)
+		accumulator["window_last_ms"] = timestamp if last is None else max(last, timestamp)
 	attribution = record.get("attribution")
 	if isinstance(attribution, dict):
 		confidence = attribution.get("confidence")
@@ -1394,12 +1434,13 @@ def evaluate_budget_flags(declared, accumulator):
 	"""The over_budget dimensions: declared non-null and actual exceeds it.
 
 	Actuals are the contract's pinned comparisons; a null actual (no
-	reported cost) never flags its dimension.
+	reported cost, or no record inside the declared window) never flags
+	its dimension.
 	"""
 	actuals = {
 		"tokens": accumulator["tokens"]["input"] + accumulator["tokens"]["output"],
 		"cost": accumulator["cost_amount_sum"],
-		"wall_clock": accumulator["duration_ms_total"],
+		"wall_clock": window_span_ms(accumulator),
 		"requests": accumulator["invocation_count"],
 	}
 	return [dimension for dimension in BUDGET_DIMENSIONS
@@ -1434,8 +1475,8 @@ def build_unit_rollup(unit_id, batch_id, accumulator, generated_at, runtime_ms):
 
 
 def build_batch_rollup(batch_id, declared, accumulator, generated_at, runtime_ms,
-		yield_tally):
-	"""One batch_rollup record from an accumulator (schema 1.0 plus the additive runtime_ms)."""
+		yield_tally, window_start_ms=None, window_end_ms=None):
+	"""One batch_rollup record from an accumulator (schema 1.0 plus the additive window_ms, window bounds provenance, and runtime_ms)."""
 	record = {
 		"schema_version": SCHEMA_VERSION,
 		"record_type": "batch_rollup",
@@ -1452,6 +1493,7 @@ def build_batch_rollup(batch_id, declared, accumulator, generated_at, runtime_ms
 			"unreported_count": accumulator["cost_unreported"],
 		},
 		"duration_ms_total": accumulator["duration_ms_total"],
+		"window_ms": window_span_ms(accumulator),
 		"budget": {
 			"declared": {
 				"tokens": declared.get("tokens"),
@@ -1463,6 +1505,10 @@ def build_batch_rollup(batch_id, declared, accumulator, generated_at, runtime_ms
 		},
 		"runtime_ms": runtime_ms,
 	}
+	if window_start_ms is not None:
+		record["window_start_ms"] = window_start_ms
+	if window_end_ms is not None:
+		record["window_end_ms"] = window_end_ms
 	if yield_tally is not None:
 		record["yield_tally"] = yield_tally
 	return record
@@ -1586,6 +1632,10 @@ def parse_rollup_args(argv):
 		"print_cursor": None,
 		"harness": None,
 		"unit": None,
+		"window_start": None,
+		"window_end": None,
+		"window_start_ms": None,
+		"window_end_ms": None,
 	}
 	value_flags = {
 		"--ledger": "ledger",
@@ -1595,6 +1645,8 @@ def parse_rollup_args(argv):
 		"--print-cursor": "print_cursor",
 		"--harness": "harness",
 		"--unit": "unit",
+		"--window-start": "window_start",
+		"--window-end": "window_end",
 	}
 	index = 0
 	while index < len(argv):
@@ -1623,6 +1675,14 @@ def parse_rollup_args(argv):
 			"drop --ledger or run the aggregation without --print-cursor")
 	if options["unit"] is not None and (not isinstance(options["unit"], str) or not options["unit"]):
 		raise UsageError("--unit expects a non-empty unit id")
+	if options["window_start"] is not None:
+		options["window_start_ms"] = parse_moment(options["window_start"], "--window-start")
+	if options["window_end"] is not None:
+		options["window_end_ms"] = parse_moment(options["window_end"], "--window-end")
+	if options["window_start_ms"] is not None and options["window_end_ms"] is not None \
+			and options["window_start_ms"] >= options["window_end_ms"]:
+		raise UsageError(f"--window-start {options['window_start']} must precede "
+			f"--window-end {options['window_end']} (start inclusive, end exclusive)")
 	return options
 
 
@@ -1678,8 +1738,10 @@ def iso_to_epoch_ms(text):
 
 def print_rollup_digest(batches, unbatched_units, orphan_count):
 	"""The stderr digest: per batch one summary, histogram, cost line, and
-	over-budget(<dimension>) flags; then any unbatched units and orphans."""
-	for batch_id, accumulator, flags in batches:
+	over-budget(<dimension>) flags, the wall_clock flag carrying its
+	window span and envelope so the flag is explainable beside the
+	duration aggregate; then any unbatched units and orphans."""
+	for batch_id, accumulator, record in batches:
 		print(f"task-metrics rollup: batch {batch_id}: {len(accumulator['unit_ids'])} unit(s), "
 			f"{accumulator['invocation_count']} invocation(s), retries {accumulator['retry_count']}, "
 			f"restarts {accumulator['restart_count']}", file=sys.stderr)
@@ -1698,9 +1760,18 @@ def print_rollup_digest(batches, unbatched_units, orphan_count):
 		print(f"task-metrics rollup: batch {batch_id} cost: {cost_text} "
 			f"({accumulator['cost_reported']}/{accumulator['invocation_count']} reported), "
 			f"duration total {accumulator['duration_ms_total']} ms", file=sys.stderr)
+		flags = record["budget"]["over_budget"]
 		if flags:
+			rendered = []
+			for dimension in flags:
+				if dimension == "wall_clock":
+					rendered.append(f"over-budget(wall_clock) "
+						f"window {record['window_ms']} ms > "
+						f"{record['budget']['declared']['wall_clock_ms']} ms")
+				else:
+					rendered.append(f"over-budget({dimension})")
 			print(f"task-metrics rollup: batch {batch_id} "
-				+ " ".join(f"over-budget({dimension})" for dimension in flags), file=sys.stderr)
+				+ " ".join(rendered), file=sys.stderr)
 	for unit_id, accumulator in unbatched_units:
 		print(f"task-metrics rollup: unit {unit_id}: {accumulator['invocation_count']} invocation(s), "
 			"no batch declared", file=sys.stderr)
@@ -1764,11 +1835,13 @@ def run_rollup(argv):
 			unit_id = options["unit"]
 		if batch_id is not None:
 			batches.setdefault(batch_id, new_rollup_accumulator())
-			accumulate_invocation(batches[batch_id], record, label)
+			accumulate_invocation(batches[batch_id], record, label,
+				options["window_start_ms"], options["window_end_ms"])
 		if unit_id is not None:
 			key = (unit_id, batch_id)
 			units.setdefault(key, new_rollup_accumulator())
-			accumulate_invocation(units[key], record, label)
+			accumulate_invocation(units[key], record, label,
+				options["window_start_ms"], options["window_end_ms"])
 		elif batch_id is None:
 			orphan_count += 1
 	generated_at = rfc3339_utc(int(started.timestamp() * 1000))
@@ -1776,7 +1849,8 @@ def run_rollup(argv):
 	batch_records = []
 	for batch_id in sorted(batches):
 		batch_records.append(build_batch_rollup(batch_id, options["declared"],
-			batches[batch_id], generated_at, runtime_ms, yield_tally))
+			batches[batch_id], generated_at, runtime_ms, yield_tally,
+			options["window_start_ms"], options["window_end_ms"]))
 	unit_records = []
 	for key in sorted(units, key=lambda item: (item[0], item[1] or "")):
 		unit_records.append(build_unit_rollup(key[0], key[1], units[key],
@@ -1807,7 +1881,7 @@ def run_rollup(argv):
 				f"{options['update_cursor']}: {exc}", file=sys.stderr)
 			return 2
 	digest_batches = [(record["batch_id"], batches[record["batch_id"]],
-			record["budget"]["over_budget"]) for record in batch_records]
+			record) for record in batch_records]
 	digest_units = [(key[0], units[key]) for key in sorted(units) if key[1] is None]
 	print_rollup_digest(digest_batches, digest_units, orphan_count)
 	print(f"task-metrics rollup: {len(unit_records)} unit rollup(s), {len(batch_records)} "
