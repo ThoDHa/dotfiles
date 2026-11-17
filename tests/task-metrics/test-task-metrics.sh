@@ -1185,6 +1185,143 @@ assert_eq "--unit claims the orphans and the same ledger exits 0" "0" "$?"
 python3 "$EXTRACTOR" rollup --ledger "$ROOT/does-not-exist.jsonl" >/dev/null 2>&1
 assert_eq "an unreadable ledger exits 2" "2" "$?"
 
+echo "== rollup mode: wall_clock compares the batch window (D1) =="
+python3 - "$ROOT/window-ledger.jsonl" <<'PYEOF'
+import json, sys
+from datetime import datetime, timedelta, timezone
+
+def stamp(hour):
+	base = datetime(2026, 12, 1, tzinfo=timezone.utc)
+	return (base + timedelta(hours=hour)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def invocation(record_id, hour, duration, batch):
+	return {
+		"schema_version": "1.0", "record_type": "invocation",
+		"timestamp": stamp(hour), "harness": "pi", "session_id": "s", "message_id": record_id,
+		"agent_role": None, "model": "glm-5.3", "provider": "zai",
+		"tokens": {"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "reasoning": 0},
+		"cost": {"amount": 0.01, "source": "reported"},
+		"duration_ms": duration, "stop_reason": "stop",
+		"retry": {"count": 0, "evidence": None},
+		"restart": {"of_session_id": None, "engine_log": None},
+		"nested": {"child_count": 0, "children": []},
+		"attribution": {"method": "none", "confidence": "unattributed",
+			"unit_id": None, "batch_id": batch},
+	}
+
+# Three batches against one 72h wall_clock envelope: the sparse wave
+# spans 79h with 80m of summed duration (must flag), the dense burst
+# sums 75h of active time inside a 29h window (must not flag: the
+# envelope is the declared semantic), and the clamp batch carries two
+# in-window records 4h apart plus strays 10h before and 100h after
+# them (must flag unbounded, then clamp to 4h).
+records = (
+	[invocation(f"sparse-{h:02d}", h, 60000, "B-SPARSE") for h in range(80)]
+	+ [invocation(f"dense-{h:02d}", h, 9000000, "B-DENSE") for h in range(30)]
+	+ [invocation("clamp-early", -10, 1000, "B-CLAMP"),
+		invocation("clamp-first", 0.5, 1000, "B-CLAMP"),
+		invocation("clamp-last", 4.5, 1000, "B-CLAMP"),
+		invocation("clamp-late", 100, 1000, "B-CLAMP")]
+)
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+	for record in records:
+		handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+PYEOF
+run_rollup "$ROOT/window-open.jsonl" "$ROOT/window-open.rc" \
+	--ledger "$ROOT/window-ledger.jsonl" --budget wall_clock_ms=259200000
+assert_eq "unbounded-window rollup over the three batches exits 0" "0" "$(cat "$ROOT/window-open.rc")"
+window_gaps_rc=0
+window_gaps="$(python3 - "$ROOT/window-open.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+batches = {r["batch_id"]: r for r in records if r["record_type"] == "batch_rollup"}
+problems = []
+expected = {
+	"B-SPARSE": (["wall_clock"], 284400000, 4800000),
+	"B-DENSE": ([], 104400000, 270000000),
+	"B-CLAMP": (["wall_clock"], 396000000, 4000),
+}
+for batch_id, (flags, window_ms, duration_total) in expected.items():
+	batch = batches.get(batch_id)
+	if batch is None:
+		problems.append(f"batch rollup {batch_id} missing")
+		continue
+	if batch["budget"]["over_budget"] != flags:
+		problems.append(f"{batch_id} over_budget {batch['budget']['over_budget']!r} != {flags!r}")
+	if batch.get("window_ms") != window_ms:
+		problems.append(f"{batch_id} window_ms {batch.get('window_ms')!r} != {window_ms}")
+	if batch["duration_ms_total"] != duration_total:
+		problems.append(f"{batch_id} duration_ms_total {batch['duration_ms_total']} != {duration_total}")
+print("\n".join(problems))
+PYEOF
+)" || window_gaps_rc=$?
+window_gaps="$(crash_sentinel "$window_gaps_rc" "$window_gaps")"
+assert_no_output "wall_clock flags the window span, not the duration sum, across the three batches" "$window_gaps"
+assert_contains "the digest routes over-budget(wall_clock) for the sparse wave" \
+	"$(cat "$ROOT/window-open.jsonl.err")" "over-budget(wall_clock)"
+python3 "$VALIDATOR" "$ROOT/window-open.jsonl" > /dev/null 2>&1
+assert_eq "unbounded-window rollups validate" "0" "$?"
+
+window_start_ms="$(python3 -c 'from datetime import datetime, timezone; print(int(datetime(2026,12,1,tzinfo=timezone.utc).timestamp()*1000))')"
+run_rollup "$ROOT/window-clamped.jsonl" "$ROOT/window-clamped.rc" \
+	--ledger "$ROOT/window-ledger.jsonl" --budget wall_clock_ms=259200000 \
+	--window-start "$window_start_ms" --window-end 2026-12-01T05:00:00Z
+assert_eq "declared-window rollup exits 0" "0" "$(cat "$ROOT/window-clamped.rc")"
+window_clamp_gaps_rc=0
+window_clamp_gaps="$(python3 - "$ROOT/window-clamped.jsonl" <<'PYEOF'
+import json, sys
+records = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+batches = {r["batch_id"]: r for r in records if r["record_type"] == "batch_rollup"}
+problems = []
+if sorted(batches) != ["B-CLAMP", "B-DENSE", "B-SPARSE"]:
+	problems.append(f"expected the three batches, got {sorted(batches)!r}")
+for batch_id, batch in batches.items():
+	if batch["budget"]["over_budget"] != []:
+		problems.append(f"{batch_id} flagged inside a declared window: {batch['budget']['over_budget']!r}")
+	if batch.get("window_ms") != 14400000:
+		problems.append(f"{batch_id} clamped window_ms {batch.get('window_ms')!r} != 14400000 "
+			"(out-of-window records excluded, window end exclusive)")
+print("\n".join(problems))
+PYEOF
+)" || window_clamp_gaps_rc=$?
+window_clamp_gaps="$(crash_sentinel "$window_clamp_gaps_rc" "$window_clamp_gaps")"
+assert_no_output "the declared window clamps every batch to its in-window span" "$window_clamp_gaps"
+python3 "$VALIDATOR" "$ROOT/window-clamped.jsonl" > /dev/null 2>&1
+assert_eq "declared-window rollups validate" "0" "$?"
+
+python3 "$EXTRACTOR" rollup --ledger "$ROOT/window-ledger.jsonl" \
+	--window-start 2026-12-01T05:00:00Z --window-end 2026-12-01T00:00:00Z >/dev/null 2>&1
+assert_eq "inverted window bounds exit 2" "2" "$?"
+
+python3 - "$ROOT/window-rollup-base.jsonl" <<'PYEOF'
+import json, sys
+record = {
+	"schema_version": "1.0", "record_type": "batch_rollup",
+	"batch_id": "B-FORM", "generated_at": "2026-12-01T06:00:00Z",
+	"unit_count": 0, "invocation_count": 2,
+	"stop_reason_histogram": {"stop": 2},
+	"tokens": {"input": 20, "output": 10, "cache_read": 0, "cache_write": 0, "reasoning": 0},
+	"nested_tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},
+	"cost": {"amount_sum": 0.02, "reported_count": 2, "unreported_count": 0},
+	"duration_ms_total": 284400000,
+	"budget": {"declared": {"tokens": None, "cost": None, "wall_clock_ms": 259200000,
+			"requests": None},
+		"over_budget": ["wall_clock"]},
+}
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(record) + "\n")
+PYEOF
+validate_ok "an old-form batch_rollup flags wall_clock on its duration total" \
+	"$ROOT/window-rollup-base.jsonl" "batch_rollup: 1"
+tamper "$t" "$ROOT/window-rollup-base.jsonl" batch_rollup 'rec["window_ms"] = 284400000'
+validate_ok "a new-form batch_rollup flags wall_clock on its window span" \
+	"$t" "batch_rollup: 1"
+tamper "$t" "$ROOT/window-rollup-base.jsonl" batch_rollup 'rec["window_ms"] = 14400000'
+validate_err "a wall_clock flag contradicting window_ms is rejected" \
+	"$t" "budget.over_budget"
+tamper "$t" "$ROOT/window-rollup-base.jsonl" batch_rollup 'rec["window_ms"] = None'
+validate_err "a wall_clock flag on a null window span is rejected" \
+	"$t" "budget.over_budget"
+
 echo "== rollup mode: grouping, cursors, yield tally =="
 python3 - "$ROOT/mixed-ledger.jsonl" <<'PYEOF'
 import json, sys
