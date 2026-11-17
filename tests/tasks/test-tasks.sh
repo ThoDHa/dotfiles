@@ -3836,6 +3836,874 @@ rm -rf "$rdr_meta_root"
 
 # --- expanded doctor (ORCH-4-4-2) -------------------------------------------
 
+echo "== show: --project bounded default read =="
+# The bounded seven-element projection: golden shape pin, determinism,
+# read-only guarantees, bounds and restrictions survival, role maps,
+# parser-ride agreement with the shared classifiers, fail-soft legacy
+# rendering with the advisory pointer, and the versioned JSON form. A
+# dedicated board keeps the pins isolated from the readers corpus above.
+proj_dir="$ROOT/proj/.tasks"
+t init --dir "$proj_dir" >/dev/null
+mkdir -p "$proj_dir/archive"
+cat >"$proj_dir/current/GOLD-1-20260615-1200-golden.md" <<'GOLDEOF'
+# Task: Golden
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Ship the golden projection today. Later work follows.
+
+## Success Criteria
+
+- [x] landed thing
+- [ ] open thing
+- ~ [ ] replaced by later work
+
+## Dependencies
+
+- ORCH-4-9 (migration)
+- ORCH-4-3 (telemetry)
+
+## Work Log
+
+### 2026-06-15 11:00: planner: planned
+
+plan body
+
+### 2026-06-15 12:00: worker: started
+
+work body
+GOLDEOF
+proj_gold_expect="# Task: Golden
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective (digest)
+
+Ship the golden projection today. Later work follows.
+
+## Success Criteria (open verbatim)
+
+- [ ] open thing
+- ~ [ ] replaced by later work
+[1 ticked criterion collapsed - verbatim: tasks show GOLD-1-20260615-1200-golden.md --section \"Success Criteria\"]
+
+## Decision Log (titles and dates)
+
+[Decision Log section missing from this file]
+
+## Work Log (latest 3 entries)
+
+### 2026-06-15 11:00: planner: planned
+
+plan body
+
+### 2026-06-15 12:00: worker: started
+
+work body
+
+## Report Digests (latest 3)
+
+[no report deposits linked yet - full index: tasks reports GOLD-1-20260615-1200-golden.md --json]
+
+## Dependencies (open)
+
+[2 dependency tokens name no board file - enumeration: tasks doctor --all]"
+proj_gold_out="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project)"
+assert_eq "the projection pins the golden seven-element shape exactly" "$proj_gold_expect" "$proj_gold_out"
+proj_gold_out2="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project)"
+assert_eq "the projection is byte-stable across repeated invocations" "$proj_gold_out" "$proj_gold_out2"
+proj_tree_before="$(find "$proj_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project >/dev/null
+t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --json >/dev/null
+proj_tree_after="$(find "$proj_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
+assert_eq "the projection leaves the board tree untouched" "$proj_tree_before" "$proj_tree_after"
+refuse "projection on a missing task file carries the coded refusal" show --dir "$proj_dir" NOPE-9.md --project
+refuse "projection refuses --tail" show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --tail 3
+refuse "projection refuses --section" show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --section Objective
+refuse "projection refuses --raw" show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --raw
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --entries 2 2>&1 >/dev/null || true)"
+assert_contains "bound overrides refuse without --project" "$proj_err" "(code: USAGE)"
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --bytes 100 2>&1 >/dev/null || true)"
+assert_contains "--bytes refuses without --project" "$proj_err" "(code: USAGE)"
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --role scout 2>&1 >/dev/null || true)"
+assert_contains "--role refuses without --project" "$proj_err" "(code: USAGE)"
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --entries abc 2>&1 >/dev/null || true)"
+assert_contains "--entries validates its integer" "$proj_err" "(code: USAGE)"
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --bytes 0 2>&1 >/dev/null || true)"
+assert_contains "--bytes validates a positive integer" "$proj_err" "(code: USAGE)"
+proj_err="$(t show --dir "$proj_dir" GOLD-1-20260615-1200-golden.md --project --role bogus 2>&1 >/dev/null || true)"
+assert_contains "--role validates the role vocabulary" "$proj_err" "(code: USAGE)"
+
+# Claim, reports, and a Decision Log: the Restrictions line, the report
+# digest element, and the decision digest element need live surfaces.
+cat >"$proj_dir/current/RDL-1-20260615-1200-rich.md" <<'RDLEOF'
+# Task: Rich
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** High
+**Progress:** 20%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Rich fixture objective text.
+
+## Success Criteria
+
+- [ ] first open criterion (verdict: unverifiable)
+- [ ] second open criterion (evidence: ../reports/RDL-1-20260615-1200-rich.md/01-first.md)
+
+### Decision Log
+
+**Decision: first rich decision** · 2026-06-15 11:00
+- Context: rich decision one body
+
+**Decision: second rich decision** · 2026-06-15 11:30
+- Context: rich decision two body
+
+## Work Log
+
+### 2026-06-15 11:00: planner: planned rich
+
+plan body
+RDLEOF
+TASKS_SESSION=sess-proj t claim --dir "$proj_dir" RDL-1-20260615-1200-rich.md >/dev/null
+printf 'report one body\n' | t report --dir "$proj_dir" RDL-1-20260615-1200-rich.md --slug first --from worker --digest "first report digest line" >/dev/null
+printf 'report two body\n' | t report --dir "$proj_dir" RDL-1-20260615-1200-rich.md --slug second --from worker --digest "second report digest line" >/dev/null
+printf 'report three body\n' | t report --dir "$proj_dir" RDL-1-20260615-1200-rich.md --slug third --from worker --digest "third report digest line" >/dev/null
+printf 'report four body\n' | t report --dir "$proj_dir" RDL-1-20260615-1200-rich.md --slug fourth --from worker --digest "fourth report digest line oldest" >/dev/null
+proj_rdl_out="$(t show --dir "$proj_dir" RDL-1-20260615-1200-rich.md --project)"
+assert_contains "the projection carries the live-claim Restrictions line" "$proj_rdl_out" "Restrictions: live claim held by sess-proj"
+assert_contains "the projection carries open criteria verbatim with their verdict marker" "$proj_rdl_out" "- [ ] first open criterion (verdict: unverifiable)"
+assert_contains "the projection carries open criteria verbatim with their evidence marker" "$proj_rdl_out" "- [ ] second open criterion (evidence: ../reports/RDL-1-20260615-1200-rich.md/01-first.md)"
+assert_contains "the projection carries decision titles and dates" "$proj_rdl_out" "**Decision: second rich decision** · 2026-06-15 11:30"
+assert_not_contains "the projection elides decision bodies" "$proj_rdl_out" "rich decision one body"
+assert_contains "the decision elision marker names the raw hatch" "$proj_rdl_out" "[decision bodies elided - full text: tasks show RDL-1-20260615-1200-rich.md --raw]"
+assert_contains "the projection carries the newest report digest" "$proj_rdl_out" "fourth report digest line oldest"
+assert_contains "the projection carries the second-newest report digest" "$proj_rdl_out" "third report digest line"
+assert_not_contains "the projection elides report digests past K" "$proj_rdl_out" "first report digest line"
+assert_contains "the report elision marker names the reports index" "$proj_rdl_out" "[1 older report digests elided - full index: tasks reports RDL-1-20260615-1200-rich.md --json]"
+assert_not_contains "the projection carries no ticked-collapse marker without ticked boxes" "$proj_rdl_out" "ticked criterion"
+
+# Worst case: an oversized file whose elidable content must collapse under
+# the hard ceiling while restriction-bearing content survives every bound
+# and override.
+big="$proj_dir/current/BIG-1-20260615-1200-big.md"
+{
+	echo "# Task: Big"
+	echo
+	echo "**Created:** 2026-06-15 12:00"
+	echo "**Status:** In Progress"
+	echo "**Priority:** High"
+	echo "**Progress:** 10%"
+	echo "**Owner:**"
+	echo "**Updated:** 2026-06-15 12:00"
+	echo
+	echo "## Objective"
+	echo
+	printf 'objective padding word %.0s' $(seq 1 120)
+	echo "first sentence end. Second sentence follows here."
+	echo
+	echo "## Success Criteria"
+	echo
+	printf -- '- [ ] %s\n' "$(printf 'restriction payload %.0s' $(seq 1 150))"
+	echo "- [x] small ticked"
+	echo
+	echo "### Decision Log"
+	echo
+	for i in $(seq 1 45); do
+		echo "**Decision: decision number $i with a reasonably long title** · 2026-06-15 11:00"
+		echo "- Context: body text for decision $i"
+		echo
+	done
+	echo "## Work Log"
+	echo
+	for i in $(seq 1 250); do
+		echo "### 2026-06-15 09:00: worker: entry $i"
+		echo
+		printf 'entry padding text %.0s' $(seq 1 36)
+		echo
+		echo
+	done
+	echo "### 2026-06-15 12:00: worker: oversized"
+	echo
+	printf 'huge entry body %.0s' $(seq 1 300)
+	echo
+} >"$big"
+proj_big_size="$(wc -c <"$big")"
+(( proj_big_size > 100000 )) || bad "the worst-case fixture exceeds 100 KB (got $proj_big_size)"
+proj_big_out="$(t show --dir "$proj_dir" BIG-1-20260615-1200-big.md --project)"
+proj_big_bytes="$(printf '%s' "$proj_big_out" | LC_ALL=C wc -c)"
+(( proj_big_bytes <= 8192 )) || bad "the worst-case projection exceeds the 8 KB ceiling (got $proj_big_bytes)"
+ok "the worst-case projection renders at or under the 8 KB hard ceiling ($proj_big_bytes bytes from $proj_big_size)"
+proj_restriction="$(printf -- '- [ ] %s' "$(printf 'restriction payload %.0s' $(seq 1 150))")"
+assert_contains "restriction-bearing criteria survive the worst case byte-verbatim" "$proj_big_out" "$proj_restriction"
+assert_contains "the worst case keeps the newest entry capped at the entry floor" "$proj_big_out" "[entry truncated at 512 bytes - full entry: tasks show BIG-1-20260615-1200-big.md --json]"
+assert_contains "the worst-case elision marker names the JSON history" "$proj_big_out" "older Work Log entries elided - complete history: tasks show BIG-1-20260615-1200-big.md --json"
+proj_big_out2="$(t show --dir "$proj_dir" BIG-1-20260615-1200-big.md --project)"
+assert_eq "the worst-case projection is byte-stable across invocations" "$proj_big_out" "$proj_big_out2"
+proj_big_tiny="$(t show --dir "$proj_dir" BIG-1-20260615-1200-big.md --project --bytes 100)"
+assert_contains "restrictions survive a ceiling override that cannot fit them" "$proj_big_tiny" "$proj_restriction"
+(( $(printf '%s' "$proj_big_tiny" | LC_ALL=C wc -c) > 100 )) || bad "the ceiling override exempt render collapsed below the restriction size"
+ok "the ceiling override renders restrictions exempt and untruncated"
+assert_contains "the final truncation stage reduces the Objective to its first sentence" "$proj_big_tiny" "[Objective reduced to its first sentence - full text: tasks show BIG-1-20260615-1200-big.md --section Objective]"
+
+# Entry-level truncation: an entry body over the per-entry cap is cut at
+# the cap with its own marker; the marker rides every bound.
+{
+	echo "# Task: Trunc"
+	echo
+	echo "**Created:** 2026-06-15 12:00"
+	echo "**Status:** Ready"
+	echo "**Priority:** Low"
+	echo "**Progress:** 0%"
+	echo "**Owner:**"
+	echo "**Updated:** 2026-06-15 12:00"
+	echo
+	echo "## Objective"
+	echo
+	echo "Trunc fixture."
+	echo
+	echo "## Success Criteria"
+	echo
+	echo "- [ ] trunc open"
+	echo
+	echo "## Work Log"
+	echo
+	echo "### 2026-06-15 10:00: worker: short entry"
+	echo
+	echo "short body"
+	echo
+	echo "### 2026-06-15 11:00: worker: fat entry"
+	echo
+	echo "HEAD-OF-BODY $(printf 'padding bytes %.0s' $(seq 1 120)) TAIL-OF-BODY"
+} >"$proj_dir/current/TRUNC-1-20260615-1200-trunc.md"
+proj_trunc_out="$(t show --dir "$proj_dir" TRUNC-1-20260615-1200-trunc.md --project --entries 2)"
+assert_contains "an oversized entry is cut at the per-entry cap with a marker" "$proj_trunc_out" "[entry truncated at 512 bytes - full entry: tasks show TRUNC-1-20260615-1200-trunc.md --json]"
+assert_contains "the truncated entry keeps its head" "$proj_trunc_out" "HEAD-OF-BODY"
+assert_not_contains "the truncated entry drops its tail" "$proj_trunc_out" "TAIL-OF-BODY"
+assert_contains "the short entry stays whole" "$proj_trunc_out" "short body"
+
+# Parser-ride agreement: the projection's criteria and dependency records
+# agree with the shared classifiers (the closure gate's scan and its
+# dependency-token projection) on the same files, so no forked grammar
+# exists. The functions are eval-extracted with their shared fragments,
+# the battery's established pattern; the fragments are eval'd WITHOUT the
+# readonly keyword so the later source-based clusters can re-declare them
+# in their own subshells.
+eval "$(sed -n "/^readonly AWK_HEADING_LEVEL=/,/^'\$/{s/^readonly //;p}" "$TASKS_BIN")"
+eval "$(sed -n "/^readonly AWK_CRITERIA_COUNTER=/,/^'\$/{s/^readonly //;p}" "$TASKS_BIN")"
+eval "$(awk '/^closure_gate_scan\(\)/{f=1} f{print} f&&/^}/{exit}' "$TASKS_BIN")"
+eval "$(awk '/^dependency_tokens\(\)/{f=1} f{print} f&&/^}/{exit}' "$TASKS_BIN")"
+eval "$(awk '/^work_log_tail\(\)/{f=1} f{print} f&&/^}/{exit}' "$TASKS_BIN")"
+for proj_target in GOLD-1-20260615-1200-golden.md RDL-1-20260615-1200-rich.md BIG-1-20260615-1200-big.md TRUNC-1-20260615-1200-trunc.md; do
+	proj_proj_json="$(t show --dir "$proj_dir" "$proj_target" --project --json)"
+	proj_open="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["open_criteria"]))')"
+	proj_sup="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["superseded_criteria"]))')"
+	proj_tick="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["ticked_criteria_count"])')"
+	proj_dep_open="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["open_dependencies"]))')"
+	proj_dep_term="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["terminal_dependencies"])')"
+	proj_dep_unres="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["unresolved_dependencies"])')"
+	proj_scan_recs="$(closure_gate_scan "$proj_dir/current/$proj_target")"
+	proj_scan_u="$(sed -n 's/^U\t//p' <<<"$proj_scan_recs")"
+	proj_scan_s="$(grep -c $'^S\t' <<<"$proj_scan_recs" || true)"
+	proj_tok_count="$(dependency_tokens "$proj_dir/current/$proj_target" | LC_ALL=C sort -u | grep -c . || true)"
+	proj_wl_count="$(work_log_tail 999999999 <"$proj_dir/current/$proj_target" | grep -c '^### ' || true)"
+	proj_wl_json="$(printf '%s' "$proj_proj_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["work_log"]) + d["older_work_log_entries"])')"
+	assert_eq "projection open criteria agree with the shared classifier ($proj_target)" "$proj_scan_u" "$proj_open"
+	assert_eq "projection superseded criteria agree with the shared classifier ($proj_target)" "$proj_scan_s" "$proj_sup"
+	[[ "$proj_target" == GOLD-1-20260615-1200-golden.md ]] \
+		&& assert_eq "projection ticked count agrees with the classifier total ($proj_target)" "1" "$proj_tick"
+	assert_eq "projection dependency records cover every declared token ($proj_target)" "$proj_tok_count" "$((proj_dep_open + proj_dep_term + proj_dep_unres))"
+	assert_eq "projection entry staging agrees with the tail verb ($proj_target)" "$proj_wl_count" "$proj_wl_json"
+done
+
+# Fail-soft legacy: missing sections and drifted shapes render omission
+# markers and never error; the advisory pointer names the doctor; reads
+# add zero new lint or doctor findings on the legacy class.
+cat >"$proj_dir/archive/LEG-1-20260615-0900-legacy.md" <<'LEGEOF'
+# Task: Legacy
+
+**Created:** 2026-06-15 09:00
+**Status:** Triage
+**Priority:** Low
+**Updated:** not-a-timestamp
+
+## Work Log
+
+### 2026-06-15 09:00: worker: legacy entry
+
+legacy body with an unchecked box below
+
+- [ ] legacy unchecked criterion
+LEGEOF
+proj_leg_out="$(t show --dir "$proj_dir" LEG-1-20260615-0900-legacy.md --project)"
+assert_contains "a missing Objective section renders an omission marker" "$proj_leg_out" "[Objective section missing from this file]"
+assert_contains "missing Success Criteria render an omission marker" "$proj_leg_out" "[Success Criteria section missing from this file]"
+assert_contains "a missing Decision Log renders an omission marker" "$proj_leg_out" "[Decision Log section missing from this file]"
+assert_contains "legacy files render what parses (work log entry)" "$proj_leg_out" "legacy body with an unchecked box below"
+assert_contains "an advisory-carrying legacy file gets the doctor pointer" "$proj_leg_out" "[advisory findings present on this file - enumeration: tasks doctor --all]"
+assert_not_contains "a clean file carries no advisory pointer" "$proj_gold_out" "advisory findings present"
+cat >"$proj_dir/current/NWL-1-20260615-1200-nowl.md" <<'NWLEOF'
+# Task: Nowl
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Low
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Nowl fixture objective.
+
+## Success Criteria
+
+- [ ] nowl open
+NWLEOF
+proj_nwl_out="$(t show --dir "$proj_dir" NWL-1-20260615-1200-nowl.md --project)"
+assert_contains "a missing Work Log section renders an omission marker" "$proj_nwl_out" "[Work Log section missing from this file]"
+assert_contains "a file with no dependencies renders the empty marker" "$proj_nwl_out" "[no dependencies declared]"
+proj_lint_before="$(t lint --dir "$proj_dir" --verbose; printf 'exit=%s' "$?")"
+proj_doctor_before="$(t doctor --dir "$proj_dir" --all)"
+t show --dir "$proj_dir" LEG-1-20260615-0900-legacy.md --project >/dev/null
+t show --dir "$proj_dir" BIG-1-20260615-1200-big.md --project --json >/dev/null
+proj_lint_after="$(t lint --dir "$proj_dir" --verbose; printf 'exit=%s' "$?")"
+proj_doctor_after="$(t doctor --dir "$proj_dir" --all)"
+assert_eq "projection reads add zero new lint findings on the legacy class" "$proj_lint_before" "$proj_lint_after"
+assert_eq "projection reads add zero new doctor findings on the legacy class" "$proj_doctor_before" "$proj_doctor_after"
+
+# Structural elision marker (fix round F2): a checkpoint-sliced ORCH
+# -pattern parent renders one line naming every whole section the
+# projection drops, the unrun unit blocks included, with the raw hatch;
+# a file with nothing elided carries no marker.
+cat >"$proj_dir/current/ORT-1-20260615-1200-orch.md" <<'ORTEOF'
+# Task: Orchparent
+
+**Created:** 2026-06-15 12:00
+**Status:** In Progress
+**Priority:** High
+**Progress:** 40%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Run the checkpoint-sliced epic.
+
+## Success Criteria
+
+- [ ] epic open
+
+## Technical Approach
+
+strategy body
+
+## Risk Assessment
+
+risk body
+
+## Task Breakdown
+
+### Task ORT-1-1: land the walking skeleton
+
+#### Acceptance Criteria
+
+- [x] unit one done
+
+### Task ORT-1-2: migrate the contracts
+
+#### Acceptance Criteria
+
+- [ ] unit two open
+
+### Task ORT-1-3: close out the batch
+
+#### Acceptance Criteria
+
+- [ ] unit three open
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+
+## Work Log
+
+### 2026-06-15 12:00: manager: dispatched
+
+body
+ORTEOF
+proj_ort_out="$(t show --dir "$proj_dir" ORT-1-20260615-1200-orch.md --project)"
+assert_contains "the structural elision marker names every elided section with the raw hatch" "$proj_ort_out" "[sections elided: Technical Approach, Risk Assessment, Task Breakdown, Task ORT-1-1: land the walking skeleton, Task ORT-1-2: migrate the contracts, Task ORT-1-3: close out the batch, Execution Log - full file: tasks show ORT-1-20260615-1200-orch.md --raw]"
+assert_contains "the structural elision marker names the unrun unit blocks" "$proj_ort_out" "Task ORT-1-2: migrate the contracts"
+assert_not_contains "a file with nothing elided carries no structural marker" "$proj_gold_out" "[sections elided:"
+assert_eq "the JSON form counts the elided headings" "7" "$(t show --dir "$proj_dir" ORT-1-20260615-1200-orch.md --project --json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["elided_sections_total"])')"
+
+# Stale-claim gating (fix round F3): a leftover sidecar on a terminal task
+# renders the doctor-pointer marker instead of live-claim wording, and
+# sidecar-keyed advisories count into the advisory pointer.
+cat >"$proj_dir/current/TSC-1-20260615-1200-stale.md" <<'TSCEOF'
+# Task: Staleclaim
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Done task with a leftover sidecar.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+TSCEOF
+printf 'sess-gone\ngeneration 1\ncreated 2026-06-15 12:00\n' >"$proj_dir/current/TSC-1-20260615-1200-stale.md.claim"
+proj_tsc_out="$(t show --dir "$proj_dir" TSC-1-20260615-1200-stale.md --project)"
+assert_not_contains "a stale sidecar never renders the live-claim wording" "$proj_tsc_out" "Restrictions: live claim held by"
+assert_contains "a stale sidecar on a terminal task renders the doctor-pointer marker" "$proj_tsc_out" "[stale claim sidecar on a Completed task - enumeration: tasks doctor --all]"
+assert_contains "sidecar-keyed advisories count into the advisory pointer" "$proj_tsc_out" "[advisory findings present on this file - enumeration: tasks doctor --all]"
+proj_tsc_json="$(t show --dir "$proj_dir" TSC-1-20260615-1200-stale.md --project --json)"
+assert_eq "the JSON form reports the sidecar-keyed advisory" "true" "$(printf '%s' "$proj_tsc_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin)["advisory_findings"] else "false")')"
+assert_contains "the JSON restrictions field carries the stale marker" "$proj_tsc_json" "stale claim sidecar on a Completed task"
+assert_not_contains "a live sidecar on an open task fires no advisory pointer" "$proj_rdl_out" "advisory findings present"
+
+# Role maps: scout reads the compact class (one entry, one digest, 4 KB
+# ceiling) where the standard class reads three; the JSON form echoes the
+# bounds actually in force.
+cat >"$proj_dir/current/ROLE-1-20260615-1200-roles.md" <<'ROLEEOF'
+# Task: Role
+
+**Created:** 2026-06-15 12:00
+**Status:** Ready
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Objective
+
+Role fixture objective.
+
+## Success Criteria
+
+- [ ] role open
+
+## Dependencies
+
+- GOLD-1 (golden)
+
+## Work Log
+
+### 2026-06-15 10:00: worker: one
+
+body one
+
+### 2026-06-15 10:30: worker: two
+
+body two
+
+### 2026-06-15 11:00: worker: three
+
+body three
+
+### 2026-06-15 11:30: worker: four
+
+body four
+ROLEEOF
+proj_role_out="$(t show --dir "$proj_dir" ROLE-1-20260615-1200-roles.md --project --role scout)"
+assert_eq "the scout role map shows one Work Log entry" "1" "$(grep -c '^### ' <<<"$proj_role_out")"
+assert_contains "the scout elision marker counts the older entries" "$proj_role_out" "[3 older Work Log entries elided"
+proj_role_std="$(t show --dir "$proj_dir" ROLE-1-20260615-1200-roles.md --project)"
+assert_eq "the standard role map shows three Work Log entries" "3" "$(grep -c '^### ' <<<"$proj_role_std")"
+assert_contains "the standard elision marker counts one older entry" "$proj_role_std" "[1 older Work Log entries elided"
+proj_role_override="$(t show --dir "$proj_dir" ROLE-1-20260615-1200-roles.md --project --entries 2)"
+assert_eq "--entries overrides the role map" "2" "$(grep -c '^### ' <<<"$proj_role_override")"
+proj_role_json="$(t show --dir "$proj_dir" ROLE-1-20260615-1200-roles.md --project --role scout --json)"
+assert_contains "the JSON form echoes the scout bounds" "$proj_role_json" '"bounds":{"role":"scout","entries":1,"report_digests":1'
+assert_contains "the JSON form echoes the scout ceiling" "$proj_role_json" '"target_bytes":4096,"ceiling_bytes":4096'
+proj_std_json="$(t show --dir "$proj_dir" ROLE-1-20260615-1200-roles.md --project --json)"
+assert_contains "the JSON form echoes the worker bounds" "$proj_std_json" '"bounds":{"role":"worker","entries":3,"report_digests":3'
+assert_contains "the JSON form echoes the standard ceiling" "$proj_std_json" '"target_bytes":4096,"ceiling_bytes":8192'
+assert_contains "an open dependency renders its token, status, and file" "$proj_role_std" "GOLD-1 -> Ready current/GOLD-1-20260615-1200-golden.md"
+assert_eq "an open dependency lands in the JSON record" "1" "$(printf '%s' "$proj_std_json" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["open_dependencies"]))')"
+assert_contains "a resolved dependency leaves the unresolved count at zero" "$proj_std_json" '"unresolved_dependencies":0'
+# The ROLE fixture's resolving dependency rides the same shared classifiers:
+# the scan's I record and the projection's open record agree on it.
+proj_role_scan_toks="$(dependency_tokens "$proj_dir/current/ROLE-1-20260615-1200-roles.md" | LC_ALL=C sort -u | grep -c . || true)"
+assert_eq "projection open dependencies agree with the shared token scan (ROLE-1-20260615-1200-roles.md)" "1" "$proj_role_scan_toks"
+
+# The DEDUP-1 heavy-tail pattern (fix round D2+D3): a restriction-heavy
+# file with a long Work Log and decision log. The scout role always sees
+# exactly one capped entry on the heavy tail (the entry floor holds),
+# and two grown criteria drive the truncation past the entry floor into
+# the degrade stages (titles to 3, per-entry cap 384) so the bound
+# degrades instead of ending.
+ded_body()
+{
+	local extra="$1"
+	echo "# Task: Dedup pattern"
+	echo
+	echo "**Created:** 2026-06-15 12:00"
+	echo "**Status:** In Progress"
+	echo "**Priority:** High"
+	echo "**Progress:** 50%"
+	echo "**Owner:**"
+	echo "**Updated:** 2026-06-15 12:00"
+	echo
+	echo "## Objective"
+	echo
+	echo "Short objective sentence. Padding follows so the paragraph form has bulk: $(printf 'objective padding word %.0s' $(seq 1 120))"
+	echo
+	echo "## Success Criteria"
+	echo
+	local i
+	for i in $(seq 1 41); do
+		printf -- '- [ ] criterion payload line %02d %s\n' "$i" "$(printf 'restriction word %.0s' $(seq 1 7))"
+	done
+	for i in $(seq 1 "$extra"); do
+		printf -- '- [ ] grown criterion payload line %d %s\n' "$i" "$(printf 'restriction word %.0s' $(seq 1 7))"
+	done
+	echo
+	echo "### Decision Log"
+	echo
+	for i in $(seq 1 8); do
+		echo "**Decision: decision number $i with a reasonably long title** · 2026-06-15 11:00"
+		echo "- Context: body text for decision $i"
+		echo
+	done
+	echo "## Work Log"
+	echo
+	for i in $(seq 1 120); do
+		echo "### 2026-06-15 09:00: worker: entry $i"
+		echo
+		printf 'entry padding text %.0s' $(seq 1 60)
+		echo
+		echo
+	done
+}
+ded_body 0 >"$proj_dir/current/DED-1-20260615-1200-dedup.md"
+ded_body 2 >"$proj_dir/current/DED-2-20260615-1200-dedup.md"
+proj_ded_out="$(t show --dir "$proj_dir" DED-1-20260615-1200-dedup.md --project)"
+proj_ded_bytes="$(printf '%s' "$proj_ded_out" | LC_ALL=C wc -c)"
+(( proj_ded_bytes <= 8192 )) || bad "the base dedup-pattern projection exceeds the 8 KB ceiling (got $proj_ded_bytes)"
+ok "the base dedup-pattern projection renders at or under the 8 KB ceiling ($proj_ded_bytes bytes)"
+assert_not_contains "the base dedup-pattern render stops before the degrade stages" "$proj_ded_out" "truncated at 384 bytes"
+proj_ded_grown="$(t show --dir "$proj_dir" DED-2-20260615-1200-dedup.md --project)"
+proj_ded_grown_bytes="$(printf '%s' "$proj_ded_grown" | LC_ALL=C wc -c)"
+(( proj_ded_grown_bytes <= 8192 )) || bad "the grown dedup-pattern projection ends past the 8 KB ceiling (got $proj_ded_grown_bytes)"
+ok "the grown dedup-pattern projection degrades under the 8 KB ceiling ($proj_ded_grown_bytes bytes)"
+assert_contains "grown criteria drive the per-entry cap into its degrade stage" "$proj_ded_grown" "[entry truncated at 384 bytes - full entry: tasks show DED-2-20260615-1200-dedup.md --json]"
+assert_contains "grown criteria drive the decision titles past their floor" "$proj_ded_grown" "[5 older decision titles elided - full log: tasks show DED-2-20260615-1200-dedup.md --raw]"
+assert_contains "grown restriction criteria survive the degrade byte-verbatim" "$proj_ded_grown" "- [ ] grown criterion payload line 1"
+assert_contains "the JSON bounds echo the degraded entry cap" "$(t show --dir "$proj_dir" DED-2-20260615-1200-dedup.md --project --json)" '"entry_bytes":384'
+proj_ded_scout="$(t show --dir "$proj_dir" DED-1-20260615-1200-dedup.md --project --role scout)"
+assert_eq "the scout role always sees exactly one Work Log entry on the heavy tail" "1" "$(grep -c '^### ' <<<"$proj_ded_scout")"
+assert_contains "the scout heavy-tail read marks the entries past its floor" "$proj_ded_scout" "[119 older Work Log entries elided - complete history: tasks show DED-1-20260615-1200-dedup.md --json]"
+
+# The JSON record: schema marker, documented top-level key set, and the
+# independent-parser gate over a multibyte body (json.load refuses invalid
+# UTF-8, so a mid-character entry cut fails here).
+proj_unicode_file="$proj_dir/current/UNI-1-20260615-1200-unicode.md"
+{
+	echo "# Task: Uni"
+	echo
+	echo "**Created:** 2026-06-15 12:00"
+	echo "**Status:** Ready"
+	echo "**Priority:** Low"
+	echo "**Progress:** 0%"
+	echo "**Owner:**"
+	echo "**Updated:** 2026-06-15 12:00"
+	echo
+	echo "## Objective"
+	echo
+	echo "Unicode fixture with λ and 日本語 text."
+	echo
+	echo "## Success Criteria"
+	echo
+	echo "- [ ] uni open"
+	echo
+	echo "## Work Log"
+	echo
+	echo "### 2026-06-15 10:00: worker: unicode entry"
+	echo
+	echo "UNI-HEAD λλλ $(printf '日本語のテキスト %.0s' $(seq 1 60)) UNI-TAIL"
+} >"$proj_unicode_file"
+proj_uni_json="$(t show --dir "$proj_dir" UNI-1-20260615-1200-unicode.md --project --entries 1 --json)"
+assert_contains "the projection JSON carries the schema_version 1 marker" "$proj_uni_json" '{"schema_version":1,"type":"projection"'
+assert_eq "the projection JSON top-level keys are exactly the documented set" \
+	'"schema_version" "type" "id" "file" "bounds" "projection_bytes" "header" "restrictions" "objective" "open_criteria" "superseded_criteria" "ticked_criteria_count" "success_criteria_missing" "decision_titles" "older_decision_titles" "decision_log_missing" "work_log" "older_work_log_entries" "work_log_missing" "report_digests" "older_report_digests" "open_dependencies" "terminal_dependencies" "unresolved_dependencies" "elided_sections" "elided_sections_total" "advisory_findings"' \
+	"$(rdr_topkeys "$proj_uni_json" | tr '\n' ' ' | sed 's/ $//')"
+assert_contains "the projection JSON carries the truncated unicode entry" "$proj_uni_json" 'UNI-HEAD'
+assert_not_contains "the projection JSON drops the unicode tail past the cap" "$proj_uni_json" 'UNI-TAIL'
+proj_uni_tiny_json="$(t show --dir "$proj_dir" UNI-1-20260615-1200-unicode.md --project --bytes 100 --json)"
+assert_contains "the JSON bounds fold the target to a ceiling override below it" "$proj_uni_tiny_json" '"target_bytes":100,"ceiling_bytes":100'
+if command -v python3 >/dev/null 2>&1; then
+	if printf '%s\n' "$proj_uni_json" | python3 -c 'import json, sys; json.load(sys.stdin)' 2>/dev/null; then
+		ok "the projection JSON parses as one complete UTF-8 document (python3)"
+	else
+		bad "the projection JSON parses as one complete UTF-8 document (python3)"
+	fi
+elif command -v jq >/dev/null 2>&1; then
+	if printf '%s\n' "$proj_uni_json" | jq -e . >/dev/null 2>&1; then
+		ok "the projection JSON parses as one complete UTF-8 document (jq)"
+	else
+		bad "the projection JSON parses as one complete UTF-8 document (jq)"
+	fi
+else
+	bad "no independent JSON parser on the host (python3 nor jq)"
+fi
+proj_uni_json2="$(t show --dir "$proj_dir" UNI-1-20260615-1200-unicode.md --project --entries 1 --json)"
+assert_eq "the projection JSON is byte-stable across invocations" "$proj_uni_json" "$proj_uni_json2"
+
+# Advisory mirror tripwire (advisory round DC1): the projection's
+# advisory-pointer boolean must equal the presence of ADVISORY findings
+# in the lint classifier on every fixture task file, so a lint lane
+# added to lint_classified_findings without mirroring it into the read
+# path fails here by construction. The exclusion list is baked into the
+# assertion by name: the two lanes the staged records cannot see (dead
+# report links and unreachable recorded commits) never count against
+# the mirror, and the falsifiable fixture below is an archived terminal
+# file whose only lint advisory is a malformed header stamp, so the
+# mirror's header-shape lane is load-bearing for the green run. The
+# shape-variant fixtures that follow pin the mirrored extraction
+# semantics per variant, one anomaly each: trailing space and trailing
+# CR on a shape value (the trims must actually trim), a zero-space
+# colon value (the leading [ \t] consume is zero-or-more on both
+# sides), an empty shape value (empty means absent), and a duplicate
+# Status pair (first occurrence wins on both sides).
+cat >"$proj_dir/archive/HDR-1-20260615-1200-shape.md" <<'HDREOF'
+# Task: Headershape
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Header-shape fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+assert_contains "a malformed header stamp alone fires the advisory pointer on an archived terminal file" "$(t show --dir "$proj_dir" HDR-1-20260615-1200-shape.md --project)" "advisory findings present on this file"
+cat >"$proj_dir/archive/HDR-2-20260615-1200-trailspace.md" <<'HDREOF'
+# Task: Headertrailspace
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00 
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Trailing-space fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+proj_hdr_cr=$'\r'
+cat >"$proj_dir/archive/HDR-3-20260615-1200-trailcr.md" <<HDREOF
+# Task: Headertrailcr
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%${proj_hdr_cr}
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Trailing-CR fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+cat >"$proj_dir/archive/HDR-4-20260615-1200-zerospace.md" <<'HDREOF'
+# Task: Headerzerospace
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:**2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Zero-space fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+cat >"$proj_dir/archive/HDR-5-20260615-1200-emptyval.md" <<'HDREOF'
+# Task: Headeremptyval
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+**Latest Update:**
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Empty-value fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+cat >"$proj_dir/archive/HDR-6-20260615-1200-dupstatus.md" <<'HDREOF'
+# Task: Headerdupstatus
+
+**Created:** 2026-06-15 12:00
+**Status:** Completed
+**Status:** In Progress
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Duplicate-Status fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+proj_lint_stream="$(t lint --dir "$proj_dir" --verbose 2>/dev/null || true)"
+for proj_x_file in "$proj_dir"/current/*.md "$proj_dir"/archive/*.md; do
+	proj_x_rel="${proj_x_file#"$proj_dir"/}"
+	proj_x_pat="${proj_x_rel//./\.}"
+	proj_x_lint="$(printf '%s\n' "$proj_lint_stream" \
+		| grep -E "^ADVISORY (${proj_x_pat}|${proj_x_pat}.claim): " \
+		| grep -vcF -e 'dead report link' -e 'is unreachable from' || true)"
+	(( proj_x_lint > 0 )) && proj_x_lint=1
+	proj_x_ptr="$(t show --dir "$proj_dir" "${proj_x_file##*/}" --project --json \
+		| python3 -c 'import json,sys; print(1 if json.load(sys.stdin)["advisory_findings"] else 0)')"
+	assert_eq "the advisory mirror agrees with the lint classifier ($proj_x_rel)" "$proj_x_lint" "$proj_x_ptr"
+done
+
 echo "== doctor: grandfathering pins a legacy-shaped board at zero =="
 # Dedicated fixture board carrying every grandfathered shape the live board
 # probe recorded (archived dup IDs, all-archived cycles, Ready-file future

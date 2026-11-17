@@ -643,6 +643,50 @@ readonly DEFAULT_STATUS="$STATUS_TRIAGE"
 readonly DEFAULT_FROM="Manager"
 readonly DEFAULT_TAIL="10"
 readonly NA="N/A"
+
+# The bounded default projection's CLI-owned config (ORCH-4-8): the
+# projection's bounds live as versioned constants beside DEFAULT_TAIL,
+# never in a board config file, so bounds cannot drift from the code that
+# interprets them; the schema_version marker versions projection-shape
+# changes like every other versioned payload. The target is the design
+# budget for the default read; the ceiling is the enforced bound over
+# elidable content. Restriction-bearing content is exempt from every
+# bound: the header block, the Restrictions line, open and superseded
+# Success Criteria lines, and open dependency lines survive every ceiling
+# and override untouched. When assembly exceeds the ceiling a fixed
+# truncation order runs, and it degrades instead of ending: drop deeper
+# Work Log entries oldest first but never past the entry floor (the
+# newest entry always survives, capped), then decision titles to
+# PROJECTION_DECISION_FLOOR, then reduce the Objective digest to its
+# first sentence, then - the degrade stages - decision titles to
+# PROJECTION_DECISION_DEEP and the per-entry cap to
+# PROJECTION_ENTRY_BYTES_DEEP; once those run out the projection renders
+# as measured, because what remains is restriction bearing or structural.
+# Per-entry byte caps are not part of any role map: an entry's shape is
+# independent of who reads it, and the degrade stages move the cap for
+# every role alike under ceiling pressure. The structural elision marker
+# and the advisory pointer render outside every bound.
+readonly PROJECTION_TARGET_BYTES=4096
+readonly PROJECTION_CEILING_BYTES=8192
+readonly PROJECTION_ENTRY_BYTES=512
+readonly PROJECTION_ENTRY_BYTES_DEEP=384
+readonly PROJECTION_ENTRIES_DEFAULT=3
+readonly PROJECTION_REPORTS_DEFAULT=3
+readonly PROJECTION_DECISION_FLOOR=5
+readonly PROJECTION_DECISION_DEEP=3
+# Role bound maps over the fleet's six charter roles: the standard class
+# is the decided default (worker through verifier re-read full context);
+# scout reads the compact class. Roles vary entries, report digests, and
+# the ceiling only - never the restrictions rule and never the entry cap.
+readonly PROJECTION_ROLES="worker manager planner reviewer verifier scout"
+readonly PROJECTION_SCOUT_ROLE="scout"
+
+projection_role_bounds() { # <role>; prints "entries reports ceiling"
+	case "$1" in
+		"$PROJECTION_SCOUT_ROLE") printf '%s\n' "1 1 $PROJECTION_TARGET_BYTES" ;;
+		*) printf '%s\n' "$PROJECTION_ENTRIES_DEFAULT $PROJECTION_REPORTS_DEFAULT $PROJECTION_CEILING_BYTES" ;;
+	esac
+}
 readonly STATUS_VALUES="$STATUS_TRIAGE, $STATUS_READY, $STATUS_IN_PROGRESS, $STATUS_BLOCKED, $STATUS_CANCELLED, $STATUS_COMPLETED"
 
 # The Priority vocabulary is fixed; new/set must reject anything else. The
@@ -1035,6 +1079,36 @@ Commands:
                                        body (the edit write model's span, so
                                        read and write round-trip); --raw prints
                                        the whole file byte-exact.
+  show <taskfile> --project [--json]
+                                       The bounded default read (the seven-
+                                       element projection): verbatim header
+                                       block plus the live-claim Restrictions
+                                       line, Objective digest, open and
+                                       superseded criteria verbatim with ticked
+                                       collapsed to a count, decision titles
+                                       and dates, the latest N Work Log entries
+                                       (each capped at 512 bytes), the last K
+                                       report digest lines, and open dependency
+                                       lines. Bounds are CLI-owned constants:
+                                       4 KB target, 8 KB ceiling over elidable
+                                       content (restriction-bearing content is
+                                       exempt and survives every bound); when
+                                       assembly exceeds the ceiling a fixed
+                                       truncation order runs - Work Log entries
+                                       drop oldest first, then decision titles
+                                       fall to the newest five, then the
+                                       Objective digest reduces to its first
+                                       sentence. --entries N / --bytes N
+                                       override the entry count and ceiling;
+                                       --role NAME selects a role bound map
+                                       (worker default; scout compact); roles
+                                       vary bounds only, never the restrictions
+                                       rule. Every elision is marked and names
+                                       the escape hatch (show --json/--raw/
+                                       --section, tasks reports, tasks doctor).
+                                       --json emits the same converged content
+                                       as a schema_version 1 record. Strictly
+                                       read-only.
   list [--dir DIR] [--json] [--lane NAME] [--limit N] [--offset N]
                                        Read-only board listing in dashboard lane
                                        order. --json emits the schema_version 1
@@ -3670,34 +3744,32 @@ lint_scan_files() { # tasks_dir files...
 	' "$@"
 }
 
-cmd_lint() {
-	local dir="" verbose=""
-	while (($#)); do
-		case "$1" in
-			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "lint: --dir requires a value"; dir="$2"; shift 2 ;;
-			--dir=*) dir="${1#*=}"; shift ;;
-			--verbose) verbose=1; shift ;;
-			*) die "lint: unknown argument: $1" ;;
-		esac
-	done
-	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
-	require_tasks_dir "$tasks_dir"
-	# Same option-poisoning defusing as render_unlocked: the path is handed
-	# to git and re-parsed below.
-	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
+# Classified lint findings for a file set: the lint pipeline's scan,
+# reconcile, classification, and claim-hygiene passes in one function,
+# emitting the final "HARD rel: msg" / "ADVISORY rel: msg" records on
+# stdout in append order. cmd_lint consumes the records for its report
+# and exit code, so lint stays the single classifier for reporting
+# surfaces. The bounded projection does NOT call this function: its
+# advisory pointer is a cheap presence boolean derived from the staged
+# snapshot records (see projection_stage), which keeps the read path
+# free of the git reachability walk this pipeline runs. Scope
+# follows the file arguments: the per-file classification runs only for
+# named files, and the claim-hygiene owner and staleness branches only
+# for named files' sidecars; orphan-sidecar records stay unconditional
+# because a missing task file can never be in any caller's named set.
+# Global markers follow the resolve_tasks_dir pattern (a printf contract
+# would strand them in a $() subshell): LINT_SKIPPED_RECONCILE carries
+# the reconcile-skip note and LINT_CLAIM_COUNT the sorted sidecar count.
+# Read-only: the only subprocess is git rev-list over read-only plumbing.
+LINT_SKIPPED_RECONCILE=""
+LINT_CLAIM_COUNT=0
+lint_classified_findings() { # <tasks_dir> <rel>...
+	local tasks_dir="$1"; shift
+	local -a files=("$@")
+	LINT_SKIPPED_RECONCILE=""
+	LINT_CLAIM_COUNT=0
 
-	local -a files=()
-	local subdir file
-	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
-		[[ -d "$tasks_dir/$subdir" ]] || continue
-		for file in "$tasks_dir/$subdir"/*.md; do
-			[[ -e "$file" ]] || continue
-			files+=("${file#"$tasks_dir/"}")
-		done
-	done
-
-	# ---- pass 1: one awk scan over every task file -------------------------
+	# ---- pass 1: one awk scan over every named task file -------------------
 	local -a scan_recs=() cands=()
 	if ((${#files[@]} > 0)); then
 		mapfile -t scan_recs < <(lint_scan_files "$tasks_dir" "${files[@]}")
@@ -3731,7 +3803,7 @@ cmd_lint() {
 	# outside a repo, or a repo with no commits) the pass is skipped with a
 	# note rather than reporting every hash unreachable.
 	local -A cand_reach=()
-	local have_history=0 skipped_reconcile=""
+	local have_history=0
 	if ((${#cands[@]} > 0)); then
 		local -a uniq_cands=()
 		mapfile -t uniq_cands < <(printf '%s\n' "${cands[@]}" | LC_ALL=C sort -u)
@@ -3751,11 +3823,10 @@ cmd_lint() {
 			((ci >= nc)) && break
 		done < <(git -C "$tasks_dir" rev-list --all 2>/dev/null | LC_ALL=C sort)
 		$saw_any && have_history=1
-		((have_history)) || skipped_reconcile="no reachable git history found from $tasks_dir"
+		((have_history)) || LINT_SKIPPED_RECONCILE="no reachable git history found from $tasks_dir"
 	fi
 
 	# ---- pass 3: classify every finding ------------------------------------
-	local -a hard_out=() advisory_out=()
 	local msg sev st
 	local -a rels=()
 	for rel in "${!status_of[@]}"; do rels+=("$rel"); done
@@ -3769,11 +3840,11 @@ cmd_lint() {
 		# Triage, so the file acts as an open task with an incomplete header.
 		if (( "${have_status_of[$rel]}" == 0 )); then
 			msg="header Status field missing (expected one of: $STATUS_VALUES)"
-			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+			if lint_class_hard "$rel"; then printf 'HARD %s: %s\n' "$rel" "$msg"; else printf 'ADVISORY %s: %s\n' "$rel" "$msg"; fi
 		fi
 		if [[ "$st" != "-" ]] && ! valid_status "$st"; then
 			msg="header Status not a CLI-recognized value: '$st' (valid: $STATUS_VALUES)"
-			if lint_class_hard "$rel"; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+			if lint_class_hard "$rel"; then printf 'HARD %s: %s\n' "$rel" "$msg"; else printf 'ADVISORY %s: %s\n' "$rel" "$msg"; fi
 		fi
 		# The header contract ties the Status Reason to Blocked/Cancelled, and
 		# set and close --cancelled refuse to create the drift, so a Blocked
@@ -3784,7 +3855,7 @@ cmd_lint() {
 		if [[ "$st" == "$STATUS_BLOCKED" || "$st" == "$STATUS_CANCELLED" ]] \
 			&& [[ -z "${reason_of[$rel]:-}" ]]; then
 			msg="Status $st requires a $STATUS_REASON_KEY (the header contract ties it to $STATUS_BLOCKED/$STATUS_CANCELLED)"
-			if (( "${arch_of[$rel]}" == 1 )); then advisory_out+=("ADVISORY $rel: $msg"); else hard_out+=("HARD $rel: $msg"); fi
+			if (( "${arch_of[$rel]}" == 1 )); then printf 'ADVISORY %s: %s\n' "$rel" "$msg"; else printf 'HARD %s: %s\n' "$rel" "$msg"; fi
 		fi
 		# Checkbox-vs-Status reconciliation lives in the body (Success
 		# Criteria), so it stays advisory everywhere per the Option-1 split.
@@ -3798,9 +3869,9 @@ cmd_lint() {
 		# gets the corrected nudge instead of the closure nudge the gate
 		# would refuse.
 		if (( "${unchecked_of[$rel]}" > 0 )) && is_terminal_status "$st"; then
-			advisory_out+=("ADVISORY $rel: Status $st with ${unchecked_of[$rel]} unchecked Success Criteria boxes")
+			printf 'ADVISORY %s: %s\n' "$rel" "Status $st with ${unchecked_of[$rel]} unchecked Success Criteria boxes"
 		elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 && "${superseded_of[$rel]:-0}" == 0 && "${unexcepted_of[$rel]:-0}" == 0 )) && ! is_terminal_status "$st"; then
-			advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st (closure is 'tasks close')")
+			printf 'ADVISORY %s: %s\n' "$rel" "all ${checked_of[$rel]} Success Criteria boxes checked while $st (closure is 'tasks close')"
 		fi
 		# Verdict drift rides the same advisory lane (body-space findings
 		# stay advisory everywhere, so legacy plain-box boards keep lint
@@ -3810,19 +3881,19 @@ cmd_lint() {
 		# the claim the gate refuses to treat as established (a terminal
 		# file reached that state only through a --force override).
 		if (( "${refuted_of[$rel]:-0}" > 0 )) && is_terminal_status "$st"; then
-			advisory_out+=("ADVISORY $rel: Status $st with ${refuted_of[$rel]} refuted Success Criteria verdict(s)")
+			printf 'ADVISORY %s: %s\n' "$rel" "Status $st with ${refuted_of[$rel]} refuted Success Criteria verdict(s)"
 		fi
 		if (( "${unexcepted_of[$rel]:-0}" > 0 )); then
 			if is_terminal_status "$st"; then
-				advisory_out+=("ADVISORY $rel: Status $st with ${unexcepted_of[$rel]} unverifiable Success Criteria verdict(s) without a documented exception")
+				printf 'ADVISORY %s: %s\n' "$rel" "Status $st with ${unexcepted_of[$rel]} unverifiable Success Criteria verdict(s) without a documented exception"
 			elif (( "${unchecked_of[$rel]}" == 0 && "${checked_of[$rel]}" > 0 )); then
-				advisory_out+=("ADVISORY $rel: all ${checked_of[$rel]} Success Criteria boxes checked while $st, but ${unexcepted_of[$rel]} unverifiable verdict(s) lack documented exceptions (closure refuses)")
+				printf 'ADVISORY %s: %s\n' "$rel" "all ${checked_of[$rel]} Success Criteria boxes checked while $st, but ${unexcepted_of[$rel]} unverifiable verdict(s) lack documented exceptions (closure refuses)"
 			fi
 		fi
 		# Archive hygiene: an archived file still carrying an open status is
 		# work the board no longer shows in any active lane.
 		if (( "${arch_of[$rel]}" == 1 )) && ! is_terminal_status "$st"; then
-			advisory_out+=("ADVISORY $rel: archived while $st (archived tasks must be Completed or Cancelled)")
+			printf 'ADVISORY %s: %s\n' "$rel" "archived while $st (archived tasks must be Completed or Cancelled)"
 		fi
 		while IFS=$'\t' read -r tag a b c; do
 			[[ -n "$tag" ]] || continue
@@ -3839,7 +3910,7 @@ cmd_lint() {
 					msg="recorded commit $b (line $a) is unreachable from any branch or remote"
 					lint_class_hard "$rel" && sev=hard ;;
 			esac
-			if [[ "$sev" == hard ]]; then hard_out+=("HARD $rel: $msg"); else advisory_out+=("ADVISORY $rel: $msg"); fi
+			if [[ "$sev" == hard ]]; then printf 'HARD %s: %s\n' "$rel" "$msg"; else printf 'ADVISORY %s: %s\n' "$rel" "$msg"; fi
 		done < <(printf '%s' "${findings_of[$rel]:-}" | grep -v '^$')
 	done
 	# Open task carrying an Owner without the atomic sidecar: the header
@@ -3848,12 +3919,13 @@ cmd_lint() {
 		st="${status_of[$rel]}"
 		if ! is_terminal_status "$st" && (( "${arch_of[$rel]}" == 0 )) \
 			&& [[ -n "${owner_of[$rel]}" ]] && [[ ! -e "$tasks_dir/$rel.claim" ]]; then
-			hard_out+=("HARD $rel: header Owner '${owner_of[$rel]}' set without a claim sidecar")
+			printf 'HARD %s: %s\n' "$rel" "header Owner '${owner_of[$rel]}' set without a claim sidecar"
 		fi
 	done
 
 	# ---- pass 4: claim-sidecar and archive hygiene -------------------------
 	local -a claims=()
+	local subdir file
 	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
 		[[ -d "$tasks_dir/$subdir" ]] || continue
 		for file in "$tasks_dir/$subdir"/*.md.claim; do
@@ -3869,25 +3941,71 @@ cmd_lint() {
 	if ((${#claims[@]} > 0)); then
 		mapfile -t sorted_claims < <(printf '%s\n' "${claims[@]}" | LC_ALL=C sort)
 	fi
+	LINT_CLAIM_COUNT=${#sorted_claims[@]}
+	local -A in_scope=()
+	for rel in "${files[@]}"; do in_scope["$rel"]=1; done
 	local claim_rel task_rel sidecar_owner
 	for claim_rel in "${sorted_claims[@]}"; do
 		task_rel="${claim_rel%.claim}"
 		if [[ ! -f "$tasks_dir/$task_rel" ]]; then
-			hard_out+=("HARD $claim_rel: claim sidecar with no task file")
+			printf 'HARD %s: %s\n' "$claim_rel" "claim sidecar with no task file"
 			continue
 		fi
+		[[ -n "${in_scope[$task_rel]+x}" ]] || continue
 		st="${status_of[$task_rel]}"
 		if (( "${arch_of[$task_rel]}" == 1 )) || is_terminal_status "$st"; then
-			advisory_out+=("ADVISORY $claim_rel: stale claim sidecar on $st task")
+			printf 'ADVISORY %s: %s\n' "$claim_rel" "stale claim sidecar on $st task"
 			continue
 		fi
 		sidecar_owner="$(head -n 1 "$tasks_dir/$claim_rel")"
 		if [[ -z "${owner_of[$task_rel]}" ]]; then
-			hard_out+=("HARD $claim_rel: claim sidecar present but header Owner is empty")
+			printf 'HARD %s: %s\n' "$claim_rel" "claim sidecar present but header Owner is empty"
 		elif [[ "${owner_of[$task_rel]}" != "$sidecar_owner" ]]; then
-			hard_out+=("HARD $claim_rel: claim sidecar owner '$sidecar_owner' does not match header Owner '${owner_of[$task_rel]}'")
+			printf 'HARD %s: %s\n' "$claim_rel" "claim sidecar owner '$sidecar_owner' does not match header Owner '${owner_of[$task_rel]}'"
 		fi
 	done
+}
+
+cmd_lint() {
+	local dir="" verbose=""
+	while (($#)); do
+		case "$1" in
+			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "lint: --dir requires a value"; dir="$2"; shift 2 ;;
+			--dir=*) dir="${1#*=}"; shift ;;
+			--verbose) verbose=1; shift ;;
+			*) die "lint: unknown argument: $1" ;;
+		esac
+	done
+	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	warn_fallback_tasks_dir "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
+	# Same option-poisoning defusing as render_unlocked: the path is handed
+	# to git and re-parsed below.
+	[[ "$tasks_dir" == -* || "$tasks_dir" == ~* ]] && tasks_dir="./$tasks_dir"
+
+	local -a files=()
+	local subdir file
+	for subdir in "$CURRENT_DIR" "$ARCHIVE_DIR"; do
+		[[ -d "$tasks_dir/$subdir" ]] || continue
+		for file in "$tasks_dir/$subdir"/*.md; do
+			[[ -e "$file" ]] || continue
+			files+=("${file#"$tasks_dir/"}")
+		done
+	done
+
+	local -a lint_recs=() hard_out=() advisory_out=()
+	local rec
+	LINT_SKIPPED_RECONCILE=""
+	LINT_CLAIM_COUNT=0
+	if ((${#files[@]} > 0)); then
+		mapfile -t lint_recs < <(lint_classified_findings "$tasks_dir" "${files[@]}")
+		for rec in "${lint_recs[@]+${lint_recs[@]}}"; do
+			case "$rec" in
+				HARD*) hard_out+=("$rec") ;;
+				*) advisory_out+=("$rec") ;;
+			esac
+		done
+	fi
 
 	# ---- report -------------------------------------------------------------
 	local hard_count=${#hard_out[@]} advisory_count=${#advisory_out[@]}
@@ -3906,9 +4024,9 @@ cmd_lint() {
 			adv_printed=$((adv_printed + 1))
 		fi
 	done
-	[[ -n "$skipped_reconcile" ]] && printf 'note: push-reconcile skipped: %s\n' "$skipped_reconcile"
+	[[ -n "$LINT_SKIPPED_RECONCILE" ]] && printf 'note: push-reconcile skipped: %s\n' "$LINT_SKIPPED_RECONCILE"
 	printf 'lint: %d hard, %d advisory across %d task files (%d claim sidecars)\n' \
-		"$hard_count" "$advisory_count" "${#files[@]}" "${#sorted_claims[@]}"
+		"$hard_count" "$advisory_count" "${#files[@]}" "$LINT_CLAIM_COUNT"
 	((hard_count == 0)) || exit 1
 }
 
@@ -5575,8 +5693,813 @@ show_json() {
 		' "$file"
 }
 
+# ---- bounded default projection (show --project) -----------------------
+
+# JSON-escape one string through the shared escaper fragment: the quoted
+# form every projection JSON value rides, so the projection cannot drift
+# from the readers' escaping discipline.
+projection_jq() { # <string>
+	LC_ALL=C AWK_JSON_STRING="$1" awk "$AWK_JSON_ESCAPE"'BEGIN { print jq(ENVIRON["AWK_JSON_STRING"]) }'
+}
+
+# The Objective digest for the current truncation mode: the first
+# paragraph, reduced to its first sentence in sentence mode (when one
+# exists) or cut at the per-entry byte cap at a UTF-8 boundary when the
+# paragraph overruns. One implementation feeds both the human block and
+# the JSON record, so the two forms cannot drift.
+projection_objective_text() { # <objective_mode> <entry-bytes>
+	local obj_mode="$1" entry_bytes="$2" p IFS=$'\n'
+	(( ${#P_OBJ[@]} > 0 )) || return 1
+	p="${P_OBJ[*]}"
+	if [[ "$obj_mode" == "sentence" && "$p" == *". "* ]]; then
+		printf '%s' "${p%%. *}."
+	elif (( P_OBJ_BYTES > entry_bytes )); then
+		projection_cut "$entry_bytes" <<<"$p"
+	else
+		printf '%s' "$p"
+	fi
+}
+
+# Blank-line discipline for the assembled projection: one blank line
+# before a block heading (blocks separate by one blank) and one after it
+# (content starts clear of the heading). The array is the caller's, via
+# nameref.
+projection_push_heading() { # <array-nameref> <heading>
+	local -n out_arr="$1"
+	(( ${#out_arr[@]} > 0 )) && out_arr+=("")
+	out_arr+=("$2")
+	out_arr+=("")
+}
+
+# Cut stdin to at most <cap> bytes, backing off over UTF-8 continuation
+# bytes so the cut never splits a multibyte character (LC_ALL=C makes awk
+# byte-oriented, so continuation bytes 0x80-0xBF compare inside the range).
+# Multi-line input keeps its interior newlines inside the budget.
+projection_cut() { # <cap>
+	LC_ALL=C awk -v cap="$1" '
+		{ buf = buf ((NR > 1) ? "\n" : "") $0 }
+		END {
+			if (length(buf) <= cap) { print buf; exit }
+			t = substr(buf, 1, cap)
+			while (t != "" && substr(t, length(t), 1) >= "\x80") t = substr(t, 1, length(t) - 1)
+			print t
+		}
+	'
+}
+
+# The projection's single record pass over one snapshot: every semantic
+# the seven elements need plus the structural-elision and staging records,
+# emitted as single-line tagged records so the human and JSON forms
+# assemble from one implementation and the ceiling loop never re-reads
+# the file. Sources the shared heading reader and the shared criteria
+# classifier fragments, so a grammar change lands once and every consumer
+# sees it: SECH carries every heading, OBJP the Objective's first
+# paragraph, CRIT_O/CRIT_S the open and superseded criteria lines
+# verbatim (verdict, exception, and evidence markers ride inside the
+# verbatim lines), CRIT_T the ticked count, DEC the decision title lines,
+# WLL every Work Log body line in order (the entry anchors included, so
+# the bash side slices the last-N span work_log_tail would print without
+# a second pass), RPD the per-entry report digest lines, and VER_R/VER_U
+# the refuted and unverifiable-without-exception verdict counts in the
+# lint classifier's own counting terms. The Work Log region follows
+# work_log_tail's own grammar (raw /^## Work Log/ prefix enters, any
+# other /^## / exits), so the WLL stream and the tail verb can never
+# drift on where entries live. criteria_box and criteria_verdict run on
+# every body line so the fence toggle and the verdict counters stay
+# exact against the lint scan. Read-only, one pass.
+projection_records() { # <snapshot-file>
+	LC_ALL=C awk "$AWK_HEADING_LEVEL$AWK_CRITERIA_COUNTER"'
+		{
+			lvl = heading_level($0)
+			if (lvl >= 2) {
+				if (inwl && lvl > 2) {
+					# Inside the Work Log region every heading-grade line is
+					# tail content in the tail-verb grammar: the ### anchors
+					# split entries (and flush a pending report digest), the
+					# deeper grades ride as body lines. Only a level-2 heading
+					# exits the region.
+					if ($0 ~ /^### /) {
+						if (entryreport && entrydigest != "") print "RPD\t" entrydigest
+						entryreport = 0; entrydigest = ""
+					}
+					print "WLL\t" $0
+					if (lvl == 3) print "SECH\t" lvl "\t" HTEXT
+					next
+				}
+				print "SECH\t" lvl "\t" HTEXT
+				if ($0 ~ /^## Work Log/) inwl = 1
+				else if ($0 ~ /^## /) inwl = 0
+				track_criteria_section($0)
+				if (lvl == 2) {
+					inobj = (HTEXT == "Objective")
+					objopen = inobj
+					indec = 0
+				} else if (lvl == 3) {
+					indec = (HTEXT == "Decision Log")
+				}
+				next
+			}
+			box = criteria_box($0)
+			verdict = criteria_verdict($0)
+			if (verdict == "refuted") refuted++
+			else if (verdict == "unverifiable" && ! criteria_excepted($0)) unex++
+			if (inwl) {
+				if ($0 ~ /^### /) {
+					if (entryreport && entrydigest != "") print "RPD\t" entrydigest
+					entryreport = 0; entrydigest = ""
+					print "WLL\t" $0
+					next
+				}
+				if (index($0, "**Report:** [") > 0) entryreport = 1
+				if (index($0, "**Digest:** ") == 1) entrydigest = substr($0, 13)
+				print "WLL\t" $0
+				next
+			}
+			if (inobj) {
+				if ($0 != "") {
+					print "OBJP\t" $0
+					objopen = 0
+				} else if (!objopen) {
+					inobj = 0
+				}
+			}
+			if (box == "unchecked") print "CRIT_O\t" $0
+			else if (box == "superseded") print "CRIT_S\t" $0
+			else if (box == "checked") ticked++
+			if (indec && $0 ~ /^\*\*Decision: /) print "DEC\t" $0
+		}
+		END {
+			if (entryreport && entrydigest != "") print "RPD\t" entrydigest
+			print "VER_R\t" refuted + 0
+			print "VER_U\t" unex + 0
+			print "CRIT_T\t" ticked + 0
+		}
+	' "$1"
+}
+
+# Shape the Work Log tail text (work_log_tail output) into the projection's
+# entry block: entries split on the same "### " anchors work_log_tail
+# counted, per-entry byte cap with the elision marker naming the escape
+# hatch, and the older-entries marker. Text mode prints the human block;
+# JSON mode prints the entries as a JSON array of
+# {stamp,title,body,truncated} records carrying the same cut bodies. The
+# stamp/title grammar is show_json's entry anchor form. Byte caps cut at
+# UTF-8 boundaries; an entry whose heading alone exceeds the cap keeps the
+# heading and carries the marker.
+projection_shape_entries() { # <entries-text> <cap> <basename> <older> <jmode>
+	LC_ALL=C awk -v cap="$2" -v base="$3" -v older="$4" -v jmode="$5" "$AWK_JSON_ESCAPE"'
+		function utf8_cut(s,    t) {
+			if (length(s) <= cap) return s
+			t = substr(s, 1, cap)
+			while (t != "" && substr(t, length(t), 1) >= "\x80") t = substr(t, 1, length(t) - 1)
+			return t
+		}
+		function emit_entry(    total, budget, lines, n, i, used, l, room, cutflag, stamp, title) {
+			if (!inentry) return
+			inentry = 0
+			while (nbody > 0 && body[nbody] == "") nbody--
+			cutflag = 0
+			total = length(EH)
+			for (i = 1; i <= nbody; i++) total += 1 + length(body[i])
+			if (nbody > 0) total += 1
+			if (total > cap) {
+				cutflag = 1
+				budget = cap - length(EH) - 1
+				if (budget < 0) {
+					nbody = 0
+				} else {
+					used = 0
+					for (i = 1; i <= nbody; i++) {
+						room = budget - used - ((i > 1) ? 1 : 0)
+						if (length(body[i]) <= room) {
+							used += length(body[i]) + ((i > 1) ? 1 : 0)
+							continue
+						}
+						nbody = i
+						if (room > 0) body[i] = utf8_cut(body[i], room)
+						else nbody = i - 1
+						break
+					}
+				}
+			}
+			stamp = ""; title = EH
+			if (match(EH, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]/)) {
+				stamp = substr(EH, 1, 16)
+				if (substr(EH, 17, 2) == ": ") title = substr(EH, 19)
+			}
+			if (jmode) {
+				b = ""
+				for (i = 1; i <= nbody; i++) b = b ((i > 1) ? "\n" : "") body[i]
+				item = "{" "\"stamp\":" jq(stamp) ",\"title\":" jq(title)
+				item = item ",\"body\":" jq(b) ",\"truncated\":" ((cutflag) ? "true" : "false") "}"
+				items[++ni] = item
+			} else {
+				if (nprinted > 0) printf "\n"
+				printf "%s\n", EH
+				for (i = 1; i <= nbody; i++) printf "%s\n", body[i]
+				if (cutflag) printf "[entry truncated at %d bytes - full entry: tasks show %s --json]\n", cap, base
+				nprinted++
+			}
+		}
+		/^### / {
+			if (inentry) emit_entry()
+			inentry = 1; EH = $0; nbody = 0
+			next
+		}
+		inentry { body[++nbody] = $0 }
+		END {
+			emit_entry()
+			if (jmode) {
+				s = ""
+				for (i = 1; i <= ni; i++) s = s ((i > 1) ? "," : "") items[i]
+				printf "[%s]\n", s
+			} else {
+				if (older > 0 && nprinted > 0) printf "\n"
+				if (older > 0) printf "[%d older Work Log entries elided - complete history: tasks show %s --json]\n", older, base
+			}
+		}
+	' <<<"$1"
+}
+
+# Resolve the snapshot's dependency tokens through the one consumer path
+# (dependency_tokens) into DEP records: one DEP_OPEN line per declared
+# token that resolves to a board file whose status is not terminal, plus
+# the terminal and unresolved counts. Resolution matches the closure
+# gate's child scan (filename prefix glob, basename Task ID equality);
+# tokens naming no board file are the doctor's MISSING_DEP class and are
+# counted, never validated, here.
+projection_deps() { # <snapshot-file> <tasks_dir> <own-basename>
+	local snap="$1" tasks_dir="$2" own_id="$3"
+	local tok f cand_id cand_status cand_rel
+	local term=0 unres=0
+	local -a toks=()
+	mapfile -t toks < <(dependency_tokens "$snap" | LC_ALL=C sort -u)
+	for tok in "${toks[@]+${toks[@]}}"; do
+		[[ "$tok" == "$own_id" ]] && continue
+		cand_rel=""
+		for f in "$tasks_dir/$CURRENT_DIR/$tok"*.md "$tasks_dir/$ARCHIVE_DIR/$tok"*.md; do
+			[[ -e "$f" ]] || continue
+			cand_id="$(task_id_of_basename "${f##*/}")"
+			[[ "$cand_id" == "$tok" ]] || continue
+			cand_rel="${f#"$tasks_dir/"}"
+			cand_status="$(header_status "$f")"
+			break
+		done
+		if [[ -z "$cand_rel" ]]; then
+			((unres += 1))
+		elif is_terminal_status "$cand_status"; then
+			((term += 1))
+		else
+			printf 'DEP_OPEN\t%s\t%s\t%s\n' "$tok" "${cand_status:-missing}" "$cand_rel"
+		fi
+	done
+	printf 'DEP_TERM\t%d\n' "$term"
+	printf 'DEP_UNRES\t%d\n' "$unres"
+}
+
+# The Restrictions ride-along: the claim sidecar's state as one line that
+# survives every bound. A sidecar on a non-terminal, non-archived task is
+# live and renders the owner, generation, and created stamp; a stale
+# sidecar (terminal status or archived, the lint classifier's stale-claim
+# lane) renders the doctor-pointer marker instead, so a leftover sidecar
+# is never presented as a live restriction. Absent without a sidecar;
+# never truncated.
+projection_claim_line() { # <tasks_dir> <rel> <status> <arch>
+	local f="$1/$2.claim"
+	[[ -f "$f" ]] || return 0
+	local owner="" gen="" created="" line
+	while IFS= read -r line; do
+		case "$line" in
+			generation\ *) gen="${line#generation }" ;;
+			created\ *) created="${line#created }" ;;
+			*) [[ -z "$owner" ]] && owner="$line" ;;
+		esac
+	done <"$f"
+	if (( "$4" == 1 )); then
+		printf '[stale claim sidecar on an archived task - enumeration: tasks doctor --all]'
+	elif is_terminal_status "$3"; then
+		printf '[stale claim sidecar on a %s task - enumeration: tasks doctor --all]' "$3"
+	else
+		printf 'Restrictions: live claim held by %s (generation %s, created %s) - recovery: tasks claims, tasks reclaim\n' \
+			"$owner" "$gen" "$created"
+	fi
+}
+
+# Slice the last <n> Work Log entries from the staged tail lines: the same
+# span work_log_tail <n> prints over the snapshot (first kept anchor
+# through the last non-blank line), computed in-memory so the ceiling
+# loop reassembles without re-reading the file. Empty output when the
+# snapshot carries no entries.
+projection_wl_slice() { # <n>
+	local n="$1" total=${#P_WL_ANCHORS[@]} i start last
+	(( total == 0 )) && return 0
+	(( n > total )) && n=$total
+	start="${P_WL_ANCHORS[total - n]}"
+	last=$(( ${#P_WL_LINES[@]} - 1 ))
+	while (( last >= start )) && [[ "${P_WL_LINES[last]}" == "" ]]; do ((last--)); done
+	for ((i = start; i <= last; i++)); do printf '%s\n' "${P_WL_LINES[i]}"; done
+}
+
+# Assemble the human projection from the staged globals under the current
+# truncation parameters (entries, decision-title limit, objective mode,
+# report count, per-entry byte cap). Pure bash over the staged arrays:
+# byte measurement and no re-derivation, so every iteration of the
+# ceiling loop is exact and cheap. The structural elision marker names
+# every whole section the projection drops (and the unit blocks inside
+# them, so a resuming agent can see unrun checkpoint units exist) with
+# the --raw escape hatch, capped at the per-entry budget with an
+# and-N-more tail.
+projection_build() { # <entries> <title_limit> <objective_mode> <reports_k> <entry_bytes>
+	local entries="$1" title_limit="$2" obj_mode="$3" reports_k="$4" entry_bytes="$5"
+	local LC_ALL=C base="$P_BASE"
+	local -a out=() line
+	local p i n shown older rest full el_items="" el_shown=0 el_item el_limit el_line el_bytes=0 el_item_bytes el_i cand_bytes tick_s
+	# 1. complete header block, verbatim, never pruned
+	while IFS= read -r line; do out+=("$line"); done <<<"$P_HDR"
+	# 2. Restrictions ride-along (restriction bearing, never truncated)
+	[[ -n "$P_CLAIM" ]] && out+=("" "$P_CLAIM")
+	# 3. Objective digest
+	projection_push_heading out "## Objective (digest)"
+	if ! p="$(projection_objective_text "$obj_mode" "$entry_bytes")"; then
+		out+=("[Objective section missing from this file]")
+	else
+		full="$(IFS=$'\n'; printf '%s' "${P_OBJ[*]}")"
+		out+=("$p")
+		if [[ "$p" != "$full" ]]; then
+			if [[ "$obj_mode" == "sentence" && "$full" == "$p "* ]]; then
+				out+=("[Objective reduced to its first sentence - full text: tasks show $base --section Objective]")
+			else
+				out+=("[Objective digest truncated at $entry_bytes bytes - full text: tasks show $base --section Objective]")
+			fi
+		fi
+	fi
+	# 4. open criteria verbatim (restriction bearing, never truncated)
+	projection_push_heading out "## Success Criteria (open verbatim)"
+	if [[ "$P_HAS_SC" != "1" ]]; then
+		out+=("[Success Criteria section missing from this file]")
+	else
+		for line in "${P_CRIT_O[@]+${P_CRIT_O[@]}}"; do out+=("$line"); done
+		for line in "${P_CRIT_S[@]+${P_CRIT_S[@]}}"; do out+=("$line"); done
+		if (( ${#P_CRIT_O[@]} == 0 && ${#P_CRIT_S[@]} == 0 && P_TICK == 0 )); then
+			out+=("[no Success Criteria lines on this file]")
+		fi
+		if (( P_TICK > 0 )); then
+			tick_s=""
+			(( P_TICK == 1 )) || tick_s="s"
+			out+=("[$P_TICK ticked criterion${tick_s} collapsed - verbatim: tasks show $base --section \"Success Criteria\"]")
+		fi
+	fi
+	# 5. decision-log digest: titles and dates only
+	projection_push_heading out "## Decision Log (titles and dates)"
+	if [[ "$P_HAS_DL" != "1" ]]; then
+		out+=("[Decision Log section missing from this file]")
+	elif (( ${#P_DEC[@]} == 0 )); then
+		out+=("[no decision entries in the Decision Log]")
+	else
+		n=${#P_DEC[@]}
+		shown=$n
+		if (( title_limit > 0 && n > title_limit )); then shown=$title_limit; fi
+		for ((i = n - shown + 1; i <= n; i++)); do out+=("${P_DEC[i - 1]}"); done
+		(( shown < n )) && out+=("[$((n - shown)) older decision titles elided - full log: tasks show $base --raw]")
+		out+=("[decision bodies elided - full text: tasks show $base --raw]")
+	fi
+	# 6. latest N Work Log entries (deeper entries drop first)
+	projection_push_heading out "## Work Log (latest $entries entries)"
+	if [[ "$P_HAS_WL" != "1" ]]; then
+		out+=("[Work Log section missing from this file]")
+	elif (( P_TOTAL_ENTRIES == 0 )); then
+		out+=("[no Work Log entries on this file]")
+	else
+		shown=$entries
+		(( shown > P_TOTAL_ENTRIES )) && shown=$P_TOTAL_ENTRIES
+		older=$((P_TOTAL_ENTRIES - shown))
+		if (( shown > 0 )); then
+			while IFS= read -r line; do out+=("$line"); done < \
+				<(projection_shape_entries "$(projection_wl_slice "$shown")" "$entry_bytes" "$base" "$older" 0)
+		elif (( older > 0 )); then
+			out+=("[$older older Work Log entries elided - complete history: tasks show $base --json]")
+		fi
+	fi
+	# 7. last K report digest lines
+	projection_push_heading out "## Report Digests (latest $reports_k)"
+	if (( ${#P_REPORTS[@]} == 0 )); then
+		out+=("[no report deposits linked yet - full index: tasks reports $base --json]")
+	else
+		n=${#P_REPORTS[@]}
+		shown=$reports_k
+		(( shown > n )) && shown=$n
+		for ((i = n - shown + 1; i <= n; i++)); do
+			p="${P_REPORTS[i - 1]}"
+			if (( P_REPORT_BYTES[i - 1] > entry_bytes )); then
+				out+=("$(projection_cut "$entry_bytes" <<<"$p")" \
+					"[digest truncated at $entry_bytes bytes - full report: tasks reports $base --json --include-body]")
+			else
+				out+=("$p")
+			fi
+		done
+		(( shown < n )) && out+=("[$((n - shown)) older report digests elided - full index: tasks reports $base --json]")
+	fi
+	# 8. open dependency-surface lines (restriction bearing, never truncated)
+	projection_push_heading out "## Dependencies (open)"
+	if (( ${#P_DEP_OPEN[@]} == 0 && P_DEP_TERM == 0 && P_DEP_UNRES == 0 )); then
+		out+=("[no dependencies declared]")
+	else
+		for line in "${P_DEP_OPEN[@]+${P_DEP_OPEN[@]}}"; do
+			p="${line%%$'\t'*}"
+			older="${line#*$'\t'}"
+			out+=("$p -> ${older%%$'\t'*} ${older#*$'\t'}")
+		done
+		(( P_DEP_UNRES > 0 )) && out+=("[$P_DEP_UNRES dependency tokens name no board file - enumeration: tasks doctor --all]")
+		(( P_DEP_TERM > 0 )) && out+=("[$P_DEP_TERM declared dependencies already terminal - full surfaces: tasks show $base --raw]")
+	fi
+	# 9. structural elision marker: the whole sections this projection does
+	# not render, named with the raw hatch (restriction bearing in spirit:
+	# it renders even when every truncation stage has run out)
+	if (( ${#P_ELIDED[@]} > 0 )); then
+		for ((el_i = 0; el_i < ${#P_ELIDED[@]}; el_i++)); do
+			el_item="${P_ELIDED[el_i]}"
+			el_item_bytes="${P_ELIDED_BYTES[el_i]}"
+			# reserve room for the and-N-more tail while items remain
+			if (( el_shown + 1 < ${#P_ELIDED[@]} )); then el_limit=$(( PROJECTION_ENTRY_BYTES - 32 )); else el_limit=$PROJECTION_ENTRY_BYTES; fi
+			# byte-exact measure of "[sections elided: <join> - full file:
+			# tasks show <base> --raw]" without forking: the join adds ", "
+			# per item and the fixed frames around it add 50 bytes
+			if (( el_shown == 0 )); then cand_bytes=$el_item_bytes; else cand_bytes=$((el_bytes + 2 + el_item_bytes)); fi
+			if (( cand_bytes + 50 + ${#base} <= el_limit )); then
+				if (( el_shown == 0 )); then el_items="$el_item"; el_bytes=$el_item_bytes; else el_items="$el_items, $el_item"; el_bytes=$((el_bytes + 2 + el_item_bytes)); fi
+				el_shown=$((el_shown + 1))
+			else
+				if (( el_shown == 0 )); then
+					# one heading over the whole budget: cut the name so the marker stays well formed
+					el_item="$(projection_cut "$(( PROJECTION_ENTRY_BYTES - 64 - ${#base} ))" <<<"$el_item")"
+					el_items="$el_item"; el_shown=1
+				fi
+				break
+			fi
+		done
+		if (( el_shown < ${#P_ELIDED[@]} )); then
+			el_line="[sections elided: $el_items - and $(( ${#P_ELIDED[@]} - el_shown )) more headings - full file: tasks show $base --raw]"
+		else
+			el_line="[sections elided: $el_items - full file: tasks show $base --raw]"
+		fi
+		out+=("" "$el_line")
+	fi
+	(( P_ADVISORIES == 1 )) && out+=("" "[advisory findings present on this file - enumeration: tasks doctor --all]")
+	# blocks separated by one blank line, trailing newline exact
+	p=""
+	for line in "${out[@]}"; do
+		p+="$line"$'\n'
+	done
+	printf '%s' "$p"
+}
+
+# Stage the snapshot's projection inputs once (records, header, claim,
+# work-log lines, report digests, deps, advisory presence) into P_*
+# globals, so the ceiling loop reassembles without re-parsing. The
+# advisory presence check reads only what this staging already holds
+# (header fields with their shape table, criteria and verdict counts,
+# sidecar existence, archive bit): it mirrors every advisory lane the
+# lint classifier emits from those records, namely the header-shape,
+# status-presence, and status-vocabulary lanes and the missing-section
+# lane on archived or terminal files, the body-space checkbox and
+# verdict-drift lanes everywhere, and the stale-claim lane keyed by the
+# sidecar, so the read path never runs the lint pipeline or a git walk.
+# Lint remains the single classifier for reporting surfaces, and the
+# pointer is a boolean naming the doctor as the enumeration surface: the
+# surviving exclusions are exactly the two lanes the staged records
+# cannot see (dead report links and unreachable recorded commits) plus
+# hard-class findings, which never mirror because the pointer carries
+# advisory presence only.
+projection_stage() { # <snapshot-file> <tasks_dir> <rel> <basename>
+	P_SNAP="$1"; P_TASKS_DIR="$2"; P_REL="$3"; P_BASE="$4"
+	local -a recs=()
+	mapfile -t recs < <(projection_records "$P_SNAP")
+	P_HAS_TOC=0; P_HAS_OBJ=0; P_HAS_SC=0; P_HAS_DL=0; P_HAS_WL=0; P_HAS_EXEC=0
+	P_TICK=0; P_REFUTED=0; P_UNEX=0
+	P_OBJ=(); P_CRIT_O=(); P_CRIT_S=(); P_DEC=(); P_DEP_OPEN=()
+	P_DEP_TERM=0; P_DEP_UNRES=0; P_REPORTS=()
+	P_ELIDED=(); P_WL_LINES=(); P_WL_ANCHORS=(); P_ELIDED_CUR2=""
+	P_ELIDED_BYTES=(); P_REPORT_BYTES=(); P_OBJ_BYTES=0
+	local rec tag value lvl hname
+	for rec in "${recs[@]+${recs[@]}}"; do
+		tag="${rec%%$'\t'*}"
+		value="${rec#*$'\t'}"
+		case "$tag" in
+			SECH)
+				lvl="${value%%$'\t'*}"
+				hname="${value#*$'\t'}"
+				if [[ "$lvl" == "2" ]]; then
+					P_ELIDED_CUR2="$hname"
+					case "$hname" in
+						"Table of Contents") P_HAS_TOC=1; P_ELIDED+=("$hname") ;;
+						"Objective") P_HAS_OBJ=1 ;;
+						"Success Criteria") P_HAS_SC=1 ;;
+						"Work Log") P_HAS_WL=1 ;;
+						"Execution Log") P_HAS_EXEC=1; P_ELIDED+=("$hname") ;;
+						"Dependencies") ;;
+						*) P_ELIDED+=("$hname") ;;
+					esac
+				elif [[ "$lvl" == "3" ]]; then
+					if [[ "$hname" == "Decision Log" ]]; then
+						P_HAS_DL=1
+					elif [[ "$P_ELIDED_CUR2" != "Work Log" ]]; then
+						case "$P_ELIDED_CUR2" in
+							"Objective"|"Success Criteria"|"Dependencies") ;;
+							*) P_ELIDED+=("$hname") ;;
+						esac
+					fi
+				fi ;;
+			OBJP) P_OBJ+=("$value") ;;
+			CRIT_O) P_CRIT_O+=("$value") ;;
+			CRIT_S) P_CRIT_S+=("$value") ;;
+			DEC) P_DEC+=("$value") ;;
+			CRIT_T) P_TICK="$value" ;;
+			VER_R) P_REFUTED="$value" ;;
+			VER_U) P_UNEX="$value" ;;
+			RPD) P_REPORTS+=("$value") ;;
+			WLL)
+				P_WL_LINES+=("$value")
+				[[ "$value" == "### "* ]] && P_WL_ANCHORS+=("$(( ${#P_WL_LINES[@]} - 1 ))")
+				;;
+		esac
+	done
+	P_TOTAL_ENTRIES=${#P_WL_ANCHORS[@]}
+	P_HDR="$(header_of <"$P_SNAP")"
+	P_HDR_STATUS=""; P_HDR_REASON=""; P_HAVE_STATUS=0; P_HDR_SHAPE=0
+	local hline parch=0
+	local hws=$' \t' hwsr=$' \t\r'
+	local hfield hval
+	local -A hseen=()
+	# The shape table replicates lint_scan_files field_check exactly: the
+	# same six fields, trailing [ \t\r]+ trimmed before the match, and
+	# empty values meaning absent (allowed). The inner trim class stays
+	# unstarred on purpose: a trailing * makes the [!...] class match the
+	# whole string, turning the trim into a no-op. The hseen
+	# first-occurrence-wins rule covers these six fields and, per lint's
+	# have_status/have_reason guards, the Status and Status Reason
+	# captures too.
+	local hdr_ts_re='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]$'
+	local hdr_lu_re='^\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]\] '
+	local hdr_dur_re='^(N/A|([0-9]+(d|h|m))( ([0-9]+(d|h|m)))*)$'
+	local hdr_prog_re='^[0-9]+%$'
+	while IFS= read -r hline; do
+		hfield=""
+		case "$hline" in
+			"**Status:**"*)
+				P_HAVE_STATUS=1
+				if [[ -z "${hseen["Status"]+x}" ]]; then
+					hseen["Status"]=1
+					P_HDR_STATUS="${hline#\*\*Status:\*\*}"
+					# lint's scan consumes exactly [ \t] after the colon and
+					# leaves trailing whitespace in place; replicating that
+					# extraction verbatim keeps terminality from diverging on
+					# a trailing-space header
+					P_HDR_STATUS="${P_HDR_STATUS#"${P_HDR_STATUS%%[!$hws]*}"}"
+				fi ;;
+			"**Status Reason:**"*)
+				if [[ -z "${hseen["Status Reason"]+x}" ]]; then
+					hseen["Status Reason"]=1
+					P_HDR_REASON="${hline#\*\*Status Reason:\*\*}"
+					P_HDR_REASON="${P_HDR_REASON#"${P_HDR_REASON%%[!$hws]*}"}"
+					P_HDR_REASON="${P_HDR_REASON%"${P_HDR_REASON##*[!$hwsr]}"}"
+				fi ;;
+			"**Created:**"*) hfield="Created" ;;
+			"**Updated:**"*) hfield="Updated" ;;
+			"**Completed:**"*) hfield="Completed" ;;
+			"**Latest Update:**"*) hfield="Latest Update" ;;
+			"**Duration:**"*) hfield="Duration" ;;
+			"**Progress:**"*) hfield="Progress" ;;
+		esac
+		if [[ -n "$hfield" && -z "${hseen[$hfield]+x}" ]]; then
+			hseen["$hfield"]=1
+			hval="${hline#\*\*${hfield}:\*\*}"
+			hval="${hval#"${hval%%[!$hws]*}"}"
+			hval="${hval%"${hval##*[!$hwsr]}"}"
+			if [[ -n "$hval" ]]; then
+				case "$hfield" in
+					Created|Updated|Completed) [[ "$hval" =~ $hdr_ts_re ]] || P_HDR_SHAPE=1 ;;
+					"Latest Update") [[ "$hval" =~ $hdr_lu_re ]] || P_HDR_SHAPE=1 ;;
+					Duration) [[ "$hval" =~ $hdr_dur_re ]] || P_HDR_SHAPE=1 ;;
+					Progress) [[ "$hval" =~ $hdr_prog_re ]] || P_HDR_SHAPE=1 ;;
+				esac
+			fi
+		fi
+	done <<<"$P_HDR"
+	P_CLAIM_EXISTS=0
+	[[ -f "$P_TASKS_DIR/$P_REL.claim" ]] && P_CLAIM_EXISTS=1
+	[[ "$P_REL" == "$ARCHIVE_DIR"/* ]] && parch=1
+	P_CLAIM="$(projection_claim_line "$P_TASKS_DIR" "$P_REL" "$P_HDR_STATUS" "$parch")"
+	local dep_recs
+	while IFS= read -r dep_recs; do
+		case "$dep_recs" in
+			DEP_OPEN*) P_DEP_OPEN+=("${dep_recs#DEP_OPEN$'\t'}") ;;
+			DEP_TERM*) P_DEP_TERM="${dep_recs#DEP_TERM$'\t'}" ;;
+			DEP_UNRES*) P_DEP_UNRES="${dep_recs#DEP_UNRES$'\t'}" ;;
+		esac
+	done < <(projection_deps "$P_SNAP" "$P_TASKS_DIR" "$(task_id_of_basename "$P_BASE")")
+	P_ADVISORIES="$(projection_advisory_presence)"
+	# Per-item byte lengths, measured once: the ceiling loop can assemble up
+	# to seven projections per read, and measuring each report digest, elision
+	# candidate, and the objective paragraph per build forked two processes
+	# per item per build - the dominant wall-clock cost on section-heavy
+	# files. LC_ALL=C awk length() counts bytes, matching the wc -c calls
+	# these caches replace; the objective total is the newline-join length
+	# (one separator between lines, none trailing), the exact string the
+	# objective digest renders from.
+	if (( ${#P_ELIDED[@]} > 0 )); then
+		mapfile -t P_ELIDED_BYTES < <(printf '%s\n' "${P_ELIDED[@]}" | LC_ALL=C awk '{ print length($0) }')
+	fi
+	if (( ${#P_REPORTS[@]} > 0 )); then
+		mapfile -t P_REPORT_BYTES < <(printf '%s\n' "${P_REPORTS[@]}" | LC_ALL=C awk '{ print length($0) }')
+	fi
+	if (( ${#P_OBJ[@]} > 0 )); then
+		P_OBJ_BYTES="$(printf '%s\n' "${P_OBJ[@]}" | LC_ALL=C awk '{ t += length($0) + 1 } END { printf "%d", t - 1 }')"
+	fi
+}
+
+# The advisory presence boolean over the staged snapshot records: the
+# cheap lane mirror described on projection_stage. Every lane reads only
+# staged state; the git-walk and link-scan lanes stay out of the read
+# path by design.
+projection_advisory_presence() {
+	local arch=0
+	[[ "$P_REL" == "$ARCHIVE_DIR"/* ]] && arch=1
+	local aged=0
+	if (( arch == 1 )) || is_terminal_status "$P_HDR_STATUS"; then aged=1; fi
+	local adv=0
+	if (( P_HAVE_STATUS == 0 && aged == 1 )); then adv=1; fi
+	if (( P_HAVE_STATUS == 1 )) && ! valid_status "$P_HDR_STATUS" && (( aged == 1 )); then adv=1; fi
+	if (( P_HDR_SHAPE == 1 && aged == 1 )); then adv=1; fi
+	if [[ "$P_HDR_STATUS" == "$STATUS_BLOCKED" || "$P_HDR_STATUS" == "$STATUS_CANCELLED" ]] \
+		&& [[ -z "$P_HDR_REASON" ]] && (( arch == 1 )); then adv=1; fi
+	if (( ${#P_CRIT_O[@]} > 0 )) && is_terminal_status "$P_HDR_STATUS"; then adv=1; fi
+	if (( ${#P_CRIT_O[@]} == 0 && P_TICK > 0 && ${#P_CRIT_S[@]} == 0 && P_UNEX == 0 )) \
+		&& ! is_terminal_status "$P_HDR_STATUS"; then adv=1; fi
+	if (( P_UNEX > 0 )); then
+		if is_terminal_status "$P_HDR_STATUS"; then adv=1
+		elif (( ${#P_CRIT_O[@]} == 0 && P_TICK > 0 )); then adv=1; fi
+	fi
+	if (( P_REFUTED > 0 )) && is_terminal_status "$P_HDR_STATUS"; then adv=1; fi
+	if (( arch == 1 )) && ! is_terminal_status "$P_HDR_STATUS"; then adv=1; fi
+	if (( P_CLAIM_EXISTS == 1 && aged == 1 )); then adv=1; fi
+	if (( aged == 1 )); then
+		[[ "$P_HAS_TOC" == 1 && "$P_HAS_OBJ" == 1 && "$P_HAS_SC" == 1 && "$P_HAS_WL" == 1 && "$P_HAS_EXEC" == 1 ]] || adv=1
+	fi
+	printf '%s' "$adv"
+}
+
+# The bounded projection read: stage once, then converge the fixed
+# truncation order against the ceiling - deeper Work Log entries drop
+# oldest first but never past the entry floor (the newest entry always
+# survives, capped), then decision titles fall to
+# PROJECTION_DECISION_FLOOR, then the Objective digest reduces to its
+# first sentence, then - the degrade stages - decision titles fall to
+# PROJECTION_DECISION_DEEP and the per-entry cap drops to
+# PROJECTION_ENTRY_BYTES_DEEP - and stop at the first assembly that
+# fits. What remains over the ceiling after the stages run out is
+# restriction bearing or structural and renders as measured, so the
+# bound degrades instead of ending under content growth. --json emits
+# the same converged content as a schema_version 1 record. Read-only:
+# one snapshot read, no lock, no render, no bump.
+show_projection() { # <file> <rel> <tasks_dir> <entries> <bytes> <role> <json>
+	local file="$1" rel="$2" tasks_dir="$3" entries_want="$4" bytes_want="$5" role="$6" json="$7"
+	local snap
+	snap="$(mktemp "${TMPDIR:-/tmp}/tasks-proj.XXXXXX")"
+	arm_tmp_cleanup_trap "$snap"
+	cat "$file" >"$snap"
+	projection_stage "$snap" "$tasks_dir" "$rel" "${file##*/}"
+	read -r entries reports ceiling <<<"$(projection_role_bounds "$role")"
+	[[ -n "$entries_want" ]] && entries="$entries_want"
+	[[ -n "$bytes_want" ]] && ceiling="$bytes_want"
+	local proj title_limit=0 obj_mode=para entry_bytes=$PROJECTION_ENTRY_BYTES size entries_n="$entries"
+	proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+	size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+	local n
+	if (( size > ceiling )); then
+		for ((n = entries - 1; n >= 1; n--)); do
+			entries_n="$n"
+			proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+			size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+			(( size <= ceiling )) && break
+		done
+	fi
+	if (( size > ceiling )); then
+		title_limit=$PROJECTION_DECISION_FLOOR
+		proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+		size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+	fi
+	if (( size > ceiling )); then
+		obj_mode=sentence
+		proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+		size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+	fi
+	if (( size > ceiling )); then
+		title_limit=$PROJECTION_DECISION_DEEP
+		proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+		size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+	fi
+	if (( size > ceiling )); then
+		entry_bytes=$PROJECTION_ENTRY_BYTES_DEEP
+		proj="$(projection_build "$entries_n" "$title_limit" "$obj_mode" "$reports" "$entry_bytes")"
+		size="$(printf '%s\n' "$proj" | LC_ALL=C wc -c)"
+	fi
+	if ((json == 1)); then
+		show_projection_json "$rel" "$role" "$entries" "$reports" "$ceiling" "$entries_n" "$title_limit" "$obj_mode" "$size" "$entry_bytes"
+	else
+		printf '%s\n' "$proj"
+	fi
+}
+
+# The projection's versioned JSON record: the same converged content the
+# human form carries, riding the schema_version marker. Byte counts and
+# truncation flags are reported explicitly so consumers can see every
+# elision without diffing text. The bounds block echoes what this
+# invocation actually used: the target folds to the ceiling when an
+# override sits below the design target, and entry_bytes reports the
+# converged per-entry cap.
+show_projection_json() { # <rel> <role> <role_entries> <role_reports> <ceiling> <entries> <title_limit> <obj_mode> <size> <entry-bytes>
+	local rel="$1" role="$2" role_entries="$3" role_reports="$4" ceiling="$5"
+	local entries_n="$6" title_limit="$7" obj_mode="$8" size="$9" entry_bytes="${10}"
+	local base="$P_BASE" id p out i target
+	id="$(task_id_of_basename "$base")"
+	target=$PROJECTION_TARGET_BYTES
+	(( ceiling < target )) && target=$ceiling
+	local entries_json shown=$entries_n
+	(( shown > P_TOTAL_ENTRIES )) && shown=$P_TOTAL_ENTRIES
+	if (( shown > 0 )); then
+		entries_json="$(projection_shape_entries "$(projection_wl_slice "$shown")" "$entry_bytes" "$base" "$((P_TOTAL_ENTRIES - shown))" 1)"
+	else
+		entries_json="[]"
+	fi
+	out="{\"schema_version\":$SCHEMA_VERSION,\"type\":\"projection\""
+	out+=",\"id\":$(projection_jq "$id")"
+	out+=",\"file\":$(projection_jq "$rel")"
+	out+=",\"bounds\":{\"role\":$(projection_jq "$role")"
+	out+=",\"entries\":$role_entries,\"report_digests\":$role_reports"
+	out+=",\"target_bytes\":$target,\"ceiling_bytes\":$ceiling,\"entry_bytes\":$entry_bytes}"
+	out+=",\"projection_bytes\":$size"
+	out+=",\"header\":$(projection_jq "$P_HDR")"
+	out+=",\"restrictions\":$(projection_jq "$P_CLAIM")"
+	if (( ${#P_OBJ[@]} == 0 )); then
+		out+=",\"objective\":{\"digest\":\"\",\"missing\":true,\"truncated\":false,\"sentence_only\":false}"
+	else
+		p="$(projection_objective_text "$obj_mode" "$entry_bytes")"
+		local full otrunc=false osent=false
+		full="$(IFS=$'\n'; printf '%s' "${P_OBJ[*]}")"
+		if [[ "$p" != "$full" ]]; then
+			if [[ "$obj_mode" == "sentence" && "$full" == "$p "* ]]; then
+				osent=true
+			else
+				otrunc=true
+			fi
+		fi
+		out+=",\"objective\":{\"digest\":$(projection_jq "$p")"
+		out+=",\"missing\":false,\"truncated\":$otrunc,\"sentence_only\":$osent}"
+	fi
+	local -a crit=() tokparts
+	for p in "${P_CRIT_O[@]+${P_CRIT_O[@]}}"; do crit+=("$(projection_jq "$p")"); done
+	out+=",\"open_criteria\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	crit=()
+	for p in "${P_CRIT_S[@]+${P_CRIT_S[@]}}"; do crit+=( "$(projection_jq "$p")" ); done
+	out+=",\"superseded_criteria\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	out+=",\"ticked_criteria_count\":$P_TICK"
+	out+=",\"success_criteria_missing\":$([[ "$P_HAS_SC" == 1 ]] && echo false || echo true)"
+	crit=()
+	local ndec=${#P_DEC[@]}
+	local dshown=$ndec
+	(( title_limit > 0 && ndec > title_limit )) && dshown=$title_limit
+	for ((i = ndec - dshown + 1; i <= ndec; i++)); do crit+=("$(projection_jq "${P_DEC[i - 1]}")"); done
+	out+=",\"decision_titles\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	out+=",\"older_decision_titles\":$((ndec - dshown))"
+	out+=",\"decision_log_missing\":$([[ "$P_HAS_DL" == 1 ]] && echo false || echo true)"
+	out+=",\"work_log\":$entries_json"
+	out+=",\"older_work_log_entries\":$((P_TOTAL_ENTRIES - shown))"
+	out+=",\"work_log_missing\":$([[ "$P_HAS_WL" == 1 ]] && echo false || echo true)"
+	crit=()
+	local nrep=${#P_REPORTS[@]}
+	local rshown=$nrep
+	(( rshown > role_reports )) && rshown=$role_reports
+	for ((i = nrep - rshown + 1; i <= nrep; i++)); do crit+=("$(projection_jq "${P_REPORTS[i - 1]}")"); done
+	out+=",\"report_digests\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	out+=",\"older_report_digests\":$((nrep - rshown))"
+	crit=()
+	for p in "${P_DEP_OPEN[@]+${P_DEP_OPEN[@]}}"; do
+		IFS=$'\t' read -r -a tokparts <<<"$p"
+		crit+=("{\"token\":$(projection_jq "${tokparts[0]}"),\"status\":$(projection_jq "${tokparts[1]}"),\"file\":$(projection_jq "${tokparts[2]}")}")
+	done
+	out+=",\"open_dependencies\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	out+=",\"terminal_dependencies\":$P_DEP_TERM,\"unresolved_dependencies\":$P_DEP_UNRES"
+	crit=()
+	for p in "${P_ELIDED[@]+${P_ELIDED[@]}}"; do crit+=("$(projection_jq "$p")"); done
+	out+=",\"elided_sections\":[$(IFS=,; printf '%s' "${crit[*]:-}")]"
+	out+=",\"elided_sections_total\":${#P_ELIDED[@]}"
+	out+=",\"advisory_findings\":$([[ "$P_ADVISORIES" == 1 ]] && echo true || echo false)}"
+	printf '%s\n' "$out"
+}
+
 cmd_show() {
 	local dir="" tail="$DEFAULT_TAIL" tail_given=0 json=0 raw=0 section="" args=()
+	local project=0 proj_entries="" proj_bytes="" proj_role=""
 	while (($#)); do
 		case "$1" in
 			--dir) [[ $# -ge 2 && "$2" != --* ]] || die "show: --dir requires a value"; dir="$2"; shift 2 ;;
@@ -5587,16 +6510,26 @@ cmd_show() {
 			--raw) raw=1; shift ;;
 			--section) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "show: --section requires a value"; section="$2"; shift 2 ;;
 			--section=*) section="${1#*=}"; shift ;;
+			--project) project=1; shift ;;
+			--entries) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "show: --entries requires a value"; proj_entries="$2"; shift 2 ;;
+			--entries=*) proj_entries="${1#*=}"; shift ;;
+			--bytes) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "show: --bytes requires a value"; proj_bytes="$2"; shift 2 ;;
+			--bytes=*) proj_bytes="${1#*=}"; shift ;;
+			--role) [[ $# -ge 2 && "$2" != --* ]] || diec "$CODE_USAGE" "show: --role requires a value"; proj_role="$2"; shift 2 ;;
+			--role=*) proj_role="${1#*=}"; shift ;;
 			*) args+=("$1"); shift ;;
 		esac
 	done
-	((${#args[@]} == 1)) || diec "$CODE_USAGE" "show: usage: tasks show <taskfile> [--tail N] [--json] [--section HEADING] [--raw]"
+	((${#args[@]} == 1)) || diec "$CODE_USAGE" "show: usage: tasks show <taskfile> [--tail N] [--json] [--section HEADING] [--raw] [--project]"
 	[[ "$tail" =~ ^[1-9][0-9]*$ ]] || diec "$CODE_USAGE" "show: --tail expects a positive integer, got: $tail"
 	# One output mode per call: the human view (optionally tailed), the
-	# versioned JSON snapshot, the raw whole-file hatch, or one section's
-	# canonical body (--json narrows it to the envelope). --tail only shapes
-	# the human Work Log tail; the JSON snapshot always carries the complete
+	# versioned JSON snapshot, the raw whole-file hatch, one section's
+	# canonical body (--json narrows it to the envelope), or the bounded
+	# projection (--json emits its versioned record). --tail only shapes the
+	# human Work Log tail; the JSON snapshot always carries the complete
 	# history, so combining it with --tail would silently lie about scope.
+	# The projection's bound overrides (--entries/--bytes/--role) shape only
+	# the projection and are refused elsewhere.
 	((json == 1 && tail_given == 1)) \
 		&& diec "$CODE_USAGE" "show: --tail applies to the human view only; --json carries the complete history"
 	((raw == 1 && json == 1)) \
@@ -5607,11 +6540,38 @@ cmd_show() {
 		&& diec "$CODE_USAGE" "show: --raw prints the whole file; --section alone prints one section's body"
 	((tail_given == 1)) && [[ -n "$section" ]] \
 		&& diec "$CODE_USAGE" "show: --tail applies to the human view only; --section prints one section's body"
+	if ((project == 1)); then
+		((tail_given == 1)) \
+			&& diec "$CODE_USAGE" "show: --project bounds its own tail; --tail shapes the human view"
+		[[ -n "$section" ]] \
+			&& diec "$CODE_USAGE" "show: --project is one output mode; --section prints a raw section body"
+		((raw == 1)) \
+			&& diec "$CODE_USAGE" "show: --project is one output mode; --raw prints the whole file"
+	else
+		[[ -n "$proj_entries$proj_bytes$proj_role" ]] \
+			&& diec "$CODE_USAGE" "show: --entries/--bytes/--role shape --project only"
+	fi
+	if [[ -n "$proj_entries" ]]; then
+		[[ "$proj_entries" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "show: --entries expects a non-negative integer, got: $proj_entries"
+	fi
+	if [[ -n "$proj_bytes" ]]; then
+		[[ "$proj_bytes" =~ ^[1-9][0-9]*$ ]] || diec "$CODE_USAGE" "show: --bytes expects a positive integer, got: $proj_bytes"
+	fi
+	if [[ -n "$proj_role" ]]; then
+		[[ " $PROJECTION_ROLES " == *" $proj_role "* ]] \
+			|| diec "$CODE_USAGE" "show: unknown role: $proj_role (valid: $PROJECTION_ROLES)"
+	else
+		proj_role="worker"
+	fi
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
 	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
+	local rel file_r board_r
+	file_r="$(readlink -f "$file")"
+	board_r="$(readlink -f "$tasks_dir")"
+	rel="${file_r#"$board_r"/}"
 
 	# Strictly read-only: no board lock, no render, no header bump. Task
 	# mutations publish via atomic mv, so a lock-free reader sees complete
@@ -5619,7 +6579,13 @@ cmd_show() {
 	# snapshot and both the header and the tail are extracted from that
 	# single image, so a concurrent mutation can never yield a torn composite
 	# of an old header with a new tail; the JSON and raw views read through
-	# the same single open (one awk pass, one cat).
+	# the same single open (one awk pass, one cat). The projection reads its
+	# snapshot once into a temp file and stages every element from that
+	# image under the same discipline.
+	if ((project == 1)); then
+		show_projection "$file" "$rel" "$tasks_dir" "$proj_entries" "$proj_bytes" "$proj_role" "$json"
+		return
+	fi
 	if ((raw == 1)); then
 		cat "$file"
 		return
