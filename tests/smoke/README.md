@@ -81,6 +81,23 @@ on the gating set (stop: rollback is the manager's decision), 2 = no
 gating scenario produced green, vocab, or regression evidence (an
 entirely broken instrument must not exit 0).
 
+`--side-order fixed|alternate|random` (paired mode only, default
+`fixed`) controls which side of each pair dispatches first, breaking the
+confound of side with dispatch position: under the default the tip
+always runs second in its time window, so a deterministic
+second-dispatch position effect reproduces consecutively on the same
+check exactly as a corpus delta would. `alternate` swaps every second
+pair; `random` draws per pair from a seedable LCG and requires
+`--seed N`. `fixed` preserves the historic behavior byte-for-byte
+(manifest and delta formats included); under `alternate`/`random` the
+mode and seed head `manifest.txt`, every row carries a sixth `order`
+column naming the realized dispatch order, and the delta rows and table
+header record the same, so a positional signature (an
+about-half-of-reproductions flip of the red side under random) is
+auditable from the artifacts alone. Artifact dirs stay keyed by side in
+every mode; only the dispatch order moves, and per-side grading is
+unchanged so deltas stay comparable.
+
 Manifest discipline for recovered runs: `manifest.txt` in a run dir carries the union of every completed row. When a run is interrupted and its remaining rows are re-run into the same dir (a session-cap kill mid-queue, for example), the partial manifest is preserved alongside as `manifest-<stamp>-partial-<rows>.txt` and its rows are unioned into `manifest.txt` (or a pointer line inside `manifest.txt` names the partial file), so the run dir stays self-evidencing for audit without cross-referencing files.
 
 ## Two-tier rubric gate and rules-body composition

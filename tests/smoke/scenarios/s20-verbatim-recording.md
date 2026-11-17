@@ -29,7 +29,6 @@ require: BODY:
 require: ANALYSIS:
 require-any: digest|link
 require-any: reports/|report file|verbatim|deposited
-require-any: independent|not a restatement|not a copy|own reading|my own|check on
 tool-forbid: worker
 tool-forbid: reviewer
 tool-forbid: verifier
@@ -38,3 +37,4 @@ tool-forbid: scout
 tool-forbid: planner
 tier: literal
 require: verbatim
+require-any: independent|not a restatement|not a copy|own reading|my own|check on

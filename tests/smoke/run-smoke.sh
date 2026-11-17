@@ -30,6 +30,7 @@
 #
 #   run-smoke.sh --paired [--scenario S1] [--model provider/id]
 #                [--thinking LEVEL] [--run-dir DIR] [--baseline-ref REF]
+#                [--side-order fixed|alternate|random] [--seed N]
 #       Paired delta mode, explicit invocation only (never chained): per
 #       scenario, dispatch baseline and tip bodies back to back in the
 #       same time window (baseline bodies from --baseline-ref, default
@@ -41,6 +42,19 @@
 #       not red; otherwise green. Exit 0 green-by-delta, 1 regression, 2
 #       when no gating scenario produced any green, vocab, or regression
 #       evidence (an entirely broken instrument must not exit 0).
+#
+#       --side-order controls which side of each pair dispatches first;
+#       the artifact dirs stay keyed by side in every mode, only the
+#       dispatch order moves. fixed (the default) is today's
+#       baseline-then-tip, byte-for-byte including the manifest and delta
+#       formats. alternate swaps every second pair. random draws per pair
+#       from a seedable LCG and requires --seed N. Under the default the
+#       tip always runs second in its time window, so a deterministic
+#       second-dispatch position effect reproduces consecutively on the
+#       same check exactly as a corpus delta would; alternate and random
+#       break that side-position confound, and the seed plus each pair's
+#       realized order are recorded in manifest.txt and delta.txt so a
+#       positional signature is auditable from the artifacts alone.
 #
 # Two-tier rubric gate (ORCH-4-6-2 review, second memo (a), binding from
 # ORCH-4-6-3 on): a scenario rubric may split its checks into a semantics
@@ -114,7 +128,8 @@ usage() {
 	echo "usage: run-smoke.sh --validate"
 	echo "       run-smoke.sh [--scenario S1] [--model provider/id] [--thinking LEVEL] [--run-dir DIR]"
 	echo "       run-smoke.sh --paired [--scenario S1] [--model provider/id] [--thinking LEVEL]"
-	echo "                     [--run-dir DIR] [--baseline-ref REF]"
+	echo "                     [--run-dir DIR] [--baseline-ref REF] [--side-order fixed|alternate|random]"
+	echo "                     [--seed N]"
 }
 
 die() { echo "FAIL: $*" >&2; exit 1; }
@@ -330,6 +345,39 @@ PYEOF
 	selftest_out="$(python3 "$LIB" --selftest)" || rc=1
 	echo "$selftest_out"
 	echo "$selftest_out" | grep -q "SELFTEST FAIL" && rc=1
+	# Seed normalization pin: a zero-prefixed --seed must be accepted as
+	# decimal and realize the same order sequence as its unprefixed
+	# form; bash arithmetic would otherwise parse the leading-zero
+	# string as octal, silently for digits 0-7 and aborting on 8/9.
+	# Each sequence draws in a subshell so an aborting draw fails
+	# this pin with a message instead of killing the whole validate.
+	local pin_bare pin_zeroed pin_seq probe i
+	for probe in 42 9; do
+		pin_bare="$(
+			side_order_state=""
+			seed="$probe"
+			pin_seq=""
+			for ((i = 0; i < 6; i++)); do
+				pair_order random "$i"
+				pin_seq+="${pair_order_result:0:1}"
+			done
+			printf '%s' "$pin_seq"
+		)" || pin_bare=""
+		pin_zeroed="$(
+			side_order_state=""
+			seed="0$probe"
+			pin_seq=""
+			for ((i = 0; i < 6; i++)); do
+				pair_order random "$i"
+				pin_seq+="${pair_order_result:0:1}"
+			done
+			printf '%s' "$pin_seq"
+		)" || pin_zeroed=""
+		if [[ -z "$pin_bare" || "$pin_bare" != "$pin_zeroed" ]]; then
+			echo "VALIDATE FAIL side-order seed: zero-prefixed seed 0$probe does not reproduce seed $probe's realized order (0$probe -> ${pin_zeroed:-<aborted>}, $probe -> ${pin_bare:-<aborted>})"
+			rc=1
+		fi
+	done
 	if ((rc == 0)); then
 		echo "Smoke instrument validate: PASS"
 	else
@@ -533,8 +581,46 @@ paired_class() {
 	esac
 }
 
+# Per-pair dispatch order under --side-order: the artifact dirs stay
+# keyed by side in every mode, the label names which side dispatches
+# first inside the pair. random draws from a 31-bit LCG so the realized
+# sequence depends only on the recorded seed and is reproducible from
+# manifest.txt/delta.txt alone; bash arithmetic is 64-bit signed, so the
+# product below cannot overflow. The draw takes bit 30, not bit 0: for a
+# power-of-two-modulus LCG the k-th least significant bit has period at
+# most 2^(k+1), so the low bit degenerates to strict alternation for
+# every seed while the top bit carries the full 2^31 period. Both
+# routines store their result in a global and are called as plain
+# statements: a command substitution would run them in a subshell and
+# lose the state update, freezing every draw at the seed. The seed
+# enters through 10# reduced mod 2^31: bash would otherwise read a
+# zero-prefixed seed string as octal, erroring on digits 8 and 9, and
+# an unreduced seed could overflow the first product.
+side_order_state=""
+side_order_draw() {
+	if [[ -z "$side_order_state" ]]; then
+		side_order_state=$(( (10#$seed) % 2147483648 ))
+	else
+		side_order_state=$(( (side_order_state * 1103515245 + 12345) % 2147483648 ))
+	fi
+	side_order_draw_result=$(( (side_order_state >> 30) & 1 ))
+}
+
+pair_order() {
+	local mode="$1" index="$2"
+	case "$mode" in
+		fixed) pair_order_result="baseline-first" ;;
+		alternate)
+			if (( index % 2 == 0 )); then pair_order_result="baseline-first"; else pair_order_result="tip-first"; fi ;;
+		random)
+			side_order_draw
+			if (( side_order_draw_result == 0 )); then pair_order_result="baseline-first"; else pair_order_result="tip-first"; fi ;;
+	esac
+}
+
 run_paired() {
 	local scenarios=() model="" thinking="" run_dir="" baseline_ref="main"
+	local side_order="fixed" seed=""
 	while (($#)); do
 		case "$1" in
 			--scenario)
@@ -544,9 +630,21 @@ run_paired() {
 			--thinking) thinking="${2:-}"; shift 2 ;;
 			--run-dir) run_dir="${2:-}"; shift 2 ;;
 			--baseline-ref) baseline_ref="${2:-}"; [[ -n "$baseline_ref" ]] || die "--baseline-ref needs a ref"; shift 2 ;;
+			--side-order)
+				side_order="${2:-}"
+				[[ "$side_order" == fixed || "$side_order" == alternate || "$side_order" == random ]] \
+					|| die "--side-order must be fixed|alternate|random"
+				shift 2 ;;
+			--seed) seed="${2:-}"; [[ "$seed" =~ ^[0-9]+$ ]] || die "--seed needs a non-negative integer"; shift 2 ;;
 			*) usage >&2; exit 2 ;;
 		esac
 	done
+	if [[ "$side_order" == random && -z "$seed" ]]; then
+		die "--side-order random needs --seed N (the seed is recorded in manifest.txt and delta.txt)"
+	fi
+	if [[ -n "$seed" && "$side_order" != random ]]; then
+		die "--seed only combines with --side-order random"
+	fi
 	command -v pi >/dev/null 2>&1 || die "pi not on PATH; the paired mode dispatches through pi"
 	command -v git >/dev/null 2>&1 || die "git not available; the paired mode reads the baseline body from a git ref"
 	(( ${#scenarios[@]} )) || mapfile -t scenarios < <(all_scenario_ids)
@@ -601,28 +699,48 @@ run_paired() {
 	echo "  gating registry: $GATING_IDS (everything else advisory)"
 	echo "  model: ${model:-host pi default}"
 	[[ -n "$thinking" ]] && echo "  thinking: $thinking"
+	[[ "$side_order" != fixed ]] && echo "  side order: $side_order${seed:+ (seed $seed)}"
 
 	local red=0 gating_green=0 drift=0 inconclusive=0 advisory_green=0 advisory_other=0 vocab_signal=0
-	local sid vb vt cls gate row body_kind
+	local sid vb vt cls gate row body_kind pair_index=0 order="" order_note="" order_col="" side_note=""
 	local -a table_rows=()
 	: > "$run_dir/manifest.txt"
-	# Interleave per scenario (baseline then tip back to back) so each
-	# pair sits in the tightest possible time window: the pairing, not the
-	# overall wall clock, is what controls model-behavior drift. Each
+	if [[ "$side_order" != fixed ]]; then
+		printf '# side-order %s%s\n' "$side_order" "${seed:+ seed $seed}" >> "$run_dir/manifest.txt"
+	fi
+	# Interleave per scenario (both sides of a pair back to back, which
+	# side goes first set by --side-order) so each pair sits in the
+	# tightest possible time window: the pairing, not the overall wall
+	# clock, is what controls model-behavior drift. Each
 	# scenario's body kind selects which corpus pair grades it.
 	for sid in "${scenarios[@]}"; do
 		if is_gating "$sid"; then gate="gating"; else gate="advisory"; fi
 		body_kind="$(scenario_body "$(scenario_path "$sid")")" \
 			|| die "scenario $sid failed to parse during body selection"
-		run_one "$sid" "${baseline_bodies[$body_kind]}" "$run_dir/$sid/baseline" || true
-		vb="$(cat "$run_dir/$sid/baseline/verdict.txt")"
-		run_one "$sid" "${tip_bodies[$body_kind]}" "$run_dir/$sid/tip" || true
-		vt="$(cat "$run_dir/$sid/tip/verdict.txt")"
+		pair_order "$side_order" "$pair_index"
+		order="$pair_order_result"
+		if [[ "$order" == baseline-first ]]; then
+			run_one "$sid" "${baseline_bodies[$body_kind]}" "$run_dir/$sid/baseline" || true
+			vb="$(cat "$run_dir/$sid/baseline/verdict.txt")"
+			run_one "$sid" "${tip_bodies[$body_kind]}" "$run_dir/$sid/tip" || true
+			vt="$(cat "$run_dir/$sid/tip/verdict.txt")"
+		else
+			run_one "$sid" "${tip_bodies[$body_kind]}" "$run_dir/$sid/tip" || true
+			vt="$(cat "$run_dir/$sid/tip/verdict.txt")"
+			run_one "$sid" "${baseline_bodies[$body_kind]}" "$run_dir/$sid/baseline" || true
+			vb="$(cat "$run_dir/$sid/baseline/verdict.txt")"
+		fi
 		cls="$(paired_class "$vb" "$vt")"
 		row="$(printf '%-4s baseline=%-33s tip=%-33s %s [%s]' "$sid" "$vb" "$vt" "$cls" "$gate")"
+		if [[ "$side_order" != fixed ]]; then
+			order_note=" (order: $order)"
+			order_col=$'\t'"$order"
+			row="$row$order_note"
+		fi
 		table_rows+=("$row")
-		echo "  [$sid] delta: baseline=$vb tip=$vt -> $cls [$gate]"
-		printf '%s\t%s\t%s\t%s\t%s\n' "$sid" "$vb" "$vt" "$cls" "$gate" >> "$run_dir/manifest.txt"
+		echo "  [$sid] delta: baseline=$vb tip=$vt -> $cls [$gate]$order_note"
+		printf '%s\t%s\t%s\t%s\t%s%s\n' "$sid" "$vb" "$vt" "$cls" "$gate" "$order_col" >> "$run_dir/manifest.txt"
+		pair_index=$(( pair_index + 1 ))
 		case "$gate" in
 			gating)
 				case "$cls" in
@@ -642,8 +760,11 @@ run_paired() {
 
 	for row in "${table_rows[@]}"; do echo "  $row"; done
 	echo "Gating counts: $gating_green green, $vocab_signal vocab (non-gating literal drift), $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
+	if [[ "$side_order" != fixed ]]; then
+		side_note="; side-order $side_order${seed:+ seed $seed}"
+	fi
 	{
-		echo "Delta table (gating: $GATING_IDS; baseline $baseline_ref @$baseline_sha vs tip @$tip_sha)"
+		echo "Delta table (gating: $GATING_IDS; baseline $baseline_ref @$baseline_sha vs tip @$tip_sha$side_note)"
 		for row in "${table_rows[@]}"; do echo "  $row"; done
 		echo "Gating counts: $gating_green green, $vocab_signal vocab (non-gating literal drift), $drift drift, $inconclusive inconclusive, $red regressions; advisory: $advisory_green green, $advisory_other other"
 	} > "$run_dir/delta.txt"

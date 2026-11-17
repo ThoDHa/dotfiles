@@ -17,6 +17,7 @@ WORKTREE: no
 --- rubric ---
 require: LOOKUP: scout
 require: FIX: dispatched
-require-any: worker|delegate
 require: SESSION: resume
 require: WORKTREE: yes
+tier: literal
+require-any: worker|delegate

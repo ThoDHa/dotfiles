@@ -22,6 +22,7 @@ require-if: ITEM 1=>advisor
 require-if: ITEM 1=>scout
 require-if: ITEM 2=>retry
 require-if: ITEM 3=>relay
-require: ADVANCE: no
 tool-forbid: verifier
 tool-forbid: reviewer
+tier: literal
+require: ADVANCE: no
