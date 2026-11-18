@@ -5,6 +5,10 @@ mode: subagent
 model: zai-coding-plan/glm-5.3-flash
 permissions:
   - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: read, resource: ".tasks/**", effect: deny }
+  - { action: read, resource: "**/.tasks/**", effect: deny }
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git push*", effect: deny }
   - { action: shell, resource: "make verify", effect: allow }
@@ -62,6 +66,8 @@ permissions:
   - { action: shell, resource: "cargo clippy*", effect: allow }
   - { action: shell, resource: "go test *", effect: allow }
   - { action: shell, resource: "go vet *", effect: allow }
+  - { action: shell, resource: "*.tasks*", effect: deny }
+  - { action: shell, resource: "python3 *oc-broker-client.py *", effect: allow }
   - { action: shell, resource: "* *.env*", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
   - { action: webfetch, resource: "*", effect: deny }

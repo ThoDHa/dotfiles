@@ -1,24 +1,30 @@
 # Tier-B fixture dispatch config: scout (ORCH-4-9-1 skeleton; the
 # ORCH-4-9-4 representative executions run under this file).
 #
-# Realizes the scout's zero-diff posture: the live map carries no shell
-# rules and names no task access, so the fixture adds the shell denial
-# tail explicitly and keeps everything else absent. Scout's authorized
-# task-command set is empty by contract (role-verbs.sh); any task access
-# is discipline-broken and the transcript audit covers the read-tool gap.
+# Realizes the scout's zero-diff posture: the live map carries no task
+# allows and ORCH-4-10-3 added the storage denies (mirrored above the
+# tail), so the fixture adds the shell denial tail explicitly and keeps
+# everything else absent. Scout's authorized task-command set is empty by
+# contract (role-verbs.sh); any task access is discipline-broken, and the
+# landed maps and storage-guard plugin close the read-tool gap the
+# transcript audit once covered.
 #
 # Rule semantics are opencode's: ordered rules, the LAST matching rule
 # wins, so the denial tail overrides everything above it.
 #
 # Boundary: these rules deny the edit and shell routes. opencode maps have
-# no read action, so the native read tool is covered by the transcript
-# audit (tests/task-access/audit-transcript.sh), not denied here. This
-# fixture proves contract sufficiency and role discipline; it is not a
-# filesystem boundary, and enforcement is ORCH-4-10's work.
+# a read action since v2.3.0, and ORCH-4-10-3 added read and edit denies on
+# the .tasks tree to the live maps; the edit-rule sequence above the
+# denial tail mirrors the landed live map so the map-diff target stays in
+# lockstep with it. The native read route is enforced by the landed maps
+# and the storage-guard plugin, not modeled here; this fixture proves
+# contract sufficiency and role discipline.
 description: "Tier-B fixture config: scout under CLI-only task access"
 mode: subagent
 permissions:
   - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
 # fixture denial tail (fixture-only rules; not part of the target map)
   - { action: edit, resource: ".tasks/**", effect: deny }

@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-opencode test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -516,6 +516,15 @@ test-task-access-drift:
 test-task-access-replay:
 	@echo "Testing task-access command-sufficiency replay..."
 	@bash tests/task-access/test-replay.sh
+
+# The opencode task-storage enforcement suite (ORCH-4-10-3). Its e2e
+# section drives real opencode sessions (LLM calls on the model gateway),
+# so it stays out of `make test` and `verify-inner` the same way
+# run-skeleton.sh does; ORCH-4-10-4 owns wiring the combined adversarial
+# suite into `make test`.
+test-task-storage-opencode:
+	@echo "Testing opencode task-storage enforcement..."
+	@bash tests/task-storage-isolation/test-opencode-enforcement.sh
 
 # Tier-B fixture harness skeleton (ORCH-4-9-1): per-role dispatch configs
 # validated by an ordered-rule evaluator plus the transcript audit; the

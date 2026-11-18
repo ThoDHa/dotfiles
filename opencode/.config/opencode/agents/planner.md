@@ -6,6 +6,9 @@ model: zai-coding-plan/glm-5.3
 permissions:
   - { action: edit, resource: "*", effect: deny }
   - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: read, resource: ".tasks/**", effect: deny }
+  - { action: read, resource: "**/.tasks/**", effect: deny }
   - { action: edit, resource: ".tasks/reports/research/**", effect: allow }
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git status *", effect: allow }
@@ -36,6 +39,8 @@ permissions:
   - { action: shell, resource: "opencode --version", effect: allow }
   - { action: shell, resource: "opencode debug config", effect: allow }
   - { action: shell, resource: "opencode debug agents", effect: allow }
+  - { action: shell, resource: "*.tasks*", effect: deny }
+  - { action: shell, resource: "python3 *oc-broker-client.py *", effect: allow }
   - { action: shell, resource: "* *.env*", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
   - { action: subagent, resource: "scout", effect: allow }

@@ -159,6 +159,7 @@ fm_planner() { # extra-body-line... -> fixture with the planner target stanza on
 		printf '  - { action: shell, resource: "*", effect: deny }\n'
 		printf '  - { action: edit, resource: "*", effect: deny }\n'
 		printf '  - { action: edit, resource: ".tasks/**", effect: deny }\n'
+		printf '  - { action: edit, resource: "**/.tasks/**", effect: deny }\n'
 		printf '  - { action: edit, resource: ".tasks/reports/research/**", effect: allow }\n'
 		printf -- '---\n'
 		printf '# Fixture body\n\n'

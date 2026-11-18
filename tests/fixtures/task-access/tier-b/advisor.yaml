@@ -10,14 +10,18 @@
 # wins, so the denial tail overrides everything above it.
 #
 # Boundary: these rules deny the edit and shell routes. opencode maps have
-# no read action, so the native read tool is covered by the transcript
-# audit (tests/task-access/audit-transcript.sh), not denied here. This
-# fixture proves contract sufficiency and role discipline; it is not a
-# filesystem boundary, and enforcement is ORCH-4-10's work.
+# a read action since v2.3.0, and ORCH-4-10-3 added read and edit denies on
+# the .tasks tree to the live maps; the edit-rule sequence above the
+# denial tail mirrors the landed live map so the map-diff target stays in
+# lockstep with it. The native read route is enforced by the landed maps
+# and the storage-guard plugin, not modeled here; this fixture proves
+# contract sufficiency and role discipline.
 description: "Tier-B fixture config: advisor under CLI-only task access"
 mode: subagent
 permissions:
   - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git status *", effect: allow }
   - { action: shell, resource: "git diff *", effect: allow }

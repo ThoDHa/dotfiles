@@ -5,6 +5,12 @@ mode: subagent
 model: zai-coding-plan/glm-5.3-flash
 permissions:
   - { action: edit, resource: "*", effect: deny }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: read, resource: ".tasks/**", effect: deny }
+  - { action: read, resource: "**/.tasks/**", effect: deny }
+  - { action: shell, resource: "*.tasks*", effect: deny }
+  - { action: shell, resource: "python3 *oc-broker-client.py *", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
 ---
 

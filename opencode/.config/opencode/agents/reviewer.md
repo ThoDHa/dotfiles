@@ -6,6 +6,10 @@ model: zai-coding-plan/glm-5.3
 permissions:
   - { action: edit, resource: "*", effect: deny }
   - { action: edit, resource: "/tmp/llm/reports/**", effect: allow }
+  - { action: edit, resource: ".tasks/**", effect: deny }
+  - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: read, resource: ".tasks/**", effect: deny }
+  - { action: read, resource: "**/.tasks/**", effect: deny }
   # read-only relief: v2 permission rules are ordered and the last matching rule wins, so the deny sits first with the exception allows after, mirroring the edit maps
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git status *", effect: allow }
@@ -27,6 +31,8 @@ permissions:
   - { action: shell, resource: "tasks show *", effect: allow }
   - { action: shell, resource: "tasks list *", effect: allow }
   - { action: shell, resource: "tasks reports *", effect: allow }
+  - { action: shell, resource: "*.tasks*", effect: deny }
+  - { action: shell, resource: "python3 *oc-broker-client.py *", effect: allow }
   - { action: shell, resource: "* *.env*", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
   - { action: subagent, resource: "scout", effect: allow }
