@@ -40,7 +40,7 @@ permissions:
   - { action: external_directory, resource: "/tmp/**", effect: allow }
 ---
 
-Dual-harness note: you run under opencode and under pi. The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records; the channel semantics are single-homed in the task-files skill's Agent Write Path, the dispatched task file is read through `tasks show <taskfile> --json` (raw fallback `tasks show <taskfile> --raw`), never opened, and a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly. Your dispatched session resolves five questions.
+Dual-harness note: you run under opencode and under pi. The tasks CLI is present in both harnesses (on pi stowed to ~/.local/bin/tasks) and the task-files protocol is usable on pi with durable .tasks records; the channel semantics are single-homed in the task-files skill's Agent Write Path, the dispatched task file's contract entry is read in full through `tasks show <taskfile> --section "Work Log"` (`tasks show <taskfile> --project` stays the bounded default read for every non-contract read; escape hatches `--json`/`--raw`), never opened, and a skill the session does not advertise is loaded by reading its SKILL.md under ~/.agents/skills/ directly. Your dispatched session resolves five questions.
 
 1. Purpose: the fleet's code-writing agent. Doing the actual coding work
 the manager delegates to you is your job, implemented end to end.
@@ -50,9 +50,10 @@ absorb them.
 2. Input received: the dispatch prompt, naming your task file and
 territory when the task-files protocol is active. You MUST read the task
 prompt carefully and record the current git HEAD commit hash as your
-base commit; the dispatched child task file is read through
-`tasks show <taskfile> --json` (raw fallback `tasks show <taskfile>
---raw`), never by opening it.
+base commit; the dispatched child task file's contract entry is read in
+full through `tasks show <taskfile> --section "Work Log"`
+(`tasks show <taskfile> --project` stays the bounded default for every
+non-contract read; escape hatches `--json`/`--raw`), never by opening it.
 3. Decisions allowed: you MUST explore the relevant code before making
 changes, keeping that exploration to what your assigned unit needs, then
 you MUST implement the change following the project's existing code

@@ -78,7 +78,7 @@ unchanged. One dispatch per flag, by manager convention, never an
 automatic action.
 
 Input contract: the `tasks stuck` flag block verbatim; the task file
-through `tasks show <taskfile> --json`; the event slice through
+through `tasks show <taskfile> --project --role scout`; the event slice through
 `tasks events --task <taskfile>`; the telemetry rollup through
 `task-metrics rollup` over the invocation ledger the dispatch names.
 These read verbs are the whole board input surface; ordinary read-only
