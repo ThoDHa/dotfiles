@@ -3848,7 +3848,7 @@ lint_classified_findings() { # <tasks_dir> <rel>...
 			msg="header Status field missing (expected one of: $STATUS_VALUES)"
 			if lint_class_hard "$rel"; then printf 'HARD %s: %s\n' "$rel" "$msg"; else printf 'ADVISORY %s: %s\n' "$rel" "$msg"; fi
 		fi
-		if [[ "$st" != "-" ]] && ! valid_status "$st"; then
+		if (( "${have_status_of[$rel]}" == 1 )) && ! valid_status "$st"; then
 			msg="header Status not a CLI-recognized value: '$st' (valid: $STATUS_VALUES)"
 			if lint_class_hard "$rel"; then printf 'HARD %s: %s\n' "$rel" "$msg"; else printf 'ADVISORY %s: %s\n' "$rel" "$msg"; fi
 		fi
