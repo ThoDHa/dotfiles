@@ -4494,7 +4494,12 @@ assert_eq "the projection JSON is byte-stable across invocations" "$proj_uni_jso
 # CR on a shape value (the trims must actually trim), a zero-space
 # colon value (the leading [ \t] consume is zero-or-more on both
 # sides), an empty shape value (empty means absent), and a duplicate
-# Status pair (first occurrence wins on both sides).
+# Status pair (first occurrence wins on both sides). The dash-lane fixtures
+# extend the family across both placements of a literal dash Status
+# (archived asserts the vocabulary advisory on the lint stream; open asserts
+# the hard class the exit gate consumes), and the reason-trim fixture pins a
+# whitespace-only Status Reason as absent on both sides (its sole advisory
+# is the reason lane).
 cat >"$proj_dir/archive/HDR-1-20260615-1200-shape.md" <<'HDREOF'
 # Task: Headershape
 
@@ -4691,7 +4696,117 @@ body
 
 - 2026-06-15 12:00 - created
 HDREOF
+cat >"$proj_dir/archive/HDR-7-20260615-1200-dashstatus.md" <<'HDREOF'
+# Task: Headerdashstatus
+
+**Created:** 2026-06-15 12:00
+**Status:** -
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Literal-dash archived fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+cat >"$proj_dir/current/HDR-8-20260615-1200-dashopen.md" <<'HDREOF'
+# Task: Headerdashopen
+
+**Created:** 2026-06-15 12:00
+**Status:** -
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Literal-dash open fixture objective.
+
+## Success Criteria
+
+- [ ] dash open
+
+## Work Log
+
+### 2026-06-15 12:00: worker: created
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+proj_hdr_ws=$'   '
+cat >"$proj_dir/archive/HDR-9-20260615-1200-reasontrim.md" <<HDREOF
+# Task: Headerreasontrim
+
+**Created:** 2026-06-15 12:00
+**Status:** Cancelled
+**Status Reason:**${proj_hdr_ws}
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Reason-trim fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
 proj_lint_stream="$(t lint --dir "$proj_dir" --verbose 2>/dev/null || true)"
+assert_contains "an archived literal-dash Status fires the vocabulary advisory on the lint stream" \
+	"$proj_lint_stream" \
+	"ADVISORY archive/HDR-7-20260615-1200-dashstatus.md: header Status not a CLI-recognized value: '-'"
+assert_contains "an open literal-dash Status fires the hard vocabulary finding the exit gate consumes" \
+	"$proj_lint_stream" \
+	"HARD current/HDR-8-20260615-1200-dashopen.md: header Status not a CLI-recognized value: '-'"
+assert_contains "an archived Cancelled with a whitespace-only Status Reason fires the advisory pointer" \
+	"$(t show --dir "$proj_dir" HDR-9-20260615-1200-reasontrim.md --project)" \
+	"advisory findings present on this file"
+assert_eq "the sole advisory on the whitespace-only Status Reason is the reason lane" \
+	"ADVISORY archive/HDR-9-20260615-1200-reasontrim.md: Status Cancelled requires a Status Reason (the header contract ties it to Blocked/Cancelled)" \
+	"$(printf '%s\n' "$proj_lint_stream" | grep -E '^ADVISORY archive/HDR-9-20260615-1200-reasontrim\.md: ' || true)"
 for proj_x_file in "$proj_dir"/current/*.md "$proj_dir"/archive/*.md; do
 	proj_x_rel="${proj_x_file#"$proj_dir"/}"
 	proj_x_pat="${proj_x_rel//./\.}"
