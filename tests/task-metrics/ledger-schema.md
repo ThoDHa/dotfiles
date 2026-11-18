@@ -26,7 +26,7 @@ One record per model invocation (pi assistant message, opencode assistant messag
 | `harness` | `pi` or `opencode`, required | derived by the extracting mode | derived by the extracting mode |
 | `session_id` | non-empty string, required | session file identity | `message.session_id` (oc 1) |
 | `message_id` | non-empty string, required | session entry id | `message.id` (oc 1) |
-| `agent_role` | string or null | subagent toolResult `details.results[].agent` where derivable (pi 2) | `message.data.agent`, an explicit field where present; null otherwise (oc 1) |
+| `agent_role` | string or null | subagent toolResult `details.results[].agent` where derivable (pi 2); on host invocations, "manager" when the governing per-run system message's `sections.addendum` contains the manager body's pinned opening marker ("You are a manager", opening the body's charter text in every committed body version; matched by containment since the addendum wraps the body after the dual-harness preamble), null otherwise | `message.data.agent`, an explicit field where present; null otherwise (oc 1) |
 | `model` | non-empty string, required | assistant `model` (pi 1) | `message.modelID` (oc 1) |
 | `provider` | non-empty string, required | assistant `provider` (pi 1) | `message.providerID` (oc 1) |
 | `tokens` | object, required (see below) | `usage` {input, output, cacheRead, cacheWrite, reasoning} (pi 1) | `message.tokens` {input, output, cache{read, write}, reasoning} (oc 1) |

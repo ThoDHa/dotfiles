@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"ggg00007-0000-0000-0000-000000000007","timestamp":"2026-11-06T20:00:00.000Z","cwd":"/tmp/decoy-cwd"}
+{"type":"message","id":"s-g-0001","parentId":null,"timestamp":"2026-11-06T20:00:02.000Z","message":{"role":"system","timestamp":1794067202000,"toolsAdded":[],"content":"","sections":{"preamble":"preamble text","addendum":"<addendum>\n\nSome other extension's addendum text without the manager marker."}}}
+{"type":"message","id":"u-g-0001","parentId":"s-g-0001","timestamp":"2026-11-06T20:00:03.000Z","message":{"role":"user","content":[{"type":"text","text":"Do something."}]}}
+{"type":"message","id":"m-g-0001","parentId":"u-g-0001","timestamp":"2026-11-06T20:00:20.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3","stopReason":"stop","durationMs":17000,"usage":{"input":2000,"output":40,"cacheRead":0,"cacheWrite":0,"reasoning":4,"cost":{"total":0.0001}},"content":[]}}

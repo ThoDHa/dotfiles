@@ -221,6 +221,7 @@ WORKTREE_SLUG_RE = re.compile(r"([a-z]+)(\d+(?:-\d+)*)\Z")
 TASK_ID_RE = re.compile(r"\b([A-Z][A-Z0-9]*-\d+(?:-\d+)+)\b")
 PI_SESSION_ROOT = "~/.pi/agent/sessions"
 PI_CONTINUE_STATE_DIR = "~/.local/share/pi/pi-continue"
+MANAGER_BODY_OPENING_MARKER = "You are a manager"
 
 MODES = ("oc", "pi", "rollup", "ac12")
 
@@ -452,6 +453,29 @@ def read_session(path):
 	return header, entries, skipped
 
 
+def system_message_agent_role(message, source):
+	"""The agent_role a persisted system message governs: "manager" when
+	its sections.addendum contains the manager body's pinned opening
+	marker, else None. The marker rather than a body digest is matched
+	because the body's content varies by corpus state; the marker opens
+	the body's charter text in every committed body version. The match is
+	containment, not an addendum-opening anchor: the addendum wraps the
+	body after the dual-harness preamble, so live manager addenda place
+	the marker hundreds of characters in. An addendum present without the
+	marker warns and attributes nothing, keeping silence conservative."""
+	sections = message.get("sections")
+	if not isinstance(sections, dict):
+		return None
+	addendum = sections.get("addendum")
+	if not isinstance(addendum, str):
+		return None
+	if MANAGER_BODY_OPENING_MARKER in addendum:
+		return "manager"
+	warn(f"{source} system-message addendum lacks the manager-body "
+		f"opening marker, attributed nothing")
+	return None
+
+
 def extract_session(path, batch_id):
 	"""Extract one session file into invocation records. Returns
 	(records, session_span, skipped_line_count, unattached_group_count)
@@ -496,11 +520,16 @@ def extract_session(path, batch_id):
 	prose = ""
 	previous_stop = None
 	first_epoch = last_epoch = None
+	governing_agent_role = None
 	for entry in entries:
 		message = entry.get("message")
 		if not isinstance(message, dict):
 			continue
 		role = message.get("role")
+		if role == "system":
+			governing_agent_role = system_message_agent_role(
+				message, f"{path} entry {entry.get('id')}")
+			continue
 		if role in ("user", "assistant"):
 			prose = f"{prose} {text_of(message.get('content'))}"
 		if role != "assistant":
@@ -528,7 +557,7 @@ def extract_session(path, batch_id):
 			"harness": "pi",
 			"session_id": session_id,
 			"message_id": entry_id,
-			"agent_role": None,
+			"agent_role": governing_agent_role,
 			"model": message["model"],
 			"provider": message["provider"],
 			"tokens": map_tokens({} if zeroed else usage, f"{path} entry {entry_id}"),

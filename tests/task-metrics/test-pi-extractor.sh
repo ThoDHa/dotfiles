@@ -12,8 +12,11 @@
 # classes (stop-reason, invocation-repeat), the pi-continue engine.log
 # park/restart join and the interrupted-park stale-state regression,
 # attribution (cwd-match worktree normalization, task-file-reference,
-# unattributed with the populated and absent batch forms), read-only
-# store handling, determinism, append semantics, corrupt-line
+# unattributed with the populated and absent batch forms), manager
+# attribution through the per-run system-message addendum (manager-body
+# opening-marker containment: positive, plain negative, decoy warning,
+# multi-run reset attributing per run),
+# read-only store handling, determinism, append semantics, corrupt-line
 # resilience, the exit ladder, and the make wiring pin.
 #
 # Hermetic: the fixture store is synthetic under
@@ -282,6 +285,48 @@ PYEOF
 assert_no_output "batch-less extraction leaves batch_id null" "$nobatch_gaps"
 python3 "$VALIDATOR" "$ROOT/plain.jsonl" >/dev/null 2>&1
 assert_eq "batch-stamped single record validates" "0" "$?"
+
+echo "== manager attribution (per-run system-message addendum) =="
+run_extractor "$ROOT/manager.jsonl" "$ROOT/manager.rc" --session-dir "$FIXTURES/manager-store/sessions"
+assert_eq "manager-store extraction exits 0" "0" "$(cat "$ROOT/manager.rc")"
+assert_eq "manager store emits 6 records" "6" "$(wc -l < "$ROOT/manager.jsonl" | tr -d ' ')"
+role_gaps="$(python3 - "$ROOT/manager.jsonl" <<'PYEOF'
+import json, sys
+
+MANAGER = "eee00005-0000-0000-0000-000000000005"
+PLAIN = "fff00006-0000-0000-0000-000000000006"
+DECOY = "ggg00007-0000-0000-0000-000000000007"
+MULTI = "hhh00008-0000-0000-0000-000000000008"
+
+roles = {}
+run_roles = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+	record = json.loads(line)
+	roles[record["session_id"]] = record["agent_role"]
+	run_roles[record["message_id"]] = record["agent_role"]
+problems = []
+if roles.get(MANAGER) != "manager":
+	problems.append(f"manager-composed session: first invocation agent_role "
+		f"{roles.get(MANAGER)!r} != 'manager'")
+if roles.get(PLAIN) is not None:
+	problems.append(f"plain session: agent_role {roles.get(PLAIN)!r} is not null")
+if roles.get(DECOY) is not None:
+	problems.append(f"decoy session: agent_role {roles.get(DECOY)!r} is not null")
+expected_runs = (("m-h-0001", "manager"), ("m-h-0002", None), ("m-h-0003", "manager"))
+for message_id, expected in expected_runs:
+	actual = run_roles.get(message_id)
+	if actual != expected:
+		problems.append(f"multi-run reset: {message_id} agent_role {actual!r} != {expected!r}")
+print("\n".join(problems))
+PYEOF
+)"
+assert_no_output "agent_role derives from the governing system-message addendum (manager positive, plain and decoy negative, multi-run reset attributing per run)" "$role_gaps"
+assert_contains "decoy addendum warns naming its source entry" "$(cat "$ROOT/manager.jsonl.err")" \
+	"entry s-g-0001 system-message addendum lacks the manager-body opening marker"
+assert_eq "only the decoy addendum warns" "1" \
+	"$(grep -c "lacks the manager-body opening marker" "$ROOT/manager.jsonl.err")"
+python3 "$VALIDATOR" "$ROOT/manager.jsonl" >/dev/null 2>&1
+assert_eq "ledger carrying attributed host records validates" "0" "$?"
 
 echo "== unattached subagent result group warns and is counted ==="
 rm -rf "$ROOT/unattached-store"

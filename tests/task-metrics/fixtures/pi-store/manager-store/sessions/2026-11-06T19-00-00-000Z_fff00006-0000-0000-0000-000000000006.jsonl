@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"fff00006-0000-0000-0000-000000000006","timestamp":"2026-11-06T19:00:00.000Z","cwd":"/tmp/plain-cwd"}
+{"type":"message","id":"s-f-0001","parentId":null,"timestamp":"2026-11-06T19:00:02.000Z","message":{"role":"system","timestamp":1794063602000,"toolsAdded":[],"content":"","sections":{"preamble":"preamble text","docs":"docs text"}}}
+{"type":"message","id":"u-f-0001","parentId":"s-f-0001","timestamp":"2026-11-06T19:00:03.000Z","message":{"role":"user","content":[{"type":"text","text":"Answer a question."}]}}
+{"type":"message","id":"m-f-0001","parentId":"u-f-0001","timestamp":"2026-11-06T19:00:20.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3","stopReason":"stop","durationMs":17000,"usage":{"input":3000,"output":50,"cacheRead":0,"cacheWrite":0,"reasoning":5,"cost":{"total":0.0002}},"content":[]}}
