@@ -429,8 +429,14 @@ readonly AWK_ROW_HELPERS='		BEGIN {
 # awk variants, so NUL is left to the slow path's table gap and control
 # codes run 1..31).
 readonly AWK_JSON_ESCAPE='		function json_escape(s,  out, i, n, c, code, hexd) {
-			gsub(/\\/, "\\\\\\\\", s)
+			gsub(/\\/, "&&", s)
 			gsub(/"/, "\\\"", s)
+			# Backslash doubling rides the gsub replacement layer, where "&&"
+			# (matched text twice) is the one expansion identical under every
+			# awk; a backslash-only replacement string diverges (gawk collapses
+			# its backslash pairs, mawk copies them literally, so "\\\\\\\\"
+			# emits two under gawk but four under mawk; mdesescape proves the
+			# idiom live).
 			# The named-control replacements carry one source backslash ("\\n"):
 			# gawk >= 5.3 uses the replacement value literally after \\\\ collapsing,
 			# so "\\\\n" (value \\\\n) would emit two backslashes and break JSON
@@ -4950,10 +4956,11 @@ stuck_events_scan() { # ledger-file
 # still counts, its own tokens are readable); unit_id absent or null
 # travels as "-" (an empty field cannot survive the consumer's IFS-tab
 # split, and "-" never matches a task id, so unattributed records
-# attribute to nothing). Timestamps convert with mktime's UTC flag: the
-# ledger's RFC3339 UTC stamps and the board's naive stamps (parsed by
-# date in the host timezone) both yield true instants, so the comparison
-# is instant-exact on any host timezone.
+# attribute to nothing). Timestamps convert through m_epoch's
+# UTC-pinned Fliegel-Van Flandern arithmetic: the ledger's RFC3339 UTC
+# stamps and the board's naive stamps (parsed by date in the host
+# timezone) both yield true instants, so the comparison is instant-exact
+# on any host timezone.
 # Tolerant of the additive-evolution whitespace variants: field matches
 # allow optional space around the colon.
 #
@@ -5036,10 +5043,23 @@ stuck_metrics_scan() { # ledger-file
 			}
 			return total
 		}
-		function m_epoch(ts,    d, t) {
+		function m_epoch(ts,    d, t, y, mo, da, yy, era, yoe, doy, doe) {
 			split(substr(ts, 1, 10), d, "-")
 			split(substr(ts, 12, 8), t, ":")
-			return mktime(sprintf("%04d %02d %02d %02d %02d %02d", d[1], d[2], d[3], t[1], t[2], t[3]), 1)
+			y = d[1] + 0; mo = d[2] + 0; da = d[3] + 0
+			# Fliegel-Van Flandern Julian-day arithmetic pinned to UTC, in
+			# place of mktime: the 2-arg UTC form is gawk-only (mawk aborts on
+			# the second argument) and the 1-arg form diverges (mawk reads the
+			# spec as UTC, gawk as local time); these integer steps evaluate
+			# identically under both interpreters. int() truncates toward
+			# zero, so negative years take a one-step floor correction.
+			yy = y - (mo <= 2 ? 1 : 0)
+			era = int(yy / 400)
+			if (yy < 0 && era * 400 != yy) era--
+			yoe = yy - era * 400
+			doy = int((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5) + da - 1
+			doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+			return (era * 146097 + doe - 719468) * 86400 + t[1] * 3600 + t[2] * 60 + t[3] + 0
 		}
 		{
 			if (!m_split($0)) { bad++; next }

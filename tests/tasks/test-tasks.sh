@@ -6179,5 +6179,25 @@ assert_eq "the corrupt ledger exits 1" "1" "$stuck_rc"
 sed -i '$d' "$TASKS_DIR/events.log"
 rm -f "$stuck_entries" "$tmp_mk"
 
+echo "== metrics: the m_epoch century-correction pin =="
+# H4's postdate ordering rides m_epoch, the shipped Fliegel-Van Flandern
+# replacement for the gawk-only 2-arg mktime; its century term
+# (- int(yoe/100)) is what keeps a non-leap century year from contributing
+# a Feb 29. The pin extracts the shipped function from the CLI at battery
+# runtime and asserts the date -u ground truth on both sides of the 1900
+# and 2100 boundaries under the ambient awk (host gawk; the container
+# gate re-runs this block under mawk). 2100-02-28 sits before the era's
+# first century mark and pins the boundary day itself, so exactly three
+# of the four dates move when the term is deleted.
+m_epoch_pin_prog="$ROOT/m_epoch-pin.awk"
+for ts in 1900-02-28 1900-03-01 2100-02-28 2100-03-01; do
+	{ sed -n '/function m_epoch(/,/^\t\t}$/p' "$TASKS_BIN"
+	  printf 'BEGIN { printf "%%d", m_epoch("%sT00:00:00Z") }\n' "$ts"
+	} >"$m_epoch_pin_prog"
+	assert_eq "m_epoch matches date -u ground truth at $ts" \
+		"$(date -u -d "${ts}T00:00:00Z" +%s)" \
+		"$(awk -f "$m_epoch_pin_prog")"
+done
+
  print_result
 ((fail == 0)) || exit 1
