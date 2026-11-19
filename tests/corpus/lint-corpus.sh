@@ -716,8 +716,8 @@ VERIFIER_SHELL_FILE="$AGENTS_SCOPE/verifier.md"
 VERIFIER_SHELL_FIRST='- { action: shell, resource: "*", effect: deny }'
 VERIFIER_SHELL_ENV_DENY='- { action: shell, resource: "* *.env*", effect: deny }'
 VERIFIER_SHELL_PUSH_DENY='- { action: shell, resource: "git push*", effect: deny }'
-VERIFIER_SHELL_RULE_COUNT=58
-VERIFIER_LIST_ITEM_COUNT=63
+VERIFIER_SHELL_RULE_COUNT=60
+VERIFIER_LIST_ITEM_COUNT=69
 
 check_verifier_map_order() {
 	assert_present "$VERIFIER_SHELL_FILE"
