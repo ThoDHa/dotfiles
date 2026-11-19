@@ -1297,24 +1297,31 @@ Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
 a value that itself begins with "--" (e.g. --name=--force).
 
 The board directory is located from --dir, then $TASKS_DIR, then the
-project's central-store slice, then by walking up from the current
-directory, then ./.tasks as a last resort. The store maps a project under
-$TASKS_DEV_ROOT (default /home/khave/dev) to $TASKS_DEV_ROOT/tasks/<project>
-where <project> is the topmost directory under the dev root with any leading
-dot stripped (.dotfiles maps to tasks/dotfiles); a cwd outside the dev root
-falls back to the git repository root and its basename. An existing slice
-takes over every board operation; until it exists the legacy local search
-above runs unchanged. Writing commands refuse the bare last resort; show and
-render only warn about it.
+project's explicit store mapping (a .tasks-map marker file in the project
+directory naming its namespace, else a reverse lookup of the derived
+project path in the store registry $TASKS_DEV_ROOT/tasks/mapping.yaml),
+then the project's derived central-store slice, then by walking up from
+the current directory, then ./.tasks as a last resort. The store maps a
+project under $TASKS_DEV_ROOT (default /home/khave/dev) to
+$TASKS_DEV_ROOT/tasks/<project> where <project> is the topmost directory
+under the dev root with any leading dot stripped (.dotfiles maps to
+tasks/dotfiles); a cwd outside the dev root falls back to the git
+repository root and its basename. A derived name that the registry binds
+to a different project refuses with a store namespace collision error
+instead of crossing boards. An existing slice takes over every board
+operation; until it exists the legacy local search above runs unchanged.
+Writing commands refuse the bare last resort; show and render only warn
+about it.
 EOF
 }
 
 # How the last resolve_tasks_dir call reached its answer: flag (--dir), env
-# (TASKS_DIR), store (the project's central-store slice), walkup (an upward
-# search that found an existing board), or fallback (the bare ./.tasks last
-# resort). The guards below hang off this marker: writers refuse the
-# fallback root, readers only warn, and every other branch passes either
-# way.
+# (TASKS_DIR), marker (a .tasks-map namespace), registry (the store
+# registry's reverse lookup of the project path), store (the project's
+# derived central-store slice), walkup (an upward search that found an
+# existing board), or fallback (the bare ./.tasks last resort). The guards
+# below hang off this marker: writers refuse the fallback root, readers
+# only warn, and every other branch passes either way.
 RESOLVED_VIA=""
 # The resolved directory itself. Resolution assigns both globals in the
 # caller's shell instead of printing the directory: a printf contract
@@ -1338,14 +1345,20 @@ TASKS_DEV_ROOT="${TASKS_DEV_ROOT%/}"
 # How the last project_store_slice call derived its project root: none (no
 # derivable root), dev-walk (the topmost directory under the dev root), or
 # git-fallback (the git repository root for a cwd outside the dev root).
-# init's create mode claims a not-yet-existing slice only for a dev-walk
-# root, so a non-dev project keeps its legacy creation behavior.
+# init's create mode claims a not-yet-existing derived slice only for a
+# dev-walk root, so an unmapped non-dev project keeps its legacy creation
+# behavior; an explicitly mapped project (marker or registry) claims its
+# named namespace however the root was derived.
 PROJECT_ROOT_VIA="none"
-# The derived slice path, empty when no project root is derivable. Both
-# globals are assigned in the caller's shell on every call, the same
-# contract resolve_tasks_dir uses: a $() command substitution runs the
-# derivation in a subshell whose assignments never reach the caller, so
-# callers invoke the function directly instead of wrapping it.
+# The derived project root itself (the dev-walk topmost directory or the
+# git repository root), empty when none is derivable: the store registry
+# reverse-lookups by this path. The derived slice path follows from it
+# under the same conditions. Both globals are assigned in the caller's
+# shell on every call, the same contract resolve_tasks_dir uses: a $()
+# command substitution runs the derivation in a subshell whose assignments
+# never reach the caller, so callers invoke the function directly instead
+# of wrapping it.
+PROJECT_ROOT=""
 PROJECT_STORE_SLICE=""
 
 # Derive the project's store slice path from the invocation cwd. The
@@ -1362,6 +1375,7 @@ PROJECT_STORE_SLICE=""
 project_store_slice() {
 	local dir="$PWD" root rel
 	PROJECT_ROOT_VIA="none"
+	PROJECT_ROOT=""
 	PROJECT_STORE_SLICE=""
 	if [[ "$dir" == "$TASKS_DEV_ROOT"/* ]]; then
 		while [[ "$(dirname "$dir")" != "$TASKS_DEV_ROOT" ]]; do
@@ -1377,41 +1391,241 @@ project_store_slice() {
 		PROJECT_ROOT_VIA=git-fallback
 	fi
 	rel="${rel#.}"
-	if [[ -z "$rel" ]]; then PROJECT_ROOT_VIA="none"; return 1; fi
+	if [[ -z "$rel" ]]; then PROJECT_ROOT_VIA="none"; PROJECT_ROOT=""; return 1; fi
+	PROJECT_ROOT="$root"
 	PROJECT_STORE_SLICE="$TASKS_DEV_ROOT/tasks/$rel"
 }
 
+# The project-side half of the explicit mapping: a one-line marker file in
+# the project directory naming the store namespace it uses
+# ("namespace: sudoku"). The seam reads it before every derivation
+# because explicit beats derived: a project whose layout would mislead
+# the walk (nested repos, renamed directories, symlinked entry paths)
+# plants the marker and pins its namespace regardless of how the
+# invocation cwd derives. Searched upward from the cwd like the legacy
+# .tasks walk, nearest marker winning, so one marker per project covers
+# every cwd inside it and a nested project's own marker shadows the
+# parent's. The name carries no path structure: a namespace is one flat
+# store-slice name, so a hostile or typoed marker value cannot point the
+# slice outside the store root.
+TASKS_MAP_MARKER=".tasks-map"
+MARKER_NAMESPACE=""
+MARKER_DIR=""
+
+# Read the nearest .tasks-map walking up from the invocation cwd. Assigns
+# MARKER_NAMESPACE and MARKER_DIR in the caller's shell (the same direct
+# contract as project_store_slice) and returns 0 when a marker was found;
+# returns 1 with empty globals when none was. The file admits blank lines
+# and # comments around exactly one "namespace: <name>" line; anything
+# else, a missing or repeated namespace, or a name outside the flat
+# namespace charset is a named refusal rather than a silent guess.
+project_tasks_marker() {
+	local dir="$PWD" line ns
+	MARKER_NAMESPACE=""
+	MARKER_DIR=""
+	while [[ "$dir" != "/" ]]; do
+		if [[ -r "$dir/$TASKS_MAP_MARKER" ]]; then
+			ns=""
+			while IFS= read -r line || [[ -n "$line" ]]; do
+				line="${line%$'\r'}"
+				line="${line%"${line##*[![:space:]]}"}"
+				line="${line#"${line%%[![:space:]]*}"}"
+				if [[ -z "$line" || "$line" == \#* ]]; then continue; fi
+				if [[ "$line" =~ ^namespace:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
+					[[ -z "$ns" ]] || die "$TASKS_MAP_MARKER at $dir names more than one namespace"
+					ns="${BASH_REMATCH[1]}"
+				else
+					die "malformed $dir/$TASKS_MAP_MARKER: the only content is one 'namespace: <name>' line (blank lines and # comments allowed)"
+				fi
+			done < "$dir/$TASKS_MAP_MARKER"
+			[[ -n "$ns" ]] || die "$TASKS_MAP_MARKER at $dir names no namespace"
+			if ! [[ "$ns" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+				die "$TASKS_MAP_MARKER at $dir names '$ns': a namespace is one flat store-slice name (letters, digits, dots, dashes, underscores; no leading dot or slash)"
+			fi
+			MARKER_NAMESPACE="$ns"
+			MARKER_DIR="$dir"
+			return 0
+		fi
+		dir="$(dirname "$dir")"
+	done
+	return 1
+}
+
+# The store-side half of the explicit mapping: a flat registry at the
+# store root ($TASKS_DEV_ROOT/tasks/mapping.yaml) recording, one
+# "name: /local/path" entry per line, where each namespace is linked
+# locally. It is the where-is-it-linked view the seam reverse-lookups by
+# project path when no marker exists, and the ownership record the
+# collision refusal checks derived names against. The admitted subset is
+# deliberately shell-parseable: blank lines, # comments, and flat
+# "name: path" entries only, so the store registry stays a plain text
+# file instead of gaining a YAML dependency.
+STORE_REGISTRY_KEYS=()
+STORE_REGISTRY_PATHS=()
+store_registry_loaded=0
+
+# Normalize a registry local path for comparisons: expand a leading ~/
+# against $HOME and strip trailing slashes (the root / stays /). Pure:
+# prints the normalized path, changes nothing.
+normalize_store_path() {
+	local p="$1"
+	case "$p" in
+		"~") p="$HOME" ;;
+		"~"/*) p="$HOME/${p#"~/"}" ;;
+	esac
+	while [[ "$p" != "/" && "$p" == */ ]]; do p="${p%/}"; done
+	printf '%s\n' "$p"
+}
+
+# Parse the store registry into parallel arrays (namespaces in
+# STORE_REGISTRY_KEYS, normalized local paths in STORE_REGISTRY_PATHS).
+# Runs once per invocation; a missing registry file loads nothing, so an
+# unmigrated store behaves exactly like the pre-registry seam. A
+# malformed entry, a relative path, or a duplicate namespace is refused
+# by name: the registry is machine-written and drift in it should stop
+# resolution loudly instead of quietly re-binding boards.
+load_store_registry() {
+	(( store_registry_loaded )) && return 0
+	store_registry_loaded=1
+	local reg="$TASKS_DEV_ROOT/tasks/mapping.yaml"
+	[[ -r "$reg" ]] || return 0
+	local line ns path norm i
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		line="${line%"${line##*[![:space:]]}"}"
+		line="${line#"${line%%[![:space:]]*}"}"
+		if [[ -z "$line" || "$line" == \#* ]]; then continue; fi
+		if [[ "$line" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*):[[:space:]]*(.+)$ ]]; then
+			ns="${BASH_REMATCH[1]}"
+			path="${BASH_REMATCH[2]}"
+		else
+			die "malformed entry in $reg: expected one flat 'name: /local/path' line, got: $line"
+		fi
+		case "$path" in
+			/*|~|~/*) ;;
+			*) die "relative local path for '$ns' in $reg: registry paths are absolute or ~/-prefixed" ;;
+		esac
+		for i in "${!STORE_REGISTRY_KEYS[@]}"; do
+			if [[ "${STORE_REGISTRY_KEYS[i]}" == "$ns" ]]; then
+				die "duplicate registry entry for '$ns' in $reg: one namespace binds one local path"
+			fi
+		done
+		norm="$(normalize_store_path "$path")"
+		STORE_REGISTRY_KEYS+=("$ns")
+		STORE_REGISTRY_PATHS+=("$norm")
+	done < "$reg"
+}
+
+# Registry forward lookup: the local path a namespace is bound to, into
+# REGISTRY_LOCAL_PATH in the caller's shell. Returns 0 on a hit; returns
+# 1 with an empty value when the namespace is unregistered.
+store_registry_path_for_namespace() {
+	local i
+	REGISTRY_LOCAL_PATH=""
+	for i in "${!STORE_REGISTRY_KEYS[@]}"; do
+		if [[ "${STORE_REGISTRY_KEYS[i]}" == "$1" ]]; then
+			REGISTRY_LOCAL_PATH="${STORE_REGISTRY_PATHS[i]}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Registry reverse lookup: the namespace a local project path is bound
+# to, into REGISTRY_NAMESPACE in the caller's shell. Returns 0 on a hit;
+# returns 1 with an empty value when the path is unregistered.
+store_registry_namespace_for_path() {
+	local i norm
+	norm="$(normalize_store_path "$1")"
+	REGISTRY_NAMESPACE=""
+	for i in "${!STORE_REGISTRY_KEYS[@]}"; do
+		if [[ "${STORE_REGISTRY_PATHS[i]}" == "$norm" ]]; then
+			REGISTRY_NAMESPACE="${STORE_REGISTRY_KEYS[i]}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Collision refusal (the seam review's routed finding): a namespace the
+# registry binds to a different project refuses by name instead of
+# silently crossing boards. <origin> describes the claim for the error
+# message, <namespace> is the contested name, <root> is the claiming
+# project's local path. Unregistered namespaces pass; an exact bind
+# match passes.
+refuse_registry_namespace_conflict() {
+	local origin="$1" ns="$2" root="$3" bound
+	if store_registry_path_for_namespace "$ns"; then
+		bound="$REGISTRY_LOCAL_PATH"
+		if [[ "$bound" != "$(normalize_store_path "$root")" ]]; then
+			die "store namespace collision: $origin claims namespace '$ns' but $TASKS_DEV_ROOT/tasks/mapping.yaml binds '$ns' to $bound; fix the claim or the registry entry rather than crossing into another project's board"
+		fi
+	fi
+}
+
 # Resolve the board directory: explicit --dir wins, then the TASKS_DIR
-# pin, then the project's existing central-store slice, then the legacy
-# upward search, else the bare ./.tasks default. The optional second
+# pin, then the project's explicit store mapping (the nearest .tasks-map
+# marker naming the namespace, else the registry's reverse lookup of the
+# derived project path), then the derived central-store slice, then the
+# legacy upward search, else the bare ./.tasks default. An explicit
+# mapping whose slice does not exist yet suppresses the derived guesses
+# below it and falls to the legacy search, so planting a marker or a
+# registry entry never silently re-homes a project onto a neighboring
+# namespace while its slice is still staging. The optional second
 # argument (create mode, passed by init) additionally claims a
-# not-yet-existing store slice of a dev-root project as the last resort
-# before the bare fallback, so unpinned init inside such a project
-# scaffolds the store location instead of refusing; every other verb
-# resolves through the same precedence with no create mode, which is what
-# keeps the slice's existence the single switch that migrates a project
-# from its legacy local board to the store.
+# not-yet-existing slice as the last resort before the bare fallback: the
+# marker's namespace first, then the registry's, then a dev-walk
+# derivation, so unpinned init scaffolds the explicit target when one
+# exists and the store location for unmapped dev-root projects; every
+# other verb resolves through the same precedence with no create mode,
+# which is what keeps the slice's existence the single switch that
+# migrates a project from its legacy local board to the store. A derived
+# name the registry binds to a different project refuses with a store
+# namespace collision error instead of resolving.
 resolve_tasks_dir() {
-	local explicit="${1:-}" create="${2:-}" dir
+	local explicit="${1:-}" create="${2:-}" dir slice reg_ns=""
 	if [[ -n "$explicit" ]]; then RESOLVED_VIA=flag; RESOLVED_TASKS_DIR="$explicit"; return; fi
 	if [[ -n "${TASKS_DIR:-}" ]]; then RESOLVED_VIA=env; RESOLVED_TASKS_DIR="$TASKS_DIR"; return; fi
 	# The empty-slice return is the no-project outcome the walkup and
 	# fallback branches below consume, so it is consumed here: a bare call
 	# returning non-zero would trip set -e and kill the verb silently.
+	project_tasks_marker || true
+	load_store_registry
 	project_store_slice || true
-	if [[ -n "$PROJECT_STORE_SLICE" && -d "$PROJECT_STORE_SLICE" ]]; then
-		RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+	if [[ -n "$MARKER_NAMESPACE" ]]; then
+		refuse_registry_namespace_conflict "$TASKS_MAP_MARKER at $MARKER_DIR" "$MARKER_NAMESPACE" "$MARKER_DIR"
+		slice="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"
+		if [[ -d "$slice" ]]; then RESOLVED_VIA=marker; RESOLVED_TASKS_DIR="$slice"; return; fi
+	elif store_registry_namespace_for_path "$PROJECT_ROOT"; then
+		reg_ns="$REGISTRY_NAMESPACE"
+		slice="$TASKS_DEV_ROOT/tasks/$reg_ns"
+		if [[ -d "$slice" ]]; then RESOLVED_VIA=registry; RESOLVED_TASKS_DIR="$slice"; return; fi
+	else
+		if [[ -n "$PROJECT_STORE_SLICE" && -d "$PROJECT_STORE_SLICE" ]]; then
+			refuse_registry_namespace_conflict "the derived namespace of this project (root $PROJECT_ROOT)" "${PROJECT_STORE_SLICE##*/}" "$PROJECT_ROOT"
+			RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+		fi
 	fi
 	dir="$PWD"
 	while [[ "$dir" != "/" ]]; do
 		if [[ -d "$dir/.tasks" ]]; then RESOLVED_VIA=walkup; RESOLVED_TASKS_DIR="$dir/.tasks"; return; fi
 		dir="$(dirname "$dir")"
 	done
-	if [[ "$create" == "create" && "$PROJECT_ROOT_VIA" == "dev-walk" ]]; then
-		RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+	if [[ "$create" == "create" ]]; then
+		if [[ -n "$MARKER_NAMESPACE" ]]; then
+			RESOLVED_VIA=marker; RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"; return
+		fi
+		if [[ -n "$reg_ns" ]]; then
+			RESOLVED_VIA=registry; RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$reg_ns"; return
+		fi
+		if [[ "$PROJECT_ROOT_VIA" == "dev-walk" ]]; then
+			refuse_registry_namespace_conflict "the derived namespace of this project (root $PROJECT_ROOT)" "${PROJECT_STORE_SLICE##*/}" "$PROJECT_ROOT"
+			RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+		fi
 	fi
 	RESOLVED_VIA=fallback
 	RESOLVED_TASKS_DIR="$PWD/.tasks"
+
 }
 
 # Refuse the bare ./.tasks last resort for mutations: a write pinned by

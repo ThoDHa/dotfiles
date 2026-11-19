@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1334
+EXPECTED_ASSERTIONS=1354
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -6433,6 +6433,140 @@ if [[ -f "$seam_store/dotfiles/dashboard.md" && ! -e "$seam_store/.dotfiles" ]];
 else
 	bad "the scaffold lands at the normalized slice, never a dotted one"
 fi
+
+section "store seam: marker-resolved board"
+# The explicit mapping layer (STORE-1 marker-registry): a .tasks-map marker
+# in the project directory names the store namespace and outranks both the
+# derived slice name and the legacy walk. This section runs before any
+# mapping.yaml exists, pinning that the marker layer alone carries
+# resolution and that a missing registry is no error.
+mkdir -p "$seam_devroot/mapproj/nested" "$seam_store/mapmark"
+printf 'namespace: mapmark\n' > "$seam_devroot/mapproj/.tasks-map"
+seam_out="$(seam_t "$seam_devroot/mapproj/nested" init)"
+assert_contains "a marker names the namespace every cwd inside the project resolves" "$seam_out" "$seam_store/mapmark"
+seam_task="$(seam_t "$seam_devroot/mapproj" new --id SEAM-6 --name "Marker Resolved Board" --status Triage)"
+assert_contains "new writes into the marker-named slice" "$seam_task" "$seam_store/mapmark/current/"
+if [[ ! -e "$seam_store/mapproj" && ! -e "$seam_devroot/mapproj/.tasks" ]]; then
+	ok "the marker suppresses the derived slice and the legacy board alike"
+else
+	bad "the marker suppresses the derived slice and the legacy board alike"
+fi
+
+section "store seam: registry-resolved board"
+# The store-side registry (mapping.yaml at the store root) binds a
+# namespace to a local path; the seam reverse-lookups the derived project
+# root when no marker exists, so a project can carry a namespace its
+# directory name does not suggest.
+mkdir -p "$seam_devroot/mapreg" "$seam_store/regname"
+printf '# store registry: one "name: /local/path" entry per line\nregname: %s\n' "$seam_devroot/mapreg" > "$seam_store/mapping.yaml"
+seam_out="$(seam_t "$seam_devroot/mapreg" init)"
+assert_contains "a registry entry binds the derived project root to its namespace" "$seam_out" "$seam_store/regname"
+seam_task="$(seam_t "$seam_devroot/mapreg" new --id SEAM-7 --name "Registry Resolved Board" --status Triage)"
+assert_contains "new writes into the registry-named slice" "$seam_task" "$seam_store/regname/current/"
+if [[ ! -e "$seam_store/mapreg" ]]; then
+	ok "the registry binding suppresses the derived-name slice"
+else
+	bad "the registry binding suppresses the derived-name slice"
+fi
+
+section "store seam: collision refusal"
+# A namespace the registry binds to a different project refuses by name
+# instead of silently crossing boards (the seam review's routed finding):
+# an unrelated checkout's derived git-basename fallback refuses writes,
+# a marker contradicting the registry refuses even reads, and the
+# registered owner keeps working throughout.
+mkdir -p "$seam_devroot/clashproj" "$seam_store/clashname"
+printf 'clashname: %s\n' "$seam_devroot/clashproj" >> "$seam_store/mapping.yaml"
+seam_t "$seam_devroot/clashproj" init >/dev/null
+seam_task="$(seam_t "$seam_devroot/clashproj" new --id CLASH-1 --name "Collision Owner" --status Triage)"
+assert_contains "the registered owner resolves and writes its bound namespace" "$seam_task" "$seam_store/clashname/current/"
+seam_clash_repo="$(mktemp -d)"
+mkdir -p "$seam_clash_repo/clashname"
+git -C "$seam_clash_repo/clashname" init -q
+seam_rc=0
+seam_err="$(seam_t "$seam_clash_repo/clashname" log nowhere.md --from probe "cross-board write attempt" </dev/null 2>&1 >/dev/null)" || seam_rc=$?
+if ((seam_rc != 0)); then
+	ok "an unrelated repo whose basename collides with a bound namespace refuses to write"
+else
+	bad "an unrelated repo whose basename collides with a bound namespace refuses to write"
+fi
+assert_contains "the refusal names the collision" "$seam_err" "store namespace collision"
+assert_eq "the refused write crossed nothing into the bound slice" "1" "$(ls "$seam_store/clashname/current/" | wc -l)"
+mkdir -p "$seam_devroot/badmarker"
+printf 'namespace: clashname\n' > "$seam_devroot/badmarker/.tasks-map"
+seam_rc=0
+seam_err="$(seam_t "$seam_devroot/badmarker" show nowhere.md </dev/null 2>&1 >/dev/null)" || seam_rc=$?
+if ((seam_rc != 0)); then
+	ok "a marker contradicting the registry refuses reads too"
+else
+	bad "a marker contradicting the registry refuses reads too"
+fi
+assert_contains "the marker contradiction names the collision" "$seam_err" "store namespace collision"
+rm -rf "$seam_clash_repo"
+
+section "store seam: marker wins over derived and legacy"
+mkdir -p "$seam_devroot/dualproj" "$seam_store/dualproj" "$seam_store/markwin"
+printf 'namespace: markwin\n' > "$seam_devroot/dualproj/.tasks-map"
+seam_t "$seam_devroot/dualproj" init --dir "$seam_devroot/dualproj/.tasks" >/dev/null
+seam_out="$(seam_t "$seam_devroot/dualproj" init)"
+assert_contains "the marker outranks the derived slice and the legacy board together" "$seam_out" "$seam_store/markwin"
+seam_task="$(seam_t "$seam_devroot/dualproj" new --id SEAM-8 --name "Marker Wins" --status Triage)"
+if [[ -f "$seam_task" && "$seam_task" == "$seam_store/markwin/current/"* ]] \
+	&& ! ls "$seam_devroot/dualproj/.tasks/current/"SEAM-8-*.md >/dev/null 2>&1; then
+	ok "the write lands in the marker slice, never the legacy board"
+else
+	bad "the write lands in the marker slice, never the legacy board"
+fi
+if [[ ! -f "$seam_store/dualproj/dashboard.md" ]]; then
+	ok "the derived-name slice stays untouched beside a marker"
+else
+	bad "the derived-name slice stays untouched beside a marker"
+fi
+
+section "store seam: init claims the explicit namespace when no slice exists"
+# Create mode stays init-only; its claim now follows the explicit mapping
+# first (marker, then registry) before the dev-walk derivation, and the
+# derived claim is collision-checked against the registry, so a project
+# mapped before its slice is staged scaffolds the named namespace and an
+# unmapped-but-bound name is never minted. Dedicated dev root: the shared
+# seam root sits under the battery board, whose legacy walkup would
+# preempt the create branch.
+seam_map_root="$(mktemp -d)"
+mkdir -p "$seam_map_root/mkinproj" "$seam_map_root/reginit" "$seam_map_root/noinproj" "$seam_map_root/tasks"
+printf 'namespace: mkinmark\n' > "$seam_map_root/mkinproj/.tasks-map"
+printf 'namespace: nomark\n' > "$seam_map_root/noinproj/.tasks-map"
+printf 'regmark: %s\n' "$seam_map_root/reginit" > "$seam_map_root/tasks/mapping.yaml"
+seam_out="$(cd "$seam_map_root/mkinproj" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_map_root" "$TASKS_BIN" init)"
+assert_contains "init claims the marker namespace for a mapped project with no slice" "$seam_out" "$seam_map_root/tasks/mkinmark"
+seam_out="$(cd "$seam_map_root/reginit" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_map_root" "$TASKS_BIN" init)"
+assert_contains "init claims the registry namespace for a declared project with no slice" "$seam_out" "$seam_map_root/tasks/regmark"
+seam_rc=0
+seam_err="$(cd "$seam_map_root/noinproj" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_map_root" "$TASKS_BIN" log nowhere.md --from probe "claim attempt" </dev/null 2>&1 >/dev/null)" || seam_rc=$?
+if ((seam_rc != 0)) && [[ ! -e "$seam_map_root/tasks/nomark" && ! -e "$seam_map_root/tasks/noinproj" && ! -e "$seam_map_root/noinproj/.tasks" ]]; then
+	ok "a mapped project whose slice is still missing refuses writes and leaves no side effect"
+else
+	bad "a mapped project whose slice is still missing refuses writes and leaves no side effect"
+fi
+rm -rf "$seam_map_root"
+
+section "store seam: bare repos and no-git cwds keep the fallback refusal"
+# Derivation yields nothing for a bare repository and for a directory with
+# no git work tree, so both fall through to the bare fallback and writers
+# refuse it (the seam review's fixture gap).
+seam_bare="$(mktemp -d)"
+git -C "$seam_bare" init -q --bare
+if seam_t "$seam_bare" log nowhere.md --from probe "message" </dev/null >/dev/null 2>&1; then
+	bad "a bare repository outside the dev root refuses the unpinned write"
+else
+	ok "a bare repository outside the dev root refuses the unpinned write"
+fi
+seam_nogit="$(mktemp -d)"
+if seam_t "$seam_nogit" log nowhere.md --from probe "message" </dev/null >/dev/null 2>&1; then
+	bad "a directory with no git repository refuses the unpinned write"
+else
+	ok "a directory with no git repository refuses the unpinned write"
+fi
+rm -rf "$seam_bare" "$seam_nogit"
 
 section "harness self-pin controls"
 
