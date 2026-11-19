@@ -1045,7 +1045,11 @@ usage() {
 Usage: tasks <command> [options]
 
 Commands:
-  init [--dir DIR]                     Scaffold a .tasks/ directory and empty board.
+  init [--dir DIR]                     Scaffold a .tasks/ directory and empty
+                                       board; unpinned init inside a project
+                                       under the dev root scaffolds the
+                                       project's central-store slice instead
+                                       (see the board location paragraph).
   render [--dir DIR]                   Rebuild dashboard.md from the task files (locked).
   new --id ID --name NAME [opts]       Create a task file with canonical header fields.
                                        opts: --status S (Triage or Ready; a test board
@@ -1292,17 +1296,25 @@ Commands:
 Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
 a value that itself begins with "--" (e.g. --name=--force).
 
-The .tasks/ directory is located from --dir, then $TASKS_DIR, then by walking
-up from the current directory, then ./.tasks as a last resort. Writing
-commands refuse the bare last resort; show and render only warn about it.
+The board directory is located from --dir, then $TASKS_DIR, then the
+project's central-store slice, then by walking up from the current
+directory, then ./.tasks as a last resort. The store maps a project under
+$TASKS_DEV_ROOT (default /home/khave/dev) to $TASKS_DEV_ROOT/tasks/<project>
+where <project> is the topmost directory under the dev root with any leading
+dot stripped (.dotfiles maps to tasks/dotfiles); a cwd outside the dev root
+falls back to the git repository root and its basename. An existing slice
+takes over every board operation; until it exists the legacy local search
+above runs unchanged. Writing commands refuse the bare last resort; show and
+render only warn about it.
 EOF
 }
 
 # How the last resolve_tasks_dir call reached its answer: flag (--dir), env
-# (TASKS_DIR), walkup (an upward search that found an existing board), or
-# fallback (the bare ./.tasks last resort). The guards below hang off this
-# marker: writers refuse the fallback root, readers only warn, and every
-# other branch passes either way.
+# (TASKS_DIR), store (the project's central-store slice), walkup (an upward
+# search that found an existing board), or fallback (the bare ./.tasks last
+# resort). The guards below hang off this marker: writers refuse the
+# fallback root, readers only warn, and every other branch passes either
+# way.
 RESOLVED_VIA=""
 # The resolved directory itself. Resolution assigns both globals in the
 # caller's shell instead of printing the directory: a printf contract
@@ -1311,16 +1323,93 @@ RESOLVED_VIA=""
 # them.
 RESOLVED_TASKS_DIR=""
 
-# Resolve the .tasks directory: explicit value wins, else search upward, else default.
+# The dev root the central board store hangs off. A project's board lives
+# as a slice under $TASKS_DEV_ROOT/tasks instead of a per-project .tasks/
+# directory; the default pins this machine's layout (the store repo sits
+# beside the projects it mirrors at /home/khave/dev/tasks), and the env
+# override relocates the whole geometry for scratch fixtures and
+# non-standard checkouts. A trailing slash is stripped so the prefix and
+# parent comparisons below stay exact, and a value that strips to nothing
+# is refused rather than silently matching every path.
+TASKS_DEV_ROOT="${TASKS_DEV_ROOT:-/home/khave/dev}"
+TASKS_DEV_ROOT="${TASKS_DEV_ROOT%/}"
+[[ -n "$TASKS_DEV_ROOT" ]] || die "TASKS_DEV_ROOT must name the dev root the central store hangs off; got an empty value"
+
+# How the last project_store_slice call derived its project root: none (no
+# derivable root), dev-walk (the topmost directory under the dev root), or
+# git-fallback (the git repository root for a cwd outside the dev root).
+# init's create mode claims a not-yet-existing slice only for a dev-walk
+# root, so a non-dev project keeps its legacy creation behavior.
+PROJECT_ROOT_VIA="none"
+# The derived slice path, empty when no project root is derivable. Both
+# globals are assigned in the caller's shell on every call, the same
+# contract resolve_tasks_dir uses: a $() command substitution runs the
+# derivation in a subshell whose assignments never reach the caller, so
+# callers invoke the function directly instead of wrapping it.
+PROJECT_STORE_SLICE=""
+
+# Derive the project's store slice path from the invocation cwd. The
+# project root is the topmost directory under the dev root (walk up until
+# the parent is the dev root, so every directory of one project maps to
+# the same slice), named by its dev-relative path with any leading dot
+# stripped (.dotfiles maps to tasks/dotfiles); a cwd outside the dev root
+# falls back to the git repository root, named by its basename. Pure
+# derivation with no filesystem opinion of its own: the caller decides
+# what existence of the slice means. Assigns PROJECT_STORE_SLICE and
+# PROJECT_ROOT_VIA in the caller's shell, prints nothing, and returns 0
+# when a project root is derivable; returns 1 with an empty slice when
+# neither the dev-root walk nor a git repository yields one.
+project_store_slice() {
+	local dir="$PWD" root rel
+	PROJECT_ROOT_VIA="none"
+	PROJECT_STORE_SLICE=""
+	if [[ "$dir" == "$TASKS_DEV_ROOT"/* ]]; then
+		while [[ "$(dirname "$dir")" != "$TASKS_DEV_ROOT" ]]; do
+			dir="$(dirname "$dir")"
+		done
+		root="$dir"
+		rel="${root#"$TASKS_DEV_ROOT"/}"
+		PROJECT_ROOT_VIA=dev-walk
+	else
+		root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || return 1
+		[[ "$root" != "/" ]] || return 1
+		rel="$(basename "$root")"
+		PROJECT_ROOT_VIA=git-fallback
+	fi
+	rel="${rel#.}"
+	if [[ -z "$rel" ]]; then PROJECT_ROOT_VIA="none"; return 1; fi
+	PROJECT_STORE_SLICE="$TASKS_DEV_ROOT/tasks/$rel"
+}
+
+# Resolve the board directory: explicit --dir wins, then the TASKS_DIR
+# pin, then the project's existing central-store slice, then the legacy
+# upward search, else the bare ./.tasks default. The optional second
+# argument (create mode, passed by init) additionally claims a
+# not-yet-existing store slice of a dev-root project as the last resort
+# before the bare fallback, so unpinned init inside such a project
+# scaffolds the store location instead of refusing; every other verb
+# resolves through the same precedence with no create mode, which is what
+# keeps the slice's existence the single switch that migrates a project
+# from its legacy local board to the store.
 resolve_tasks_dir() {
-	local explicit="${1:-}"
+	local explicit="${1:-}" create="${2:-}" dir
 	if [[ -n "$explicit" ]]; then RESOLVED_VIA=flag; RESOLVED_TASKS_DIR="$explicit"; return; fi
 	if [[ -n "${TASKS_DIR:-}" ]]; then RESOLVED_VIA=env; RESOLVED_TASKS_DIR="$TASKS_DIR"; return; fi
-	local dir="$PWD"
+	# The empty-slice return is the no-project outcome the walkup and
+	# fallback branches below consume, so it is consumed here: a bare call
+	# returning non-zero would trip set -e and kill the verb silently.
+	project_store_slice || true
+	if [[ -n "$PROJECT_STORE_SLICE" && -d "$PROJECT_STORE_SLICE" ]]; then
+		RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+	fi
+	dir="$PWD"
 	while [[ "$dir" != "/" ]]; do
 		if [[ -d "$dir/.tasks" ]]; then RESOLVED_VIA=walkup; RESOLVED_TASKS_DIR="$dir/.tasks"; return; fi
 		dir="$(dirname "$dir")"
 	done
+	if [[ "$create" == "create" && "$PROJECT_ROOT_VIA" == "dev-walk" ]]; then
+		RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+	fi
 	RESOLVED_VIA=fallback
 	RESOLVED_TASKS_DIR="$PWD/.tasks"
 }
@@ -2017,7 +2106,7 @@ cmd_init() {
 			*) die "init: unknown argument: $1" ;;
 		esac
 	done
-	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
+	local tasks_dir; resolve_tasks_dir "$dir" create; tasks_dir="$RESOLVED_TASKS_DIR"
 	refuse_fallback_tasks_dir "$tasks_dir"
 	mkdir -p "$tasks_dir/$CURRENT_DIR" "$tasks_dir/$ARCHIVE_DIR"
 	render "$tasks_dir"

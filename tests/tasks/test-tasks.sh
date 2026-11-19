@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1316
+EXPECTED_ASSERTIONS=1334
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -6314,6 +6314,125 @@ for ts in 1900-02-28 1900-03-01 2100-02-28 2100-03-01; do
 		"$(date -u -d "${ts}T00:00:00Z" +%s)" \
 		"$(awk -f "$m_epoch_pin_prog")"
 done
+
+# ---------------------------------------------------------------------------
+# Store seam (STORE-1 bootstrap slice): the project-to-store board mapping.
+# Every seam invocation runs the CLI in a subshell with its own cwd and a
+# scratch dev-root override, so the fixtures exercise the real resolution
+# end to end while the battery's own TASKS_DIR pin, clock pin, and the real
+# dev root and store stay untouched (the pins are unset inside the subshell
+# only; the CLI refuses the clock without TASKS_DIR, so both must go).
+
+seam_devroot="$ROOT/seam-devroot"
+seam_store="$seam_devroot/tasks"
+
+seam_t() { # <cwd> <args...>: run the CLI from <cwd> under the scratch dev root
+	local cwd="$1"; shift
+	(cd "$cwd" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_devroot" "$TASKS_BIN" "$@")
+}
+
+section "store seam: store-resolved board"
+mkdir -p "$seam_devroot/myproj/nested" "$seam_store/myproj"
+seam_out="$(seam_t "$seam_devroot/myproj/nested" init)"
+assert_contains "a dev project with a slice resolves the store from a nested cwd" "$seam_out" "$seam_store/myproj"
+seam_task="$(seam_t "$seam_devroot/myproj" new --id SEAM-1 --name "Store Resolved Board" --status Triage)"
+assert_contains "new writes the task file into the store slice" "$seam_task" "$seam_store/myproj/current/"
+if [[ ! -e "$seam_devroot/myproj/.tasks" ]]; then
+	ok "no local .tasks appears beside a store-resolved board"
+else
+	bad "no local .tasks appears beside a store-resolved board"
+fi
+seam_task_base="$(basename "$seam_task")"
+seam_t "$seam_devroot/myproj" log "$seam_task_base" --from worker "store checkpoint" >/dev/null
+assert_contains "log lands in the store slice's task file" "$(cat "$seam_task")" "store checkpoint"
+seam_out="$(seam_t "$seam_devroot/myproj" show "$seam_task_base" --section "Work Log")"
+assert_contains "show reads the store slice's task file" "$seam_out" "store checkpoint"
+assert_contains "the rendered dashboard lives inside the store slice" "$(cat "$seam_store/myproj/dashboard.md")" "SEAM-1"
+
+section "store seam: init creates the store slice for a slice-less dev project"
+# init is the only verb with create mode: unpinned init in a dev project
+# with no slice and no local board claims the store location, while any
+# other verb refuses and leaves no slice behind. The probe runs on its
+# own dev root outside the battery scratch tree: the shared seam root
+# sits under the pinned battery board, so the legacy walkup would find
+# that board before the create branch could claim the slice.
+seam_init_root="$(mktemp -d)"
+mkdir -p "$seam_init_root/freshproj/deeper" "$seam_init_root/noverbproj"
+seam_out="$(cd "$seam_init_root/freshproj/deeper" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_init_root" "$TASKS_BIN" init)"
+assert_contains "unpinned init in a slice-less dev project scaffolds the store slice" "$seam_out" "$seam_init_root/tasks/freshproj"
+if [[ -f "$seam_init_root/tasks/freshproj/dashboard.md" && ! -e "$seam_init_root/freshproj/.tasks" ]]; then
+	ok "the scaffold lands in the store, never a local .tasks beside it"
+else
+	bad "the scaffold lands in the store, never a local .tasks beside it"
+fi
+if (cd "$seam_init_root/noverbproj" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_init_root" "$TASKS_BIN" log does-not-exist "message" </dev/null >/dev/null 2>&1); then
+	bad "a write verb other than init still refuses when no board exists anywhere"
+else
+	ok "a write verb other than init still refuses when no board exists anywhere"
+fi
+if [[ ! -e "$seam_init_root/tasks/noverbproj" ]]; then
+	ok "no store slice appears as a side effect of the refused write"
+else
+	bad "no store slice appears as a side effect of the refused write"
+fi
+rm -rf "$seam_init_root"
+
+section "store seam: legacy fallback board"
+mkdir -p "$seam_devroot/legacyproj/deep"
+seam_t "$seam_devroot/legacyproj" init --dir "$seam_devroot/legacyproj/.tasks" >/dev/null
+seam_task="$(seam_t "$seam_devroot/legacyproj" new --id SEAM-2 --name "Legacy Fallback Board" --status Triage)"
+if [[ -f "$seam_task" && "$seam_task" == "$seam_devroot/legacyproj/.tasks/current/"* && ! -e "$seam_store/legacyproj" ]]; then
+	ok "a dev project without a slice keeps the local .tasks board"
+else
+	bad "a dev project without a slice keeps the local .tasks board"
+fi
+seam_task_base="$(basename "$seam_task")"
+seam_out="$(seam_t "$seam_devroot/legacyproj/deep" show "$seam_task_base" --json)"
+assert_contains "the legacy board resolves from a nested cwd through the walkup" "$seam_out" "SEAM-2"
+
+section "store seam: non-dev project unaffected"
+# Outside the battery root's chain, like the canonical-root guard fixture:
+# a cwd under $ROOT would walk up into the battery board and mask the
+# bare-fallback behavior under test. Cleaned up at the section's end (the
+# shared EXIT trap owns only the battery's own roots).
+seam_nonde="$(mktemp -d)"
+# The git-root fallback derives the slice from the repo basename, so the
+# probe slice carries the scratch repo's real name, not a hardcoded one.
+seam_nonde_slice="$seam_store/$(basename "$seam_nonde")"
+git -C "$seam_nonde" init -q
+if seam_t "$seam_nonde" init </dev/null >/dev/null 2>&1; then
+	bad "a non-dev project still refuses the unpinned bare fallback"
+else
+	ok "a non-dev project still refuses the unpinned bare fallback"
+fi
+seam_t "$seam_nonde" init --dir "$seam_nonde/.tasks" >/dev/null
+seam_task="$(seam_t "$seam_nonde" new --id SEAM-3 --name "Non Dev Unaffected" --status Triage)"
+if [[ -f "$seam_task" && "$seam_task" == "$seam_nonde/.tasks/current/"* && ! -e "$seam_nonde_slice" ]]; then
+	ok "a non-dev git repo without a slice keeps local behavior untouched"
+else
+	bad "a non-dev git repo without a slice keeps local behavior untouched"
+fi
+mkdir -p "$seam_nonde_slice"
+seam_out="$(seam_t "$seam_nonde" init)"
+assert_contains "the git-root fallback binds a non-dev repo to its basename slice" "$seam_out" "$seam_nonde_slice"
+seam_task="$(seam_t "$seam_nonde" new --id SEAM-4 --name "Slice Takes Over" --status Triage)"
+if [[ -f "$seam_task" && "$seam_task" == "$seam_nonde_slice/current/"* ]] \
+	&& ! ls "$seam_nonde/.tasks/current/"SEAM-4-*.md >/dev/null 2>&1; then
+	ok "an existing slice takes over writes even where a legacy board exists"
+else
+	bad "an existing slice takes over writes even where a legacy board exists"
+fi
+rm -rf "$seam_nonde"
+
+section "store seam: dotfiles mapping normalization"
+mkdir -p "$seam_devroot/.dotfiles/opencode/bin" "$seam_store/dotfiles"
+seam_out="$(seam_t "$seam_devroot/.dotfiles/opencode/bin" init)"
+assert_contains "the leading dot is stripped: .dotfiles maps to tasks/dotfiles" "$seam_out" "$seam_store/dotfiles"
+if [[ -f "$seam_store/dotfiles/dashboard.md" && ! -e "$seam_store/.dotfiles" ]]; then
+	ok "the scaffold lands at the normalized slice, never a dotted one"
+else
+	bad "the scaffold lands at the normalized slice, never a dotted one"
+fi
 
 section "harness self-pin controls"
 
