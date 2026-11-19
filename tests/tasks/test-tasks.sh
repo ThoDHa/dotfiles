@@ -11,6 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
+EXPECTED_ASSERTIONS=1316
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -47,7 +48,7 @@ edit_stderr_of() { # rest is the edit invocation; echoes its stderr
 # the same assertion meaningful when the battery runs unpinned.
 clock_today() { printf '%s\n' "${TASKS_TEST_CLOCK%% *}"; }
 
-echo "== init =="
+section "init"
 t init >/dev/null
 [[ -d "$TASKS_DIR/current" && -d "$TASKS_DIR/archive" && -f "$DASH" ]] \
 	&& ok "init scaffolds dirs and dashboard" || bad "init scaffolds dirs and dashboard"
@@ -56,7 +57,7 @@ for lane in "## Triage" "## Ready" "## In Progress" "## Blocked/Cancelled" "## C
 	assert_contains "board has lane $lane" "$board" "$lane"
 done
 
-echo "== init: idempotent on an existing board (G14 pin) =="
+section "init: idempotent on an existing board (G14 pin)"
 # Running init on a live board must scaffold nothing away and rewrite
 # nothing: both subdirs still exist, existing task files survive, and the
 # derived dashboard comes back byte-identical (init only ever renders,
@@ -71,7 +72,7 @@ assert_eq "init on an existing board leaves the dashboard byte-identical" "$idem
 rm -f "$f_idem"
 t render >/dev/null
 
-echo "== new =="
+section "new"
 f_ip="$(t new --id API-1 --name "Refactor the Auth Flow" --status "In Progress" --priority High)"
 f_tr="$(t new --id API-2 --name "Add Rate Limiting" --priority Low)"
 f_rd="$(t new --id API-3 --name "Document Endpoints" --status Ready --priority Medium)"
@@ -79,14 +80,14 @@ f_rd="$(t new --id API-3 --name "Document Endpoints" --status Ready --priority M
 assert_contains "new writes canonical header" "$(cat "$f_ip")" "**Owner:**"
 assert_contains "new sets Priority" "$(cat "$f_ip")" "**Priority:** High"
 
-echo "== set (progress + updated) =="
+section "set (progress + updated)"
 t set "$f_ip" Progress=45% >/dev/null
 assert_contains "set writes Progress" "$(header=$(awk '/^## /{exit}{print}' "$f_ip"); echo "$header")" "**Progress:** 45%"
 # Updated auto-refreshes and no duplicate Owner line appears
 owner_lines="$(grep -c '^\*\*Owner:\*\*' "$f_ip")"
 assert_eq "no duplicate Owner line after set" "1" "$owner_lines"
 
-echo "== lane placement =="
+section "lane placement"
 board="$(cat "$DASH")"
 # In Progress row carries the percentage and priority
 ip_row="$(grep -F 'Refactor the Auth Flow' <<<"$board")"
@@ -96,7 +97,7 @@ assert_contains "In Progress row links into current/" "$ip_row" "(./current/"
 assert_contains "Triage lane lists API-2 task" "$(awk '/^## Triage/{f=1} /^## Ready/{f=0} f' <<<"$board")" "Add Rate Limiting"
 assert_contains "Ready lane lists API-3 task" "$(awk '/^## Ready/{f=1} /^## In Progress/{f=0} f' <<<"$board")" "Document Endpoints"
 
-echo "== created column =="
+section "created column"
 assert_contains "new writes a canonical Created field" "$(cat "$f_tr")" "**Created:**"
 assert_contains "Triage header carries a Created column" "$board" "| Task | Priority | Created | Updated |"
 assert_contains "Ready header carries a Created column" "$board" "| Task | Priority | Created | Updated |"
@@ -134,18 +135,18 @@ rm -f "$legacy" "$undated"
 t render >/dev/null
 board="$(cat "$DASH")"
 
-echo "== idempotent render =="
+section "idempotent render"
 before="$(cat "$DASH")"
 t render >/dev/null
 after="$(cat "$DASH")"
 assert_eq "render is byte-identical on no change" "$before" "$after"
 
-echo "== Last updated is derived (newest Updated), not wall-clock =="
+section "Last updated is derived (newest Updated), not wall-clock"
 newest_updated="$(grep -hoP '^\*\*Updated:\*\*\s+\K.*' "$TASKS_DIR"/current/*.md | LC_ALL=C sort | tail -1)"
 last_line="$(grep -oP '^\*Last updated: \K.*(?=\*)' "$DASH")"
 assert_eq "Last updated equals newest task Updated" "$newest_updated" "$last_line"
 
-echo "== atomic claim (concurrent race, exactly one winner) =="
+section "atomic claim (concurrent race, exactly one winner)"
 outdir="$(mktemp -d)"
 for i in 1 2 3 4 5; do
 	( t claim "$f_tr" --owner "sess-$i" >"$outdir/$i.out" 2>&1; echo $? >"$outdir/$i.code" ) &
@@ -163,10 +164,10 @@ claimed_owner="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_tr")"
 assert_contains "Owner field set to the winning session" "$claimed_owner" "sess-"
 rm -rf "$outdir"
 
-echo "== double claim rejected =="
+section "double claim rejected"
 refuse "second claim rejected" claim "$f_tr" --owner "intruder"
 
-echo "== release clears claim and owner =="
+section "release clears claim and owner"
 # The release runs as the winning race session: a claim release is the
 # owner's op (foreign release is refused under the G15 narrowing), and
 # the token the claim minted is required.
@@ -177,7 +178,7 @@ assert_eq "Owner cleared on release" "" "${owner_after:-}"
 assert_eq "release leaves the Owner field present and empty" "1" \
 	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
 
-echo "== release: foreign release refused, recovery is manager-owned (G15 change) =="
+section "release: foreign release refused, recovery is manager-owned (G15 change)"
 # BEHAVIOR CHANGE (documented, ORCH-4-4-4): the old G15 pin "any session may
 # release a foreign claim" narrowed under generation-token claims, on all
 # three release arms (release, close, terminal set). The broad
@@ -222,7 +223,7 @@ assert_eq "the owner's own release clears Owner" "" "${owner_cross:-}"
 rm -f "$f_xo" "$xo_err_file"
 t render >/dev/null
 
-echo "== ABA guard: a stale generation's late release cannot drop a successor's claim =="
+section "ABA guard: a stale generation's late release cannot drop a successor's claim"
 # The interleaving, run end to end: A claims (generation 1); the manager
 # reclaims to B (generation 2); A wakes and releases late. Session identity
 # strings can replay (hostname-pid reuse, duplicated TASKS_SESSION), so the
@@ -317,7 +318,7 @@ assert_contains "the owner's close lands the closure" "$(grep -oP '^\*\*Status:\
 rm -f "$f_fc"
 t render >/dev/null
 
-echo "== expiry-on-read: an expired claim refuses takeover and routes to the manager =="
+section "expiry-on-read: an expired claim refuses takeover and routes to the manager"
 # The battery owns the sidecar format for fixtures, so the created stamp is
 # backdated by hand rather than through the clock seam (the seam exists for
 # timeline backdating, not ownership). The default TTL is 1440 minutes (24h,
@@ -358,7 +359,7 @@ TASKS_SESSION=newcomer t release "$f_exp" --generation "$(gen_of "$f_exp")" >/de
 rm -f "$f_exp"
 t render >/dev/null
 
-echo "== claim heartbeat: log and report checkpoints refresh the owning session's timer =="
+section "claim heartbeat: log and report checkpoints refresh the owning session's timer"
 # The heartbeat measures silence since the last checkpoint, so a log or
 # report deposit by the owning session re-stamps created; a foreign
 # session's checkpoint never extends the claim and says so on stderr
@@ -388,7 +389,7 @@ TASKS_SESSION=session-hb t release "$f_hb" --generation "$(gen_of "$f_hb")" >/de
 rm -f "$f_hb"
 t render >/dev/null
 
-echo "== claim.expired records once per generation =="
+section "claim.expired records once per generation"
 # N takeover probes against one stale claim append one recovery record,
 # not N: the ledger tail carries the open expired episode for the
 # generation, and reclaim closes it so a re-expired successor records
@@ -415,7 +416,7 @@ TASKS_SESSION=third t release "$f_e6" --generation "$(gen_of "$f_e6")" >/dev/nul
 rm -f "$f_e6"
 t render >/dev/null
 
-echo "== live-board migration: legacy owner-only sidecars gain tokens, owners survive =="
+section "live-board migration: legacy owner-only sidecars gain tokens, owners survive"
 # Three active claims (the live-board count this change must preserve):
 # migration rewrites each sidecar in place on the first write-path touch,
 # keeps the owner byte-exact, backdates created from the sidecar mtime, and
@@ -464,7 +465,7 @@ assert_contains "the manager reclaims a legacy claim through the explicit surfac
 rm -f "$f_m1" "$f_m2" "$f_m3" "$f_m1.claim" "$f_m3.claim"
 t render >/dev/null
 
-echo "== reclaim: manager-owned recovery, explicit and idempotent =="
+section "reclaim: manager-owned recovery, explicit and idempotent"
 f_rec="$(t new --id REC-1 --name "Reclaim Target")"
 rec_out="$(TASKS_SESSION=manager t reclaim "$f_rec")"
 assert_contains "reclaim without a claim is a no-op success" "$rec_out" "no claim to reclaim"
@@ -485,7 +486,7 @@ TASKS_SESSION=session-successor t release "$f_rec" --generation "$rec_gen3" >/de
 t render >/dev/null
 rm -f "$f_rec"
 
-echo "== claims sweep states: fresh, expired, orphan, terminal =="
+section "claims sweep states: fresh, expired, orphan, terminal"
 f_cl_fresh="$(t new --id CLF-1 --name "Claim Fresh")"
 t claim "$f_cl_fresh" --owner session-fresh >/dev/null
 f_cl_dead="$(t new --id CLD-1 --name "Claim Dead")"
@@ -507,7 +508,7 @@ TASKS_SESSION=session-fresh t release "$f_cl_fresh" --generation "$(gen_of "$f_c
 rm -f "$f_cl_dead" "$f_cl_dead.claim" "$TASKS_DIR/current/GHOST-1.md.claim" "$f_cl_term" "$f_cl_term.claim"
 t render >/dev/null
 
-echo "== typed event ledger: claim lifecycle and attempt provenance =="
+section "typed event ledger: claim lifecycle and attempt provenance"
 # The ledger rides the same locked spans as the writes it records: claim
 # lands acquired+started, the owner's release lands released+completed,
 # and the completed record carries the attempt's final provenance (the
@@ -551,7 +552,7 @@ assert_eq "attempt.completed pairs with the started attempt id" "$ev_aid" "$ev_c
 assert_contains "the release-verb completion records the not-run outcome" "$ev_completed" '"outcome":"not-run"'
 assert_contains "the completed record names the releasing session" "$ev_completed" '"released_by":"session-worker"'
 
-echo "== typed event ledger: outcome per release arm =="
+section "typed event ledger: outcome per release arm"
 f_evc="$(t new --id EVT-2 --name "Event Outcome Close")"
 sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_evc"
 t claim "$f_evc" --owner session-closer >/dev/null
@@ -614,7 +615,7 @@ TASKS_SESSION=session-outcomer t release "$f_evo" --generation "$evo_gen" >/dev/
 rm -f "$f_evf" "$f_eve" "$f_evo"
 t render >/dev/null
 
-echo "== typed event ledger: filters and limits =="
+section "typed event ledger: filters and limits"
 ev_all_json="$(t events --json)"
 ev_all_total="$(grep -oP '"total":\K[0-9]+' <<<"$ev_all_json")"
 ev_ledger_lines="$(wc -l <"$TASKS_DIR/events.log")"
@@ -637,7 +638,7 @@ assert_contains "the cross-class refusal names the mismatch" "$ev_mismatch" "doe
 refuse "--limit rejects non-integers" events --limit zero
 refuse "events rejects unknown arguments" events --bogus
 
-echo "== typed event ledger: validation refuses corrupt records =="
+section "typed event ledger: validation refuses corrupt records"
 ev_ledger="$TASKS_DIR/events.log"
 ev_backup="$ROOT/events.backup"
 cp "$ev_ledger" "$ev_backup"
@@ -699,7 +700,7 @@ assert_not_contains "a torn tail line does not fail the read" "$ev_torn_err" "EV
 assert_contains "the torn tail announces the drop" "$ev_torn_err" "torn tail"
 cp -f "$ev_backup" "$ev_ledger"
 
-echo "== typed event ledger: concurrent claim cycles lose no append =="
+section "typed event ledger: concurrent claim cycles lose no append"
 evc_root="$ROOT/events-concurrent"
 t init --dir "$evc_root/.tasks" >/dev/null
 ev_pids=()
@@ -723,7 +724,7 @@ assert_eq "every concurrent append survives validation" "$evc_lines" "$evc_total
 t render --dir "$evc_root/.tasks" >/dev/null
 rm -rf "$evc_root"
 
-echo "== blocked lane =="
+section "blocked lane"
 t set "$f_tr" Status=Blocked "Status Reason=lane placement probe" >/dev/null
 blocked_lane="$(awk '/^## Blocked\/Cancelled/{f=1} /^## Completed/{f=0} f' <"$DASH")"
 assert_contains "blocked task appears in Blocked/Cancelled lane" "$blocked_lane" "Add Rate Limiting"
@@ -731,7 +732,7 @@ assert_contains "blocked row carries its Created timestamp" "$blocked_lane" "$tr
 assert_contains "blocked row states the status" "$blocked_lane" "| Blocked |"
 t set "$f_tr" Status=Triage >/dev/null
 
-echo "== completed and archive lanes =="
+section "completed and archive lanes"
 t set "$f_rd" Status=Completed Completed="2026-07-09 18:00" Duration="2h 15m" >/dev/null
 board="$(cat "$DASH")"
 comp_lane="$(awk '/^## Completed/{f=1} /^## Archive/{f=0} f' <<<"$board")"
@@ -746,7 +747,7 @@ assert_contains "archived task appears in Archive lane" "$arch_lane" "(./archive
 comp_lane="$(awk '/^## Completed/{f=1} /^## Archive/{f=0} f' <<<"$board")"
 assert_not_contains "archived task left the Completed lane" "$comp_lane" "Document Endpoints"
 
-echo "== --dir flag on init/render/new/set =="
+section "--dir flag on init/render/new/set"
 dirtasks="$ROOT/flagtest/.tasks"
 dirout="$(t init --dir "$dirtasks")"
 assert_eq "init --dir reports the requested directory" "$dirtasks" "$dirout"
@@ -762,7 +763,7 @@ assert_contains "set --dir applies to the requested board" \
 	"$(awk '/^## Ready/{f=1} /^## In Progress/{f=0} f' <<<"$flagboard")" "Dir Flag Task"
 assert_not_contains "main board is untouched by --dir traffic" "$(cat "$DASH")" "Dir Flag Task"
 
-echo "== valueless option guards on pre-existing subcommands =="
+section "valueless option guards on pre-existing subcommands"
 # A flag at end of argv, or followed by another flag, must refuse with a
 # usage error instead of aborting on an unbound variable or swallowing the
 # next flag as the value.
@@ -791,7 +792,7 @@ assert_contains "claim refuses a trailing --owner" "$claim_guard_err" "claim: --
 release_guard_err="$(t release --dir 2>&1 >/dev/null || true)"
 assert_contains "release refuses a trailing --dir" "$release_guard_err" "release: --dir requires a value"
 
-echo "== --flag=VALUE long form =="
+section "--flag=VALUE long form"
 # The space-separated form refuses any value beginning with --, so such
 # values are only expressible through the long form; it must round-trip
 # verbatim while the space form stays exactly as it is today.
@@ -839,7 +840,7 @@ refuse "report rejects an empty --slug= value" report "$f_esc2" --slug= --digest
 refuse "new rejects an unknown long-form option" new --bogus=x
 assert_contains "usage documents the long-form escape" "$(t help)" '--name=--force'
 
-echo "== concurrent set serializes (no lost update) =="
+section "concurrent set serializes (no lost update)"
 f_cs="$(t new --id API-4 --name "Concurrency Set Target")"
 concdir="$(mktemp -d)"
 concfail=0
@@ -867,7 +868,7 @@ done
 assert_eq "concurrent set loses no update across rounds" "0" "$concfail"
 rm -rf "$concdir"
 
-echo "== status enum validation =="
+section "status enum validation"
 refuse "set rejects an unknown status" set "$f_cs" Status=Bogus
 assert_contains "rejected status leaves the file untouched" \
 	"$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_cs")" "Triage"
@@ -875,7 +876,7 @@ refuse "new rejects an unknown status" new --id API-5 --name "Bogus Status Task"
 if t set "$f_cs" Status=Blocked "Status Reason=enum probe" >/dev/null 2>&1; then ok "set accepts a valid status"; else bad "set accepts a valid status"; fi
 t set "$f_cs" Status=Triage >/dev/null
 
-echo "== priority enum validation =="
+section "priority enum validation"
 # The Priority vocabulary is pinned to the corpus's own set (Low, Medium,
 # High); new and set must reject anything else before any write lands.
 f_pri="$(t new --id PRI-1 --name "Priority Enum Target")"
@@ -894,7 +895,7 @@ assert_contains "new writes a valid priority" "$(grep -oP '^\*\*Priority:\*\*\s+
 rm -f "$f_pri" "$f_pri_low"
 t render >/dev/null
 
-echo "== set: Progress must be N% form =="
+section "set: Progress must be N% form"
 # The render's percent normalization is a legacy-file fallback, not a
 # license for set: a bare number is refused outright instead of landing
 # unmarked and getting silently coerced at render time.
@@ -923,7 +924,7 @@ assert_eq "Progress deletion stays allowed" "0" "$(grep -c '^\*\*Progress:\*\*' 
 rm -f "$f_prg"
 t render >/dev/null
 
-echo "== new: duplicate ID guard =="
+section "new: duplicate ID guard"
 # An ID names one piece of work across the whole board: a second new with
 # a live ID must refuse instead of silently splitting it across two files,
 # current/ and archive/ alike. --force is the documented override for
@@ -948,7 +949,7 @@ f_d3="$(t new --id DUP-11 --name "Near Miss ID")"
 rm -f "$f_d1" "$f_d2" "$f_d3"
 t render >/dev/null
 
-echo "== new: --name must be a single line =="
+section "new: --name must be a single line"
 # The name titles the level-1 heading and the dashboard row; a newline
 # would inject bogus structure into both, so it is refused outright.
 nl_before="$(ls "$TASKS_DIR/current" | wc -l)"
@@ -958,7 +959,7 @@ assert_contains "multi-line refusal states the single-line contract" "$nl_err" "
 refuse "new rejects a CR-bearing --name" new --id NL-2 --name "$(printf 'cr\rname')"
 assert_eq "rejected names create no file" "$nl_before" "$(ls "$TASKS_DIR/current" | wc -l)"
 
-echo "== new: --status is restricted to Triage and Ready outside the test seam =="
+section "new: --status is restricted to Triage and Ready outside the test seam"
 # Creation admits only the two intake states: deeper states are lifecycle
 # positions (set/claim/release/close), a directly created Blocked file
 # would skip the reason coupling, and a directly created terminal file
@@ -988,7 +989,7 @@ assert_contains "the seam admits deeper states for fixtures" "$(grep -oP '^\*\*S
 rm -f "$nst_f" "$nst_t" "$nst_d" "$nst_s"
 t render >/dev/null
 
-echo "== set: Owner is claim-owned =="
+section "set: Owner is claim-owned"
 # Ownership never moves through set: the Owner field is written by claim
 # (atomically, alongside its O_EXCL sidecar) and cleared by release. The
 # refusal is unconditional - it does not open under the battery's clock
@@ -1008,7 +1009,7 @@ TASKS_SESSION=claim-owner t release "$f_own" --generation "$(gen_of "$f_own")" >
 rm -f "$f_own"
 t render >/dev/null
 
-echo "== terminal status transitions release a live claim =="
+section "terminal status transitions release a live claim"
 # Mirroring close: a terminal task owns nothing. A Cancelled transition
 # through set is the one terminal write that would otherwise leave the
 # sidecar behind (Completed goes through close, and the seam-admitted
@@ -1054,7 +1055,7 @@ TASKS_SESSION=sess-open t release "$f_t4" --generation "$(gen_of "$f_t4")" >/dev
 rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4" "$f_t5"
 t render >/dev/null
 
-echo "== set: unknown header keys are rejected before any write =="
+section "set: unknown header keys are rejected before any write"
 f_kv="$(t new --id SET-1 --name "Set Validation Target")"
 kv_hdr() { awk '/^## /{exit} {print}' "$f_kv"; }
 kv_before="$(cat "$f_kv")"
@@ -1069,7 +1070,7 @@ assert_eq "rejected sets leave the file byte-identical" "$kv_before" "$(cat "$f_
 assert_eq "rejected sets leave no temp file behind" "" \
 	"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_kv")." || true)"
 
-echo "== set: empty value deletes the field; Status and Status Reason are coupled =="
+section "set: empty value deletes the field; Status and Status Reason are coupled"
 t set "$f_kv" Status=Blocked "Status Reason=blocked for probe" >/dev/null
 assert_contains "spaced Status Reason key writes the field" "$(kv_hdr)" "**Status Reason:** blocked for probe"
 t set "$f_kv" Status=Ready "Status Reason=" >/dev/null
@@ -1108,7 +1109,7 @@ kv_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_kv")"
 	&& ok "an emptied Updated= pair refreshes instead of deleting" \
 	|| bad "an emptied Updated= pair refreshes instead of deleting (got [$kv_updated])"
 
-echo "== set: re-inserted template fields land at their canonical slot =="
+section "set: re-inserted template fields land at their canonical slot"
 # A field deleted with Key= must re-insert at its template position (the
 # new-task scaffold's order), never at end of header; the dashboard parser
 # and humans both key on that order.
@@ -1150,7 +1151,7 @@ assert_eq "re-set Latest Update falls back to end of header" "$POS_CANONICAL_ORD
 rm -f "$f_pos"
 t render >/dev/null
 
-echo "== set: backslash values survive verbatim =="
+section "set: backslash values survive verbatim"
 f_bs="$(t new --id BS-1 --name "Backslash Target")"
 # Checkpoint Gating and Duration are the free-form carriers here (the
 # subject is backslash survival through the header writer, not the field
@@ -1163,7 +1164,7 @@ assert_contains "backslash-t in a set value survives verbatim" \
 rm -f "$f_bs"
 t render >/dev/null
 
-echo "== malformed header resilience =="
+section "malformed header resilience"
 malformed="$TASKS_DIR/current/20240101-1100-malformed-header.md"
 cat >"$malformed" <<'EOF'
 # Task: Malformed Header
@@ -1182,7 +1183,7 @@ assert_contains "malformed priority falls back to the default" "$mal_row" "| Med
 rm -f "$malformed"
 t render >/dev/null
 
-echo "== pipes and brackets in names/values render escaped =="
+section "pipes and brackets in names/values render escaped"
 f_pipe="$(t new --id API-6 --name "Piped | Name ](evil")"
 pipe_row="$(grep -F 'Piped' "$DASH")"
 assert_contains "pipe and brackets in name are escaped" "$pipe_row" 'Piped \| Name \](evil'
@@ -1200,7 +1201,7 @@ assert_eq "render is byte-identical with escaped content on the board" "$esc_bef
 rm -f "$f_pipe"
 t render >/dev/null
 
-echo "== backslash names and numeric slugs keep task ID parity =="
+section "backslash names and numeric slugs keep task ID parity"
 f_bs="$(t new --id API-7 --name "Back\\slash Name")"
 printf '%s\n' \
 	"# Task: Twelve Factor" \
@@ -1234,7 +1235,7 @@ assert_eq "numeric slugs sort chronologically in their lane" \
 rm -f "$f_bs" "$TASKS_DIR/current/NSF-5-20260101-1200-12-factor.md" "$TASKS_DIR/current/NSF-5-20190101-0100-3-body.md"
 t render >/dev/null
 
-echo "== task ID extraction: bash mirror and assembler taskid() agree =="
+section "task ID extraction: bash mirror and assembler taskid() agree"
 # Differential over adversarial basenames (numeric-only slugs, stamp
 # forms with and without slugs, recreated stamps, segment-less names):
 # one side runs the real bash mirror (task_id_of_basename, sourced from
@@ -1262,7 +1263,7 @@ done
 rm -f "$TASKS_DIR/current/"NUM-*.md "$TASKS_DIR/current/9.md"
 t render >/dev/null
 
-echo "== claim recovery with a stale sidecar =="
+section "claim recovery with a stale sidecar"
 # BEHAVIOR CHANGE (G15, same landing as the pin rewrite): the stale sidecar's
 # recovery used to be a bare foreign release; under generation-token claims
 # it is the explicit manager reclaim, and the reclaimed owner's own release
@@ -1296,7 +1297,7 @@ assert_eq "the reclaimed owner's release clears Owner" "" "${owner_now:-}"
 if t claim "$f_cs" --owner newcomer >/dev/null 2>&1; then ok "claim succeeds after stale release"; else bad "claim succeeds after stale release"; fi
 TASKS_SESSION=newcomer t release "$f_cs" --generation "$(gen_of "$f_cs")" >/dev/null
 
-echo "== render stays byte-identical across repeated runs =="
+section "render stays byte-identical across repeated runs"
 before="$(cat "$DASH")"
 t render >/dev/null
 mid="$(cat "$DASH")"
@@ -1305,7 +1306,7 @@ after="$(cat "$DASH")"
 assert_eq "repeated renders are byte-identical" "$before" "$after"
 assert_eq "render output is stable between runs" "$mid" "$after"
 
-echo "== render: one awk pass per file, zero grep spawns =="
+section "render: one awk pass per file, zero grep spawns"
 spawn_dir="$ROOT/spawn-board"
 t init --dir "$spawn_dir" >/dev/null
 t new --dir "$spawn_dir" --id SPW-1 --name "Spawn Count Ready" --status Ready >/dev/null
@@ -1349,7 +1350,7 @@ else
 fi
 assert_eq "shimmed render output equals the unshimmed render" "$unshimmed_board" "$(cat "$spawn_dir/dashboard.md")"
 
-echo "== render: dash-leading relative --dir is guarded =="
+section "render: dash-leading relative --dir is guarded"
 dash_dir="$ROOT/-board"
 t init --dir "$dash_dir" >/dev/null
 t new --dir "$dash_dir" --id DSH-1 --name "Dash Leading Board" >/dev/null
@@ -1379,7 +1380,7 @@ else
 	ok "tilde-leading render leaves no dashboard temp behind"
 fi
 
-echo "== render: mid-render failure leaves no temp residue =="
+section "render: mid-render failure leaves no temp residue"
 fail_dir="$ROOT/fail-board"
 t init --dir "$fail_dir" >/dev/null
 t new --dir "$fail_dir" --id FRL-1 --name "Failure Residue" --status Ready >/dev/null
@@ -1401,7 +1402,7 @@ else
 fi
 assert_eq "failed render leaves the board file untouched" "$board_before" "$(cat "$fail_dir/dashboard.md")"
 
-echo "== multi-key header writes commit in one pass =="
+section "multi-key header writes commit in one pass"
 mk_dir="$ROOT/mk-board"
 t init --dir "$mk_dir" >/dev/null
 t new --dir "$mk_dir" --id MKW-1 --name "Multi Key Target" --status Ready >/dev/null
@@ -1441,7 +1442,7 @@ mk_fields="$(grep -oP '^\*\*(?:Completed|Duration):' "$mk_dir/current/$mkfile" |
 assert_eq "simultaneously-missing keys insert in canonical order" \
 	"$(printf 'Completed\nDuration')" "$mk_fields"
 
-echo "== set_header_field deletes on an empty value (internal seam) =="
+section "set_header_field deletes on an empty value (internal seam)"
 sf_dir="$ROOT/seam-board"
 t init --dir "$sf_dir" >/dev/null
 t new --dir "$sf_dir" --id SFH-1 --name "Seam Fix Probe" --status Ready >/dev/null
@@ -1465,7 +1466,7 @@ else
 fi
 rm -rf "$sf_dir"
 
-echo "== report: deposit path, numbering, Work Log entry =="
+section "report: deposit path, numbering, Work Log entry"
 f_rp="$(t new --id RPT-1 --name "Report Deposit Target")"
 rpbase="$(basename "$f_rp")"
 rpdir="$TASKS_DIR/reports/$rpbase"
@@ -1505,7 +1506,7 @@ assert_contains "Latest Update carries the digest" "$latest_line" "Recon finding
 assert_contains "Latest Update links the report" "$latest_line" "([report](../reports/$rpbase/01-recon.md))"
 assert_contains "dashboard reflects the report bump" "$(grep -F 'Report Deposit Target' "$DASH")" "$rp_updated"
 
-echo "== report: stdin modes and sequence numbering =="
+section "report: stdin modes and sequence numbering"
 printf 'Second report body\n' | t report "$f_rp" --slug next-steps --digest "Second deposit" >/dev/null
 [[ -f "$rpdir/02-next-steps.md" ]] && ok "piped stdin report lands as 02" || bad "piped stdin report lands as 02"
 assert_eq "second deposit content is verbatim" "Second report body" "$(cat "$rpdir/02-next-steps.md")"
@@ -1517,7 +1518,7 @@ printf 'Gap body\n' | t report "$f_rp" --slug gap-check --digest "Gap check" >/d
 	&& ok "sequence is max NN + 1 across gaps (05 after seeded 04)" \
 	|| bad "sequence is max NN + 1 across gaps (05 after seeded 04)"
 
-echo "== report: validation refusals leave no trace =="
+section "report: validation refusals leave no trace"
 rp_entries_before="$(grep -c -E '^### .*: Report$' "$f_rp" || true)"
 rp_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
 refuse "report rejects a non-kebab slug" report "$f_rp" --slug "Bad Slug" --digest d
@@ -1548,7 +1549,7 @@ assert_eq "refusals append no Work Log entry" "$rp_entries_before" "$(grep -c -E
 assert_eq "refusals leave Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
 assert_eq "refusals deposit no report files" "5" "$(ls "$rpdir" 2>/dev/null | wc -l)"
 
-echo "== report: create failure is all-or-nothing =="
+section "report: create failure is all-or-nothing"
 if ((EUID == 0)); then
 	skip_test "failed deposit removes nothing and mutates nothing (skipped under root)"
 	skip_test "failed deposit reports the create failure (skipped under root)"
@@ -1563,13 +1564,13 @@ else
 	assert_eq "failed deposit leaves Updated untouched" "$rp_updated_before" "$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_rp")"
 fi
 
-echo "== report: whitespace-only --from re-defaults to Manager =="
+section "report: whitespace-only --from re-defaults to Manager"
 mgr_reports_before="$(grep -cE '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Report$' "$f_rp" || true)"
 printf 'Whitespace from body\n' | t report "$f_rp" --slug ws-from --from " " --digest "Whitespace from check" >/dev/null
 mgr_reports_after="$(grep -cE '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager: Report$' "$f_rp" || true)"
 assert_eq "report re-defaults a whitespace-only --from to Manager" "$((mgr_reports_before + 1))" "$mgr_reports_after"
 
-echo "== report: links resolve from current/ and archive/ =="
+section "report: links resolve from current/ and archive/"
 f_res="$(t new --id RPT-2 --name "Link Resolution Target")"
 resbase="$(basename "$f_res")"
 printf 'resolution body\n' | t report "$f_res" --slug recon --from Worker-B --digest "resolution check" >/dev/null
@@ -1586,7 +1587,7 @@ printf 'archived body\n' | t report "$TASKS_DIR/archive/$resbase" --slug post-ar
 	|| bad "reporting an archived task deposits under the same reports dir"
 rm -f "$TASKS_DIR/archive/$resbase"
 
-echo "== report: concurrent deposits serialize =="
+section "report: concurrent deposits serialize"
 f_cc="$(t new --id RPT-3 --name "Concurrent Report Target")"
 ccbase="$(basename "$f_cc")"
 ccdir="$(mktemp -d)"
@@ -1615,7 +1616,7 @@ assert_eq "concurrent deposits record all five digests" "5" \
 	"$(grep -c -F '**Digest:** report ' "$f_cc" || true)"
 rm -rf "$ccdir"
 
-echo "== log: manager entry, Updated bump, render =="
+section "log: manager entry, Updated bump, render"
 f_lg="$(t new --id LOG-1 --name "Log Entry Target")"
 t set "$f_lg" Updated="2020-01-01 00:00" >/dev/null
 lg_latest_before="$(grep -oP '^\*\*Latest Update:\*\*\s+\K.*' "$f_lg")"
@@ -1637,7 +1638,7 @@ assert_contains "multiline log headings the first line" "$(cat "$f_lg")" "Manage
 assert_contains "multiline log keeps the remaining body" \
 	"$(grep -A2 'Manager: Multi heading line' "$f_lg")" "body detail here"
 
-echo "== log: validation refusals =="
+section "log: validation refusals"
 lg_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
 refuse "log rejects an empty message" log "$f_lg" ""
 refuse "log rejects a missing message" log "$f_lg"
@@ -1646,7 +1647,7 @@ refuse "log rejects a missing task file" log NOPE-9.md "msg"
 assert_eq "rejected logs leave Updated untouched" "$lg_updated_before" \
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lg")"
 
-echo "== log: --from attribution =="
+section "log: --from attribution"
 f_lf="$(t new --id LOG-2 --name "Log From Target")"
 t set "$f_lf" Updated="2020-01-01 00:00" >/dev/null
 t log "$f_lf" --from Worker-C "Checkpoint reached, suite green" >/dev/null
@@ -1661,7 +1662,7 @@ ws_entry="$(grep -E '^### [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}: Manager:
 # The Manager default stays covered by the log tests above (f_lg), which
 # exercise the same re-default path without the flag.
 
-echo "== log: heading-line and CR rejection =="
+section "log: heading-line and CR rejection"
 # The seven-hash line is not a markdown heading and is accepted (its entry
 # lands first); the no-trace baseline is captured after it so the rejection
 # assertions below prove the refused calls append nothing.
@@ -1685,7 +1686,7 @@ assert_contains "log refuses a flag-shaped --from value" "$from_flag_err" "log: 
 logdir_flag_err="$(t log "$f_lf" --dir --bogus "msg" 2>&1 >/dev/null || true)"
 assert_contains "log refuses a flag-shaped --dir value" "$logdir_flag_err" "log: --dir requires a value"
 
-echo "== log: blank first line rejection =="
+section "log: blank first line rejection"
 lf_blank_updated_before="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_lf")"
 lf_blank_entries_before="$(grep -c '^### ' "$f_lf")"
 blank_err="$(t log "$f_lf" "$(printf '   \nbody under a blank first line')" 2>&1 >/dev/null || true)"
@@ -1697,7 +1698,7 @@ assert_eq "rejected blank-first-line logs leave Updated untouched" "$lf_blank_up
 assert_eq "rejected blank-first-line logs append no entry" "$lf_blank_entries_before" \
 	"$(grep -c '^### ' "$f_lf")"
 
-echo "== log: append failure is explicit and leaves no partial state =="
+section "log: append failure is explicit and leaves no partial state"
 # Root is immune to mode bits, so the chmod cannot provoke the append's
 # mktemp failure and the assertions are skipped rather than run as no-ops.
 if ((EUID == 0)); then
@@ -1719,7 +1720,7 @@ else
 		"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_lg")." || true)"
 fi
 
-echo "== log: headingless file still gets its Updated refresh =="
+section "log: headingless file still gets its Updated refresh"
 hless="$TASKS_DIR/current/20240101-1200-headingless-task.md"
 cat >"$hless" <<'EOF'
 # Task: Headingless Append Target
@@ -1753,7 +1754,7 @@ rm -f "$hless_predated"
 rm -f "$hless"
 t render >/dev/null
 
-echo "== edit: replace section body =="
+section "edit: replace section body"
 f_ed="$(t new --id EDT-1 --name "Edit Section Target")"
 t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
 ed_body="$ROOT/edit-body.md"
@@ -1776,7 +1777,7 @@ printf 'Tail section body\n' | t edit "$f_ed" --section "Execution Log" >/dev/nu
 ed_tail="$(awk '/^## Execution Log$/{f=1} f' "$f_ed")"
 assert_contains "replace reaches a section at end of file" "$ed_tail" "Tail section body"
 
-echo "== edit: append under an existing section =="
+section "edit: append under an existing section"
 f_ea="$(t new --id EDT-2 --name "Edit Append Target")"
 t set "$f_ea" Updated="2020-01-01 00:00" >/dev/null
 printf 'Appended tail line\n' | t edit "$f_ea" --section Objective --append >/dev/null
@@ -1796,7 +1797,7 @@ fi
 assert_eq "empty append leaves the section body untouched" "$ea_snapshot" \
 	"$(awk '/^## Objective$/{f=1;next} /^## Success Criteria$/{f=0} f' "$f_ea")"
 
-echo "== edit: refusals leave the task file untouched =="
+section "edit: refusals leave the task file untouched"
 ed_before="$(cat "$f_ed")"
 refuse "edit rejects an unknown section" edit "$f_ed" --section "No Such Section" "$ed_body"
 refuse "edit rejects an empty replacement body (file)" edit "$f_ed" --section Objective /dev/null
@@ -1839,7 +1840,7 @@ refuse "edit refuses an empty stdin replacement without a trace" edit "$f_ed" --
 assert_eq "refused edits leave Updated untouched" "$ed_updated_before" \
 	"$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
 
-echo "== edit: nested headings deeper than the section are accepted =="
+section "edit: nested headings deeper than the section are accepted"
 # The skill's template nests "### Decision Log" inside "## Technical
 # Approach" and "### Task PREFIX-N-N" entries inside "## Task Breakdown";
 # only headings at or above the target section's own level are boundary
@@ -1889,7 +1890,7 @@ nested_updated_after="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$nested")"
 [[ "$nested_updated_after" == "$(clock_today)"* ]] \
 	&& ok "nested-heading edits bump Updated" || bad "nested-heading edits bump Updated (got [$nested_updated_after])"
 
-echo "== edit: same-or-higher-level headings stay refused =="
+section "edit: same-or-higher-level headings stay refused"
 nested_before="$(cat "$nested")"
 printf 'fine text\n## Injected Sibling\nmore text\n' >"$ROOT/edit-sibling-heading.md"
 nested_sec_err="$(edit_stderr_of "$nested" --section "Technical Approach" "$ROOT/edit-sibling-heading.md")"
@@ -1909,7 +1910,7 @@ assert_eq "refused nested edits keep Updated untouched" "$nested_upd_before" \
 rm -f "$nested"
 t render >/dev/null
 
-echo "== edit: Work Log entry anchors are CLI-stamped (forgery stance: guarded) =="
+section "edit: Work Log entry anchors are CLI-stamped (forgery stance: guarded)"
 # G9 stance: guarded. Entry anchors are the Duration-derivation input and
 # the CLI's audit trail; Option-1's free-form principle covers prose, not
 # CLI-shaped timeline data, so edit refuses anchor-shaped lines in Work
@@ -1933,7 +1934,7 @@ assert_contains "anchor-shaped lines stay legal outside Work Log" \
 rm -f "$f_forg"
 t render >/dev/null
 
-echo "== edit: creates missing template sections at their canonical position =="
+section "edit: creates missing template sections at their canonical position"
 # The skill's planning pass needs Technical Approach, Risk Assessment,
 # Testing Strategy, TDD Workflow, and Task Breakdown on a freshly created
 # file; each must be creatable through edit at the template's slot, never
@@ -1997,7 +1998,7 @@ fi
 rm -f "$f_cr"
 t render >/dev/null
 
-echo "== edit: write failure is not misreported as unknown section =="
+section "edit: write failure is not misreported as unknown section"
 # Root is immune to mode bits, so the chmod cannot provoke the mktemp
 # failure and the assertions are skipped rather than run as no-ops.
 if ((EUID == 0)); then
@@ -2018,7 +2019,7 @@ else
 		"$(ls "$TASKS_DIR/current" | grep -F "$(basename "$f_ed")." || true)"
 fi
 
-echo "== edit: Updated refresh and dashboard render =="
+section "edit: Updated refresh and dashboard render"
 t set "$f_ed" Updated="2020-01-01 00:00" >/dev/null
 printf 'Render check body\n' | t edit "$f_ed" --section Objective >/dev/null
 ed_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
@@ -2026,12 +2027,12 @@ ed_updated="$(grep -oP '^\*\*Updated:\*\*\s+\K.*' "$f_ed")"
 	&& ok "edit bumps Updated to today" || bad "edit bumps Updated to today (got [$ed_updated])"
 assert_contains "dashboard reflects the edit bump" "$(grep -F 'Edit Section Target' "$DASH")" "$ed_updated"
 
-echo "== edit: --dir flag =="
+section "edit: --dir flag"
 printf 'Dir flag edit body\n' | t edit --dir "$dirtasks" "$(basename "$f_dir")" --section Objective >/dev/null
 assert_contains "edit --dir applies to the requested board" \
 	"$(cat "$dirtasks/current/$(basename "$f_dir")")" "Dir flag edit body"
 
-echo "== edit: subsection boundary semantics =="
+section "edit: subsection boundary semantics"
 subsec="$TASKS_DIR/current/20240101-1300-subsection-boundary.md"
 cat >"$subsec" <<'EOF'
 # Task: Subsection Boundary Target
@@ -2064,7 +2065,7 @@ assert_contains "edit leaves the following section intact" "$sub_next" "next bod
 rm -f "$subsec"
 t render >/dev/null
 
-echo "== concurrent edit and log serialize (no lost update) =="
+section "concurrent edit and log serialize (no lost update)"
 f_ce="$(t new --id EDT-3 --name "Concurrency Edit Target")"
 ce_body="$ROOT/conc-edit-body.md"
 ce_concdir="$(mktemp -d)"
@@ -2098,7 +2099,7 @@ done
 assert_eq "concurrent edit and log lose no update across rounds" "0" "$ce_fail"
 rm -rf "$ce_concdir"
 
-echo "== show: header fields and last N entries =="
+section "show: header fields and last N entries"
 f_sh="$(t new --id SHW-1 --name "Show Target")"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do t log "$f_sh" "Entry number $i" >/dev/null; done
 sh_md5_before="$(md5sum "$f_sh" | cut -d' ' -f1)"
@@ -2133,7 +2134,7 @@ out_empty="$(t show "$f_nolog")"
 assert_contains "show works on a task without entries" "$out_empty" "# Task: Show No Log Target"
 assert_eq "show without entries prints none" "0" "$(grep -c '^### ' <<<"$out_empty")"
 
-echo "== show: work_log_tail reads its snapshot from stdin =="
+section "show: work_log_tail reads its snapshot from stdin"
 # The tail must come from the piped snapshot, never from a re-read of a
 # file operand. The function is eval-extracted and $file is pointed at
 # /dev/null, so only a stdin-reading implementation can produce the
@@ -2151,7 +2152,7 @@ assert_contains "work_log_tail with n=2 reaches the first entry" "$wlt_two" \
 wlt_none="$(printf '## Objective\n\nno Work Log section here\n' | file=/dev/null work_log_tail 5)"
 assert_eq "work_log_tail without a Work Log section prints nothing" "" "$wlt_none"
 
-echo "== render: lanes sort chronologically and cells carry task IDs =="
+section "render: lanes sort chronologically and cells carry task IDs"
 # Dedicated board: ordering needs controlled Created/Completed values,
 # deliberate date ties, and undated fixtures, isolated from the main
 # board's accumulated tasks. Active lanes must read in Created order,
@@ -2282,7 +2283,7 @@ t render --dir "$orddir" >/dev/null
 ord_after="$(cat "$ordboard")"
 assert_eq "ordered render is byte-identical on repeat" "$ord_before" "$ord_after"
 
-echo "== lint: read-only board protocol lint =="
+section "lint: read-only board protocol lint"
 # The lint fixture board lives inside its own tiny git repo so the
 # push-reconcile pass has a real history to consult; --dir pins the board,
 # so the battery's TASKS_DIR never interferes. Fixture files are written
@@ -2480,7 +2481,7 @@ board_before="$(cat "$lint_dir/dashboard.md")"
 t lint --dir "$lint_dir" >/dev/null 2>&1 || true
 assert_eq "lint leaves the dashboard untouched" "$board_before" "$(cat "$lint_dir/dashboard.md")"
 
-echo "== set: CLI-owned header fields are refused outside the test seam =="
+section "set: CLI-owned header fields are refused outside the test seam"
 # The Option-1 contract: header timeline fields (Created, Updated,
 # Completed, Duration, Latest Update) are stamped by the CLI's own
 # operations, never written through set. The battery runs with
@@ -2531,7 +2532,7 @@ rm -f "$guard_reason"
 rm -f "$guard_target"
 t render >/dev/null
 
- echo "== close and stamp: closure stamping through the locked write path =="
+section "close and stamp: closure stamping through the locked write path"
 # close derives Duration from the Work Log anchors and stamps Completed
 # from the CLI clock; the header rewrite rides write_header_fields, so
 # field order stays canonical and the dashboard rows stay byte-compatible.
@@ -2598,7 +2599,7 @@ assert_eq "close clears Owner" "1" "$(grep -c '^\*\*Owner:\*\*$' "$f_blk")"
 refuse "close without a taskfile is refused" close
 refuse "stamp without a taskfile is refused" stamp
 
-echo "== close: the completion gate (unchecked boxes, named children, --force override) =="
+section "close: the completion gate (unchecked boxes, named children, --force override)"
 # The gate refuses before any write when the Success Criteria carry
 # unchecked boxes or a named child task is still open; a named child is a
 # task-ID-shaped token in the file that resolves to a board file, with the
@@ -2724,7 +2725,7 @@ assert_not_contains "lint does not count the fenced box as unchecked" "$fence_li
 rm -f "$f_gate" "$f_gate_child" "$f_gate_prose" "$f_gate_own" "$f_gate_parent" "$f_gate_field" "$f_gate_decl" "$f_gate_ready" "$f_gate_logfield" "$f_gate_sibling" "$f_gate_hdrfield" "$f_gate_fence"
 t render >/dev/null
 
-echo "== close: the ~ superseded annotation resolves unticked criteria =="
+section "close: the ~ superseded annotation resolves unticked criteria"
 # A Success Criteria line marked '- ~ [ ] ' counts as resolved for the
 # closure gate: close proceeds without --force and its Work Log entry
 # lists the marked criteria as superseded, stamped at the closure clock
@@ -2757,7 +2758,7 @@ assert_contains "the --force override lists the superseded criteria" "$mix_log" 
 rm -f "$f_tilde" "$f_tilde_mix"
 t render >/dev/null
 
-echo "== close: verdict markers and the unverifiable gate =="
+section "close: verdict markers and the unverifiable gate"
 # The three-way verdict dimension rides the same shared criteria counter
 # the gate and lint run: a Success Criteria line may carry (verdict:
 # verified), (verdict: refuted), or (verdict: unverifiable), optionally
@@ -3087,7 +3088,7 @@ assert_not_contains "lint stays silent on a fenced evidence tag" "$fence2_lint" 
 rm -f "$f_evc_two" "$f_evc_md" "$f_evc_md2" "$f_evc_wl" "$f_evc_fence2"
 t render >/dev/null
 
-echo "== archive: terminal tasks move to archive/ =="
+section "archive: terminal tasks move to archive/"
 # The sanctioned alternative to the hand mv the battery's earlier archive
 # lane tests used: archive refuses open tasks, moves a terminal one under
 # the lock, drops any claim sidecar on the way, and re-renders. Reports
@@ -3132,7 +3133,7 @@ rm -f "$TASKS_DIR/archive/"ARC-*.md
 rm -rf "$TASKS_DIR/reports/$(basename "$f_ar")"
 t render >/dev/null
 
-echo "== close --cancelled: terminal-transition symmetry =="
+section "close --cancelled: terminal-transition symmetry"
 # G17: Cancelled files get the same CLI-stamped closure semantics as
 # Completed ones, through close's second path, so neither terminal status
 # carries hand-derived closure data. Both paths are pinned here and in the
@@ -3180,7 +3181,7 @@ t render >/dev/null
 rm -f "$f_cc"
 t render >/dev/null
 
-echo "== stamp --repair: malformed CLI-owned fields get a CLI route back =="
+section "stamp --repair: malformed CLI-owned fields get a CLI route back"
 # The MGR-11 class: a malformed Latest Update left a file no CLI write
 # could repair (log refreshes Updated but not Latest Update, set refuses
 # the field). --repair re-stamps the stamped timeline in one locked
@@ -3257,7 +3258,7 @@ refuse "repair without a taskfile is refused" stamp --repair
 rm -f "$f_rpc"
 t render >/dev/null
 
- echo "== usage: canonical option order =="
+section "usage: canonical option order"
 usage_out="$(t help)"
 assert_contains "usage places --from between --slug and --digest" "$usage_out" \
 	"--slug SLUG [--from WORKER] --digest TEXT"
@@ -3268,7 +3269,7 @@ assert_contains "usage places --append after --section" "$usage_out" \
 assert_not_contains "usage does not place --append before --section" "$usage_out" \
 	"--append] --section"
 
-echo "== canonical-root guard (fallback root: writes refuse, reads warn) =="
+section "canonical-root guard (fallback root: writes refuse, reads warn)"
 # The guard fixture must sit OUTSIDE the battery root's chain: walk-up from
 # anywhere under ROOT finds the battery board, so a sibling temp root whose
 # ancestors carry no board is what puts the CLI in bare-fallback territory
@@ -3317,7 +3318,7 @@ walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK &&
 assert_eq "walk-up read succeeds" "0" "$?"
 assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
 
-echo "== resolve: task file arguments are contained to the board root =="
+section "resolve: task file arguments are contained to the board root"
 # resolve_task_file admits bare names, in-board paths, and archive paths,
 # but every existing-file candidate must resolve inside the resolved board
 # root (readlink -f, so traversal and symlinks cannot smuggle a write past
@@ -3433,7 +3434,7 @@ rdr_topkeys() { # line
 	'
 }
 
-echo "== show: --json schema pin and read completeness =="
+section "show: --json schema pin and read completeness"
 # Dedicated board: the pinned fixture corpus carries the shapes read
 # completeness must survive (nested deeper headings, fenced marker text
 # inside a body, an unknown section, verdict markers, quote/backslash/unicode
@@ -3578,7 +3579,7 @@ else
 	bad "no independent JSON parser on the host (python3 nor jq)"
 fi
 
-echo "== show: --section canonical body and --raw hatch =="
+section "show: --section canonical body and --raw hatch"
 rdr_sec="$(t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objective)"
 assert_eq "show --section prints the canonical body byte-exact" \
 	"$(printf 'Top objective text with "quotes" and \\backslash and cafe-lambda unicode\n\n### Sub approach\n\nnested content under a deeper heading\nmore nested text')" \
@@ -3608,7 +3609,7 @@ t show --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --section Objectiv
 cmp -s "$ROOT/rdr-raw.md" "$f_rdr1" \
 	&& ok "show --section pipes back through edit byte-identically" || bad "show --section pipes back through edit byte-identically"
 
-echo "== list: --json rows, lanes, and pagination =="
+section "list: --json rows, lanes, and pagination"
 rdr_lst="$(t list --dir "$rdr_dir" --json)"
 assert_contains "list --json carries the schema_version 1 marker" "$rdr_lst" '{"schema_version":1,'
 assert_contains "list --json counts the board" "$rdr_lst" '"total":2,"count":2'
@@ -3634,7 +3635,7 @@ rdr_human="$(t list --dir "$rdr_dir")"
 assert_contains "list human view prints tab-separated rows" "$rdr_human" \
 	"$(printf 'FIX-1\tIn Progress\tIn Progress\tcurrent/FIX-1-20260615-1200-reader-fixture.md')"
 
-echo "== reports: --json provenance and bodies =="
+section "reports: --json provenance and bodies"
 printf 'deposit one body\n' | t report --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --slug one --digest "first digest" >/dev/null
 printf 'deposit two\n' | t report --dir "$rdr_dir" FIX-1-20260615-1200-reader-fixture.md --slug two --digest "second digest" --from sess-fix >/dev/null
 printf 'ghost report never linked\n' >"$rdr_dir/reports/FIX-1-20260615-1200-reader-fixture.md/05-ghost.md"
@@ -3658,7 +3659,7 @@ refuse "reports refuses --include-body without --json" reports --dir "$rdr_dir" 
 rdr_empty="$(t reports --dir "$rdr_dir" FIX-2-20260615-0900-archived-fixture.md --json)"
 assert_contains "reports on a task without deposits is an empty success" "$rdr_empty" '"total":0,"count":0,"offset":0,"limit":0,"reports":[]'
 
-echo "== export: lossless JSONL round-trip =="
+section "export: lossless JSONL round-trip"
 rdr_export="$ROOT/rdr-export.jsonl"
 t export --dir "$rdr_dir" --include-reports >"$rdr_export"
 rdr_export_lines="$(wc -l <"$rdr_export")"
@@ -3685,7 +3686,7 @@ assert_eq "export --format jsonl is the explicit default" \
 	"$(t export --dir "$rdr_dir" --include-reports --format jsonl)" "$(cat "$rdr_export")"
 refuse "export refuses an unsupported format" export --dir "$rdr_dir" --format yaml
 
-echo "== show/edit: fenced level-2 headings are sections on both sides =="
+section "show/edit: fenced level-2 headings are sections on both sides"
 # The heading model is fence-blind repo-wide (lint scanner, closure gate,
 # edit, readers), and the skill documents the phantom-section hazard that
 # follows: a heading-looking line inside a fenced block is a real section
@@ -3739,7 +3740,7 @@ assert_eq "the fenced section round-trips through edit byte-exact" \
 	"$(printf 'still fenced body\n```\n\ntail after the fence\n\nappended inside the phantom section')" \
 	"$(t show --dir "$rdr_dir" FIX-3-20260615-1100-fenced-probe.md --section 'Fenced Demo')"
 
-echo "== readers: read-only guarantee =="
+section "readers: read-only guarantee"
 # Every reader run over the fixture board must leave the whole tree
 # untouched: no lock, no render, no Updated bump, no sidecar, no temp.
 rdr_tree_before="$(find "$rdr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
@@ -3754,7 +3755,7 @@ t export --dir "$rdr_dir" --include-reports >/dev/null
 rdr_tree_after="$(find "$rdr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
 assert_eq "the reader surface leaves the board tree untouched" "$rdr_tree_before" "$rdr_tree_after"
 
-echo "== reader error codes =="
+section "reader error codes"
 rdr_nf_err="$(t show --dir "$rdr_dir" NOPE-9.md 2>&1 >/dev/null || true)"
 assert_contains "show on a missing file carries TASK_NOT_FOUND" "$rdr_nf_err" "(code: TASK_NOT_FOUND)"
 printf 'outside\n' >"$ROOT/outside-rdr.md"
@@ -3771,7 +3772,7 @@ rdr_list_empty="$(t list --dir "$rdr_nb_board" --json)"
 assert_contains "list on an empty root prints the empty payload" "$rdr_list_empty" '{"schema_version":1,"type":"list","total":0,"count":0,"offset":0,"limit":0,"tasks":[]}'
 assert_eq "list on an empty root prints the no-tasks line" "no tasks" "$(t list --dir "$rdr_nb_board")"
 
-echo "== readers: EXIT-trap cleanup under metacharacter TMPDIR =="
+section "readers: EXIT-trap cleanup under metacharacter TMPDIR"
 # The readers stage their row maps through mktemp in ${TMPDIR:-/tmp} and
 # hand cleanup to an EXIT trap carrying %-q-escaped paths baked in at set
 # time (the render_unlocked discipline). Under a TMPDIR holding spaces and
@@ -3836,7 +3837,7 @@ rm -rf "$rdr_meta_root"
 
 # --- expanded doctor (ORCH-4-4-2) -------------------------------------------
 
-echo "== show: --project bounded default read =="
+section "show: --project bounded default read"
 # The bounded seven-element projection: golden shape pin, determinism,
 # read-only guarantees, bounds and restrictions survival, role maps,
 # parser-ride agreement with the shared classifiers, fail-soft legacy
@@ -4819,7 +4820,7 @@ for proj_x_file in "$proj_dir"/current/*.md "$proj_dir"/archive/*.md; do
 	assert_eq "the advisory mirror agrees with the lint classifier ($proj_x_rel)" "$proj_x_lint" "$proj_x_ptr"
 done
 
-echo "== doctor: grandfathering pins a legacy-shaped board at zero =="
+section "doctor: grandfathering pins a legacy-shaped board at zero"
 # Dedicated fixture board carrying every grandfathered shape the live board
 # probe recorded (archived dup IDs, all-archived cycles, Ready-file future
 # children, archived claim sidecars, archived dead links) plus healthy live
@@ -5231,7 +5232,7 @@ assert_not_contains "doctor stays quiet on the healthy claim" "$doc_out" "CLAIM-
 assert_not_contains "doctor stays quiet on the reasoned Blocked file" "$doc_out" "REASON-2"
 assert_not_contains "doctor stays quiet when a cycle token resolves" "$doc_out" "DEP-1-20260615-1200-missing-dep.md: dependency token 'CY-2'"
 
-echo "== doctor: --json envelope =="
+section "doctor: --json envelope"
 doc_json="$(t doctor --dir "$doc_dir" --json)"
 assert_contains "doctor --json carries the schema_version 1 marker" "$doc_json" '{"schema_version":1,"type":"doctor"'
 assert_eq "doctor --json counts all eight codes in fixed order" \
@@ -5243,7 +5244,7 @@ assert_contains "doctor --json records carry code, file, and detail" "$doc_json"
 doc_json_err="$(t doctor --dir "$doc_dir" --bogus 2>&1 >/dev/null || true)"
 assert_contains "doctor refuses an unknown argument with USAGE" "$doc_json_err" "(code: USAGE)"
 
-echo "== doctor: --all surfaces the grandfathered findings =="
+section "doctor: --all surfaces the grandfathered findings"
 doc_all="$(t doctor --dir "$doc_dir" --all)"
 doc_all_expected="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\nGRANDFATHERED %s\ndoctor: 8 problem(s), 6 grandfathered across 19 task files' \
 	'DEAD_REPORT_LINK current/LINK-1-20260615-1200-dead-link.md: dead report link (line 12): ../reports/GHOST-9-20260615-1200-x/99-missing.md' \
@@ -5290,7 +5291,7 @@ fi
 doc_all_rc=0; t doctor --dir "$doc_dir" --all >/dev/null 2>&1 || doc_all_rc=1
 assert_eq "doctor --all keeps the always-exit-0 contract" "0" "$doc_all_rc"
 
-echo "== doctor: dashboard divergence =="
+section "doctor: dashboard divergence"
 printf '\nstray line\n' >>"$doc_dir/dashboard.md"
 doc_div="$(t doctor --dir "$doc_dir")"
 assert_contains "doctor reports a diverged dashboard" "$doc_div" 'DASHBOARD_DIVERGENCE dashboard.md: dashboard.md differs from the assembled board'
@@ -5300,7 +5301,7 @@ rm -f "$doc_dir/dashboard.md"
 assert_contains "doctor reports a missing dashboard" "$(t doctor --dir "$doc_dir")" 'DASHBOARD_DIVERGENCE dashboard.md: dashboard.md is missing (render would create it)'
 t render --dir "$doc_dir" >/dev/null
 
-echo "== doctor: read-only guarantee =="
+section "doctor: read-only guarantee"
 doc_tree_before="$(find "$doc_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
 t doctor --dir "$doc_dir" >/dev/null
 t doctor --dir "$doc_dir" --json >/dev/null
@@ -5311,7 +5312,7 @@ assert_eq "the doctor leaves the board tree untouched" "$doc_tree_before" "$doc_
 
 # --- shared dependency-token scan (ORCH-4-4-3) -------------------------------
 
-echo "== shared dependency-token scan: cross-consumer agreement =="
+section "shared dependency-token scan: cross-consumer agreement"
 # closure_gate_scan is the board's one dependency-token grammar; the
 # doctor's MISSING_DEP/DEP_CYCLE passes and the frontier's graph
 # derivation must consume it through the shared dependency_tokens
@@ -5499,7 +5500,7 @@ FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/archive/DUP-1-20260615-0930-du
 FR_COMPLETED='2026-06-15 10:00' fr_write "$fr_dir/archive/FRC-1-20260615-0945-archived-dup.md" Completed 100%
 t render --dir "$fr_dir" >/dev/null
 
-echo "== frontier: derived runnable and the graph payload =="
+section "frontier: derived runnable and the graph payload"
 fr_json="$(t frontier --dir "$fr_dir" --json)"
 assert_contains "frontier --json carries the schema_version 1 marker" "$fr_json" '{"schema_version":1,"type":"frontier"'
 assert_eq "frontier --json pins the runnable and total counts" '"runnable":9,"total":25' \
@@ -5571,7 +5572,7 @@ else
 	bad "no independent JSON parser on the host (python3 nor jq)"
 fi
 
-echo "== frontier: edge mirror against the doctor's successor map =="
+section "frontier: edge mirror against the doctor's successor map"
 # The direct mirror the exact-output pins left implicit: the doctor's
 # pass-3 successor map (own ID -> resolved dependency token over the
 # shared dependency_tokens scan, self-deps skipped, ID-less files
@@ -5609,7 +5610,7 @@ fr_json_edges="$(printf '%s' "$fr_json" | grep -o '"from":"[^"]*","to":"[^"]*"' 
 assert_eq "the frontier's emitted edges mirror the doctor's successor map exactly" \
 	"$fr_doctor_map" "$fr_json_edges"
 
-echo "== frontier: human view and the doctor's fail-closed arm =="
+section "frontier: human view and the doctor's fail-closed arm"
 
 fr_human_expected="$(printf '%b\n' \
 	'RUNNABLE\tcurrent/FR-1-20260615-1200-alpha.md' \
@@ -5648,7 +5649,7 @@ fr_doc_all="$(t doctor --dir "$fr_dir" --all)"
 assert_contains "the Ready unknown token reports as a grandfathered doctor finding" "$fr_doc_all" \
 	"GRANDFATHERED MISSING_DEP current/FR-4-20260615-1200-delta.md: dependency token 'GHOST-9' names no board file"
 
-echo "== frontier: errors, empty board, read-only guarantee =="
+section "frontier: errors, empty board, read-only guarantee"
 fr_usage_err="$(t frontier --dir "$fr_dir" --bogus 2>&1 >/dev/null || true)"
 assert_contains "frontier refuses an unknown argument with USAGE" "$fr_usage_err" "(code: USAGE)"
 fr_arg_err="$(t frontier extra 2>&1 >/dev/null || true)"
@@ -5671,7 +5672,7 @@ t frontier --dir "$fr_dir" --json >/dev/null
 fr_tree_after="$(find "$fr_dir" -type f -exec sha1sum {} \; | LC_ALL=C sort)"
 assert_eq "the frontier leaves the board tree untouched" "$fr_tree_before" "$fr_tree_after"
 
-echo "== frontier: an ID-less file keeps its graph data and never kills the command =="
+section "frontier: an ID-less file keeps its graph data and never kills the command"
 # Legacy board shape: a file whose basename yields no Task ID carries
 # dependency tokens and rides the frontier like any other file. It keeps
 # its graph data (waiting_on, but never an edge, since an edge needs a
@@ -5700,7 +5701,7 @@ assert_eq "the frontier stays rc 0 with the ID-less board's grouped human view" 
 
 # --- AC-06 write parity (ORCH-4-4-2) ----------------------------------------
 
-echo "== write parity: every permitted mutation has an authorized CLI path =="
+section "write parity: every permitted mutation has an authorized CLI path"
 # The AC-06 inventory walk: each permitted mutation class performs through
 # its one authorized command on a scaffolded fixture, with a read-back so
 # the read surface proves the landing. Lifecycle transitions (claim,
@@ -5740,7 +5741,7 @@ t archive --dir "$wp_dir" "$(basename "$f_wp")" >/dev/null
 [[ -f "$wp_dir/archive/$(basename "$f_wp")" ]] \
 	&& ok "terminal transitions ride close and archive" || bad "terminal transitions ride close and archive"
 
-echo "== write parity: concurrent edit --append serializes (no lost append) =="
+section "write parity: concurrent edit --append serializes (no lost append)"
 # Without a seam, whether two writers' lock windows overlap is scheduler
 # luck and the assertion can pass with the lock removed whenever the
 # processes serialize naturally. Both writers carry the test-only
@@ -5774,7 +5775,7 @@ done
 assert_eq "concurrent appends serialize under the lock-hold seam and lose no update" "0" "$wpfail"
 rm -rf "$wpdir"
 
-echo "== write parity: crash safety (kill inside the commit window never tears the file) =="
+section "write parity: crash safety (kill inside the commit window never tears the file)"
 # A fixed post-launch sleep kills during bash startup, before the staging
 # write, so the interesting window (staged tmp written, mv not yet) never
 # ran and the invariant's substance stayed untested. Each round arms the
@@ -5815,7 +5816,7 @@ printf 'after-crash marker\n' | t edit --dir "$wp_dir" "$(basename "$f_wpk")" --
 assert_contains "a normal append lands after the crash rounds" \
 	"$(t show --dir "$wp_dir" "$(basename "$f_wpk")" --section "Testing Strategy")" "after-crash marker"
 
-echo "== stuck: usage, read-only contract, and degradation notes ==="
+section "stuck: usage, read-only contract, and degradation notes ="
 # The detector's v1 contract pinned here: the usage names the command, the
 # four TASKS_STUCK_* seams with their defaults, and the doctor-style exit
 # contract (findings never gate the exit); the scan writes nothing; missing
@@ -5893,7 +5894,7 @@ assert_contains "the absent-ledger note names the path" "$stuck_out" "$ROOT/no-s
 stuck_out="$(t stuck --metrics-ledger "$ROOT" 2>&1)"
 assert_contains "a directory at the metrics seam degrades with a note" "$stuck_out" "missing, unreadable, empty, or not a regular file"
 
-echo "== stuck: H1 no-checkpoint-progress ==="
+section "stuck: H1 no-checkpoint-progress ="
 # Positive: a claimed In Progress task churning five distinct entries inside
 # the claim window (opened by its claim.acquired event) while nothing
 # progress-shaped has landed since Created.
@@ -6000,7 +6001,7 @@ stuck_out="$(TASKS_TEST_CLOCK="2026-06-16 10:30" t stuck)"
 assert_contains "the fresh-claim window fires once it ages past the floor" "$stuck_out" "H1 ${f_dc1#"$TASKS_DIR/"}: churn without progress"
 assert_contains "the clamp measures the stall from the window open" "$stuck_out" "stall measured from the window open 2026-06-15 10:30"
 
-echo "== stuck: H2 repeated-identical-recorded-actions ==="
+section "stuck: H2 repeated-identical-recorded-actions ="
 # Positive: three identical entries from one author in one claim window;
 # normalization makes case and whitespace spelling irrelevant.
 f_h2="$(t new --id STUCK-5 --name "H2 Repeat Target" --status "In Progress")"
@@ -6029,7 +6030,7 @@ assert_contains "a foreign-author duplicate does not raise the count" "$stuck_ou
 stuck_out="$(t stuck --repeat-identical 4)"
 assert_not_contains "the repeat threshold moves with its flag" "$stuck_out" "H2 ${f_h2#"$TASKS_DIR/"}"
 
-echo "== stuck: H3 unchanged-failure-retries ==="
+section "stuck: H3 unchanged-failure-retries ="
 # Positive: three failed attempts against one unchanged signature (same
 # outcome, checkpoint, and report) across claim windows; the released ->
 # acquired cycle between retries is the retry cycle, not a reset.
@@ -6096,7 +6097,7 @@ assert_contains "a run whose newest failure is inside the horizon fires" "$stuck
 stuck_out="$(t stuck --stall-minutes 100)"
 assert_contains "the horizon stays put when the stall knob moves" "$stuck_out" "H3 $f_h3d_rel: 3 failed attempts against an unchanged failure signature"
 
-echo "== stuck: H4 tokens-without-state-change =="
+section "stuck: H4 tokens-without-state-change"
 # H4 rides the task-metrics invocation ledger named by the seam (env
 # TASKS_STUCK_METRICS_LEDGER, flag mirror --metrics-ledger). Ledger stamps
 # are RFC3339 UTC instants while board stamps are naive local wall-clock,
@@ -6233,7 +6234,7 @@ assert_eq "a single-letter-prefix task id keeps the scan exit 0" "0" "$stuck_rc"
 assert_contains "a single-letter-prefix task takes its H4 flag" "$stuck_out" "H4 ${f_h4z#"$TASKS_DIR/"}: 3200000 tokens (input+output) accumulated with no board mutation since the claim window open 2026-06-15 09:00"
 rm -f "$H4LEDGER"
 
-echo "== stuck: the H3 horizon seam =="
+section "stuck: the H3 horizon seam"
 # The recency horizon is an absolute minute count (default 5760, 96h),
 # decoupled from the stall floor: the coupled form silently moved the
 # horizon 8h to 96h when the stall recalibrated, so the stall knob must
@@ -6257,7 +6258,7 @@ assert_contains "the horizon flag beats the env seam" "$stuck_out" "H3 $f_hz_rel
 stuck_out="$(t stuck --stall-minutes 100)"
 assert_contains "the horizon stays put when the stall knob moves" "$stuck_out" "H3 $f_hz_rel: 3 failed attempts against an unchanged failure signature"
 
-echo "== stuck: per-layer degradation on a ledger-less board ==="
+section "stuck: per-layer degradation on a ledger-less board ="
 # A fresh board with claims but no event ledger: H1/H2 still run (the window
 # boundary falls back to the sidecar created stamp) while H3 prints its
 # inactive note, and the scan stays read-only there too.
@@ -6284,7 +6285,7 @@ assert_contains "the fallback note bounds what H1/H2 see" "$stuck_out" "only pos
 assert_contains "the degradation run exits clean" "$(grep -o 'rc=0' <<<"$stuck_out" | head -1)" "rc=0"
 rm -rf "${stuck_board%/.tasks}"
 
-echo "== stuck: a corrupt ledger is a hard error ==="
+section "stuck: a corrupt ledger is a hard error ="
 printf 'not json\n' >>"$TASKS_DIR/events.log"
 stuck_err="$(t stuck 2>&1 >/dev/null || true)"
 assert_contains "the corrupt-ledger diagnostic names the code" "$stuck_err" "EVENT_CORRUPT"
@@ -6294,7 +6295,7 @@ assert_eq "the corrupt ledger exits 1" "1" "$stuck_rc"
 sed -i '$d' "$TASKS_DIR/events.log"
 rm -f "$stuck_entries" "$tmp_mk"
 
-echo "== metrics: the m_epoch century-correction pin =="
+section "metrics: the m_epoch century-correction pin"
 # H4's postdate ordering rides m_epoch, the shipped Fliegel-Van Flandern
 # replacement for the gawk-only 2-arg mktime; its century term
 # (- int(yoe/100)) is what keeps a non-leap century year from contributing
@@ -6313,6 +6314,94 @@ for ts in 1900-02-28 1900-03-01 2100-02-28 2100-03-01; do
 		"$(date -u -d "${ts}T00:00:00Z" +%s)" \
 		"$(awk -f "$m_epoch_pin_prog")"
 done
+
+section "harness self-pin controls"
+
+# The runner must be unable to report green on a shrunk run: each control
+# builds a throwaway suite against the real harness and pins the verdict
+# print_result must produce. Fixture bodies are printf-composed so no
+# literal 'section "..."' line lands in this file; the END coverage check
+# scans this file as its own manifest and must see only real call sites.
+selfpin_fixture() { # outfile declared_total section_name...
+	local out="$1" declared="$2" s
+	shift 2
+	{
+		printf '#!/usr/bin/env bash\n'
+		printf 'set -uo pipefail\n'
+		printf 'source %q\n' "$REPO_ROOT/tests/lib/harness.sh"
+		printf 'EXPECTED_ASSERTIONS=%s\n' "$declared"
+		for s in "$@"; do
+			printf 'section "%s"\n' "$s"
+			printf 'ok "fixture assertion"\nok "fixture assertion"\n'
+		done
+		printf 'print_result\n((fail == 0)) || exit 1\n'
+	} > "$out"
+}
+
+selfpin_run() { # outfile: run a fixture, capture exit in selfpin_rc and its ANSI-stripped output in selfpin_out
+	selfpin_rc=0
+	selfpin_out="$(bash "$1" 2>&1)" || selfpin_rc=$?
+	selfpin_out="$(sed 's/\x1b\[[0-9;]*m//g' <<<"$selfpin_out")"
+}
+
+selfpin_fixture "$ROOT/selfpin-pos.sh" 4 "fixture alpha" "fixture beta"
+selfpin_run "$ROOT/selfpin-pos.sh"
+assert_eq "self-pin positive control: conforming fixture exits 0" 0 "$selfpin_rc"
+assert_contains "self-pin positive control: section headers still print" "$selfpin_out" "== fixture alpha =="
+assert_contains "self-pin positive control: both sections register" "$selfpin_out" "== fixture beta =="
+assert_contains "self-pin positive control: full total reported" "$selfpin_out" "4 passed, 0 failed"
+
+selfpin_fixture "$ROOT/selfpin-drop.sh" 4 "fixture alpha" "fixture beta"
+sed -i 's/^section "fixture beta"$/if false; then\nsection "fixture beta"\nfi/' "$ROOT/selfpin-drop.sh"
+selfpin_run "$ROOT/selfpin-drop.sh"
+if ((selfpin_rc == 0)); then
+	bad "self-pin drop control: a skipped section start fails the run"
+else
+	ok "self-pin drop control: a skipped section start fails the run"
+fi
+assert_contains "self-pin drop control: failure names the dropped section" "$selfpin_out" "fixture beta"
+assert_contains "self-pin drop control: failure names the never-ran class" "$selfpin_out" "never ran"
+
+selfpin_fixture "$ROOT/selfpin-total.sh" 9 "fixture alpha" "fixture beta"
+selfpin_run "$ROOT/selfpin-total.sh"
+if ((selfpin_rc == 0)); then
+	bad "self-pin total control: a wrong declared total fails the run"
+else
+	ok "self-pin total control: a wrong declared total fails the run"
+fi
+assert_contains "self-pin total control: drift names the actual total" "$selfpin_out" "4 passed, the suite declares 9"
+assert_contains "self-pin total control: drift gives per-section diagnostics" "$selfpin_out" "fixture beta: 2"
+
+# The manifest sed sees only `section "name"` lines, so a call site
+# outside that shape registers at runtime without entering the manifest;
+# the coverage gate must flag it instead of silently leaving it unpinned.
+# Single quotes are the same sabotage shape the design challenge used.
+selfpin_fixture "$ROOT/selfpin-undeclared.sh" 4 "fixture alpha"
+sed -i "s/^print_result$/section 'fixture odd'\\nok \"fixture assertion\"\\nok \"fixture assertion\"\\nprint_result/" "$ROOT/selfpin-undeclared.sh"
+selfpin_run "$ROOT/selfpin-undeclared.sh"
+if ((selfpin_rc == 0)); then
+	bad "self-pin undeclared control: a section call the manifest cannot see fails the run"
+else
+	ok "self-pin undeclared control: a section call the manifest cannot see fails the run"
+fi
+assert_contains "self-pin undeclared control: failure names the unseen section" "$selfpin_out" "fixture odd"
+assert_contains "self-pin undeclared control: failure names the absent-from-manifest class" "$selfpin_out" "absent from the static manifest"
+assert_contains "self-pin undeclared control: the pass total stays untouched" "$selfpin_out" "4 passed, 1 failed"
+
+# A derivation that cannot read SUITE_FILE must end the run loud, not
+# vacuously pass with an empty manifest while the registry proves the
+# suite adopted the mechanism.
+selfpin_fixture "$ROOT/selfpin-derive.sh" 4 "fixture alpha" "fixture beta"
+sed -i "s|^print_result$|SUITE_FILE=$ROOT/selfpin-gone-manifest.sh\\nprint_result|" "$ROOT/selfpin-derive.sh"
+selfpin_run "$ROOT/selfpin-derive.sh"
+if ((selfpin_rc == 0)); then
+	bad "self-pin derivation control: a failed manifest derivation fails the run"
+else
+	ok "self-pin derivation control: a failed manifest derivation fails the run"
+fi
+assert_contains "self-pin derivation control: failure names the derivation class" "$selfpin_out" "manifest derivation failed"
+assert_contains "self-pin derivation control: failure names the unreadable path" "$selfpin_out" "selfpin-gone-manifest.sh"
+assert_contains "self-pin derivation control: exactly one violation fires" "$selfpin_out" "4 passed, 1 failed"
 
  print_result
 ((fail == 0)) || exit 1

@@ -29,6 +29,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
+EXPECTED_ASSERTIONS=61
 
 accept() { # label; rest is the command that must succeed
 	local label="$1"; shift
@@ -61,7 +62,7 @@ t init >/dev/null
 LINT_BOARD="$ROOT/lintboard/.tasks"
 t init --dir "$LINT_BOARD" >/dev/null
 
-echo "== FM-1: fenced '## ' heading truncates the show tail (reproduced-pin) =="
+section "FM-1: fenced '## ' heading truncates the show tail (reproduced-pin)"
 # A ```-fenced '## ' line inside Work Log ends the section for
 # work_log_tail: every later entry drops out of tasks show.
 f_fm1="$TASKS_DIR/current/20260101-0900-fm1-fence-show.md"
@@ -80,7 +81,7 @@ assert_contains "FM-1 safe-pin: tail shows the pre-fence entry" "$fm1_show" "fir
 assert_not_contains "FM-1 reproduced-pin: tail hides the post-fence entry" "$fm1_show" "second entry"
 assert_not_contains "FM-1 reproduced-pin: tail hides the post-fence body" "$fm1_show" "second body"
 
-echo "== FM-2: tasks log inserts above the fenced heading (reproduced-pin) =="
+section "FM-2: tasks log inserts above the fenced heading (reproduced-pin)"
 # append_work_log_entry flushes the new entry at the first '## ' line
 # seen inside Work Log, so a fenced heading captures it; entries below
 # the fence stay in the file but out of every tail.
@@ -96,7 +97,7 @@ assert_not_contains "FM-2 reproduced-pin: tail still hides the hand-written entr
 assert_contains "FM-2 safe-pin: the hidden entry is not deleted from the file" \
 	"$(cat "$f_fm1")" "second body"
 
-echo "== FM-3: quoted '## '/'### ' lines are inert (safe-pin; hazard claim refuted) =="
+section "FM-3: quoted '## '/'### ' lines are inert (safe-pin; hazard claim refuted)"
 # The hazard paragraph's quoted-block half: a '>' prefix blocks the
 # ^## / ^### match in the tail, the span anchors, and the append path.
 f_fm3="$TASKS_DIR/current/20260101-0905-fm3-quoted.md"
@@ -120,7 +121,7 @@ fm3_entry_line="$(first_line_of "$f_fm3" "entry at true end")"
 fm3_last_line="$(first_line_of "$f_fm3" "last body")"
 if (( fm3_entry_line > fm3_last_line )); then ok "FM-3 safe-pin: log appends past the quoted block at section end"; else bad "FM-3 safe-pin: log appends past the quoted block at section end (entry $fm3_entry_line, last body $fm3_last_line)"; fi
 
-echo "== FM-4: fenced '## ' in the header region truncates the header (reproduced-pin) =="
+section "FM-4: fenced '## ' in the header region truncates the header (reproduced-pin)"
 # header_of and assemble_rows stop at the first '^## ' line: fields after
 # a fenced heading fall back to defaults in the render and escape the
 # lint shape checks.
@@ -151,7 +152,7 @@ assert_contains "FM-4 reproduced-pin: lint reports the Status field missing" "$f
 assert_not_contains "FM-4 reproduced-pin: shape-invalid Updated escapes the lint check" "$fm4_lint" \
 	"current/$(basename "$f_fm4"): header Updated not CLI-shaped"
 
-echo "== FM-4 control: fields in header position are checked (safe-pin) =="
+section "FM-4 control: fields in header position are checked (safe-pin)"
 f_fm4c="$LINT_BOARD/current/20260101-0901-fm4c-header-control.md"
 printf '%s\n' \
 	'# Task: FM4C Header Control Probe' '' \
@@ -167,7 +168,7 @@ fm4c_lint="$(t lint --dir "$LINT_BOARD" 2>&1 || true)"
 assert_contains "FM-4 safe-pin control: lint flags the same value in header position" "$fm4c_lint" \
 	"current/$(basename "$f_fm4c"): header Updated not CLI-shaped"
 
-echo "== FM-5: the criteria section tracker runs on fenced headings (reproduced-pin) =="
+section "FM-5: the criteria section tracker runs on fenced headings (reproduced-pin)"
 # track_criteria_section updates SECNAME/INSC on every level-2 heading,
 # fence included: a fenced heading inside Success Criteria clears INSC,
 # so real unticked boxes after it count zero in the closure gate.
@@ -187,7 +188,7 @@ accept "FM-5 reproduced-pin: close passes an unticked box hidden behind a fenced
 	close "$f_fm5a"
 assert_eq "FM-5 reproduced-pin: the closed file is Completed" "Completed" "$(status_of "$f_fm5a")"
 
-echo "== FM-5 control: the same box without a fence refuses (safe-pin) =="
+section "FM-5 control: the same box without a fence refuses (safe-pin)"
 f_fm5x="$TASKS_DIR/current/20260101-0911-fm5x-gate-control.md"
 printf '%s\n' \
 	'# Task: FM5X Gate Control Probe' '' \
@@ -201,7 +202,7 @@ fm5x_err="$(t close "$f_fm5x" 2>&1 >/dev/null || true)"
 assert_contains "FM-5 safe-pin control: an unfenced unticked box refuses closure" "$fm5x_err" \
 	"unchecked Success Criteria boxes: 1"
 
-echo "== FM-5: boxes after a fenced heading under-count (reproduced-pin) =="
+section "FM-5: boxes after a fenced heading under-count (reproduced-pin)"
 f_fm5b="$TASKS_DIR/current/20260101-0912-fm5b-undercount.md"
 printf '%s\n' \
 	'# Task: FM5B Undercount Probe' '' \
@@ -221,7 +222,7 @@ fm5b_err="$(t close "$f_fm5b" 2>&1 >/dev/null || true)"
 assert_contains "FM-5 reproduced-pin: the gate counts one of the two unticked boxes" "$fm5b_err" \
 	"unchecked Success Criteria boxes: 1"
 
-echo "== FM-5: a fenced '## Dependencies' heading toggles indeps scanning (reproduced-pin) =="
+section "FM-5: a fenced '## Dependencies' heading toggles indeps scanning (reproduced-pin)"
 # closure_gate_scan sets indeps from SECNAME on every level-2 heading
 # line, fence included: a task-ID citation inside a plain code fence
 # becomes a declared child once a fenced '## Dependencies' heading
@@ -250,7 +251,7 @@ fm5c_err="$(t close "$f_fm5c" 2>&1 >/dev/null || true)"
 assert_contains "FM-5 reproduced-pin: fenced citation declares an open child" "$fm5c_err" \
 	"unfinished named child task(s): ORCH-4-2"
 
-echo "== FM-5 control: the same citation without the fenced heading is inert (safe-pin) =="
+section "FM-5 control: the same citation without the fenced heading is inert (safe-pin)"
 f_fm5d="$TASKS_DIR/current/20260101-0914-fm5d-indeps-control.md"
 printf '%s\n' \
 	'# Task: FM5D Indeps Control Probe' '' \
@@ -267,7 +268,7 @@ accept "FM-5 safe-pin control: a fenced citation without the heading never block
 rm -f "$sibling"
 t render >/dev/null
 
-echo "== FM-6: a fenced '## ' heading ends the span scan early (reproduced-pin) =="
+section "FM-6: a fenced '## ' heading ends the span scan early (reproduced-pin)"
 # work_log_span exits at the first '^## ' line inside Work Log: anchors
 # after the fence miss the Duration derivation on stamp.
 f_fm6a="$TASKS_DIR/current/20260101-0920-fm6a-span-fence.md"
@@ -285,7 +286,7 @@ printf '%s\n' \
 t stamp "$f_fm6a" >/dev/null
 assert_eq "FM-6 reproduced-pin: Duration collapses to 0m (true span 2h)" "0m" "$(duration_of "$f_fm6a")"
 
-echo "== FM-6 control: the same anchors without a fence derive 2h (safe-pin) =="
+section "FM-6 control: the same anchors without a fence derive 2h (safe-pin)"
 f_fm6x="$TASKS_DIR/current/20260101-0921-fm6x-span-control.md"
 printf '%s\n' \
 	'# Task: FM6X Span Control Probe' '' \
@@ -298,7 +299,7 @@ printf '%s\n' \
 t stamp "$f_fm6x" >/dev/null
 assert_eq "FM-6 safe-pin control: unfenced anchors derive the true 2h span" "2h" "$(duration_of "$f_fm6x")"
 
-echo "== FM-6: a fenced '### <ts>:' line counts as the last anchor (reproduced-pin) =="
+section "FM-6: a fenced '### <ts>:' line counts as the last anchor (reproduced-pin)"
 # The anchor regex runs on every '### ' line inside the section, fence
 # included: a fenced fake anchor last in file order inflates the span.
 f_fm6b="$TASKS_DIR/current/20260101-0922-fm6b-fenced-anchor.md"
@@ -316,7 +317,7 @@ printf '%s\n' \
 t stamp "$f_fm6b" >/dev/null
 assert_eq "FM-6 reproduced-pin: Duration inflates to 14h (true span 1h)" "14h" "$(duration_of "$f_fm6b")"
 
-echo "== FM-6 control: the same anchors with an empty fence derive 1h (safe-pin) =="
+section "FM-6 control: the same anchors with an empty fence derive 1h (safe-pin)"
 f_fm6y="$TASKS_DIR/current/20260101-0923-fm6y-fenced-anchor-control.md"
 printf '%s\n' \
 	'# Task: FM6Y Fenced Anchor Control Probe' '' \
@@ -332,7 +333,7 @@ printf '%s\n' \
 t stamp "$f_fm6y" >/dev/null
 assert_eq "FM-6 safe-pin control: an anchor-free fence derives the true 1h span" "1h" "$(duration_of "$f_fm6y")"
 
-echo "== FM-7: a fenced heading satisfies --section existence (reproduced-pin) =="
+section "FM-7: a fenced heading satisfies --section existence (reproduced-pin)"
 # section_level/replace_section_body classify headings fence-blind:
 # tasks edit targets a fenced-only heading and its replacement span
 # swallows everything after the fenced line.
@@ -356,7 +357,7 @@ assert_not_contains "FM-7 reproduced-pin: the span swallows the post-fence body"
 assert_eq "FM-7 reproduced-pin: the replacement swallows the closing fence line" "1" \
 	"$(grep -c '^```$' "$f_fm7a")"
 
-echo "== FM-7: append lands before a fenced heading inside the section (reproduced-pin) =="
+section "FM-7: append lands before a fenced heading inside the section (reproduced-pin)"
 f_fm7b="$TASKS_DIR/current/20260101-0931-fm7b-append-fence.md"
 printf '%s\n' \
 	'# Task: FM7B Append Fence Probe' '' \
@@ -374,7 +375,7 @@ fm7b_post_line="$(first_line_of "$f_fm7b" "post-fence body")"
 if (( fm7b_append_line < fm7b_fence_line )); then ok "FM-7 reproduced-pin: append ends at the fenced heading"; else bad "FM-7 reproduced-pin: append ends at the fenced heading (append $fm7b_append_line, fence $fm7b_fence_line)"; fi
 if (( fm7b_fence_line < fm7b_post_line )); then ok "FM-7 safe-pin: post-fence content survives the append"; else bad "FM-7 safe-pin: post-fence content survives the append"; fi
 
-echo "== FM-7: section creation inserts above a fenced anchor heading (reproduced-pin) =="
+section "FM-7: section creation inserts above a fenced anchor heading (reproduced-pin)"
 # insert_section_body scans for its anchor with the same fence-blind
 # classifier: creating a missing template section whose canonical anchor
 # exists only inside a fence lands the new heading inside the fence
@@ -395,7 +396,7 @@ fm7c_created_line="$(first_line_of "$f_fm7c" "## Dependencies")"
 fm7c_fence_line="$(first_line_of "$f_fm7c" '## Execution Log')"
 if (( fm7c_created_line < fm7c_fence_line )); then ok "FM-7 reproduced-pin: the new section is inserted above the fenced anchor"; else bad "FM-7 reproduced-pin: the new section is inserted above the fenced anchor (created $fm7c_created_line, fence $fm7c_fence_line)"; fi
 
-echo "== FM-8: duplicate '## Work Log' headings split the append paths (reproduced-pin drift) =="
+section "FM-8: duplicate '## Work Log' headings split the append paths (reproduced-pin drift)"
 # The literal matchers special-case '## Work Log' before the generic
 # '^## ' boundary, so a duplicate heading re-opens the section for the
 # tail, the span, and tasks log; the heading-level-aware edit path ends
@@ -416,7 +417,7 @@ fm8_log_line="$(first_line_of "$f_fm8" "log-appended body")"
 fm8_second_line="$(first_line_of "$f_fm8" "second-section entry")"
 if (( fm8_log_line > fm8_second_line )); then ok "FM-8 reproduced-pin: tasks log appends past the duplicate at file end"; else bad "FM-8 reproduced-pin: tasks log appends past the duplicate at file end (log $fm8_log_line, second section $fm8_second_line)"; fi
 
-echo "== FM-8: edit --append ends at the duplicate heading (reproduced-pin drift) =="
+section "FM-8: edit --append ends at the duplicate heading (reproduced-pin drift)"
 f_fm8c="$TASKS_DIR/current/20260101-0941-fm8c-edit-duplicate.md"
 printf '%s\n' \
 	'# Task: FM8C Edit Duplicate Probe' '' \
@@ -432,7 +433,7 @@ fm8c_edit_line="$(first_line_of "$f_fm8c" "edit-appended body")"
 fm8c_dup_line="$(grep -n '^## Work Log$' "$f_fm8c" | sed -n '2p' | cut -d: -f1)"
 if (( fm8c_edit_line < fm8c_dup_line )); then ok "FM-8 reproduced-pin: edit --append lands above the duplicate heading"; else bad "FM-8 reproduced-pin: edit --append lands above the duplicate heading (edit $fm8c_edit_line, duplicate $fm8c_dup_line)"; fi
 
-echo "== FM-8: the span derivation reads both duplicate sections (reproduced-pin) =="
+section "FM-8: the span derivation reads both duplicate sections (reproduced-pin)"
 f_fm8b="$TASKS_DIR/current/20260101-0942-fm8b-duplicate-span.md"
 printf '%s\n' \
 	'# Task: FM8B Duplicate Span Probe' '' \
@@ -446,7 +447,7 @@ printf '%s\n' \
 t stamp "$f_fm8b" >/dev/null
 assert_eq "FM-8 reproduced-pin: Duration spans anchors across the duplicate (2h)" "2h" "$(duration_of "$f_fm8b")"
 
-echo "== FM-9: a level-3 '### Work Log' section is invisible (reproduced-pin) =="
+section "FM-9: a level-3 '### Work Log' section is invisible (reproduced-pin)"
 # '/^## Work Log/' never matches a level-3 heading: the tail prints no
 # entries, the span derives no anchors, and tasks log appends at EOF.
 f_fm9="$TASKS_DIR/current/20260101-0950-fm9-level3.md"
@@ -476,7 +477,7 @@ printf '%s\n' \
 t stamp "$f_fm9b" >/dev/null
 assert_eq "FM-9 reproduced-pin: Duration derives N/A from an unread section" "N/A" "$(duration_of "$f_fm9b")"
 
-echo "== FM-10: header fields after the first real '## ' heading are invisible (safe-pin) =="
+section "FM-10: header fields after the first real '## ' heading are invisible (safe-pin)"
 # Decision (report-corrections addendum): stop-at-first-section is the
 # intended header contract; a field placed after a real heading is a
 # malformed file whose sanctioned signal is lint's missing-field
@@ -503,7 +504,7 @@ assert_contains "FM-10 safe-pin: lint reports the Status field missing" "$fm10_l
 assert_not_contains "FM-10 safe-pin: shape-invalid Updated outside the header region escapes the shape check" "$fm10_lint" \
 	"current/$(basename "$f_fm10"): header Updated not CLI-shaped"
 
-echo "== FM-11: criteria_box is fence-aware (safe-pin control) =="
+section "FM-11: criteria_box is fence-aware (safe-pin control)"
 # The one fence-aware surface: fenced checkbox and ~ marker lines count
 # zero in the closure gate and the lint. This pin guards the control so
 # the parser fix cannot regress fence-awareness here. The lint count is
@@ -550,7 +551,7 @@ assert_contains "FM-11 safe-pin: the close note lists the real superseded criter
 assert_not_contains "FM-11 safe-pin: the fenced ~ marker stays out of the close note" "$fm11_log" \
 	"fenced superseded example"
 
-echo "== FM-12: header extraction agreement matrix (safe-pin controls, two agreement pins, one drift finding) =="
+section "FM-12: header extraction agreement matrix (safe-pin controls, two agreement pins, one drift finding)"
 # The three header extractions over the shared fixture set: header_of
 # (tasks show), assemble_rows (the render), lint_scan_files (the lint).
 # Control: all three agree. FM-4/FM-10: all three agree the fields are
@@ -574,7 +575,7 @@ assert_contains "FM-12 reproduced-pin agreement: render shows the default fallba
 fm12_fm10_row="$(grep -F 'FM10 Field Order Probe' "$LINT_BOARD/dashboard.md")"
 assert_contains "FM-12 safe-pin agreement: render shows the default fallback row for the FM-10 fixture" "$fm12_fm10_row" "| Medium |"
 
-echo "== FM-12 drift: a bare '## ' heading splits lint from render and show (reproduced-pin) =="
+section "FM-12 drift: a bare '## ' heading splits lint from render and show (reproduced-pin)"
 # heading_level('## ') is 2 with empty HTEXT, so track_criteria_section
 # sets SECNAME to empty and lint_scan_files keeps scanning the header,
 # while header_of and assemble_rows stop at the '^## ' line.
