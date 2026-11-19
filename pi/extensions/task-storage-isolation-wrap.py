@@ -142,6 +142,15 @@ function isoBuildIsolationArgv(
 		argv.push("--ro-bind", maskPath, maskPath);
 		argv.push("--tmpfs", maskPath);
 	}
+	// Transcript-copy stores (the DC2 lane): board content also lives in
+	// the same-uid session store of the other harness, reachable under
+	// the root read-only bind. A tmpfs over the store hides it entirely;
+	// it is skipped when absent, so machines without the other harness
+	// keep the exact same argv shape minus the dead entry.
+	const transcriptStore = `${env.XDG_DATA_HOME || `${env.HOME ?? ""}/.local/share`}/opencode`;
+	if (isoFs.existsSync(transcriptStore)) {
+		argv.push("--tmpfs", transcriptStore);
+	}
 	argv.push("--ro-bind", socketPath, socketPath);
 	argv.push(...agentState);
 	argv.push(invocation.command, ...invocation.args);

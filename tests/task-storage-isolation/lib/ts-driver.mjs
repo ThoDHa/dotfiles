@@ -256,6 +256,7 @@ async function runWrap(repoRoot, scratch, activatedPath, expectedArgvPath) {
 		[ISO.SOCKET]: expected.socket,
 		[ISO.TRUST]: expected.trust,
 		[ISO.AGENT]: expected.agent_dir,
+		XDG_DATA_HOME: expected.xdg_data_home,
 	};
 	const built = probe.wrapInvocation(invocation, wired);
 	check("wrap argv matches the suite builder for identical inputs (parity)",
@@ -264,6 +265,11 @@ async function runWrap(repoRoot, scratch, activatedPath, expectedArgvPath) {
 	const socketIndex = built ? built.args.indexOf(expected.socket) : -1;
 	check("wrap binds the socket FILE read-only (connect allowed, unlink refused)",
 		socketIndex > 0 && built.args[socketIndex - 1] === "--ro-bind",
+		JSON.stringify(built));
+	const transcriptStore = `${expected.xdg_data_home}/opencode`;
+	const storeIndex = built ? built.args.indexOf(transcriptStore) : -1;
+	check("wrap tmpfs-masks the other harness's transcript-copy store (DC2)",
+		storeIndex > 0 && built.args[storeIndex - 1] === "--tmpfs",
 		JSON.stringify(built));
 	for (const maskPath of expected.mask_paths) {
 		check(`wrap stacks a ro-bind and tmpfs mask over ${maskPath}`,

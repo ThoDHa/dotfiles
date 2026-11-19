@@ -71,7 +71,7 @@ const WRAP_BLOCK_END = "// TASK-STORAGE-ISOLATION WRAP END";
 // rather than "does it look like the wrap?". The suite cross-checks
 // this constant against the patcher's derived digest on every run.
 export const WRAP_BLOCK_DIGEST =
-	"6022ba6a9b75e7d8bb92ffd551da9ebffdb8ff3a3c82569fd91b8150df7deb32";
+	"472671c1e342e43dea0f5633cc246e74499db9c648fb25565b220851420c67db";
 
 const GUARDED_TOOLS = new Set(["read", "write", "edit"]);
 const SERVICE_WAIT_POLL_MS = 50;

@@ -78,6 +78,9 @@ def capture_stdin() -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--registry", required=True)
+    parser.add_argument("--peer-ancestor", type=int, default=None,
+                        help="spawner pid the guard passes so the broker can "
+                        "tie exec-peer acceptance to the exact host process")
     parser.add_argument("--session", required=True)
     parser.add_argument("--agent", required=True)
     parser.add_argument("verb", choices=["exec"])
@@ -103,6 +106,7 @@ def main() -> int:
         "cwd": os.getcwd(),
         "argv": ["/bin/bash", "-c", args.command],
         "stdin": body,
+        "peer_ancestor": args.peer_ancestor,
     }).encode()
     if len(payload) > SEND_LIMIT:
         print("refused: command exceeds the broker request cap", file=sys.stderr)

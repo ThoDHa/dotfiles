@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-opencode test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -254,7 +254,7 @@ sync-pi-extensions:
 		root="$$(git -C "$$src" rev-parse --show-toplevel)"; \
 		rel="$$(git -C "$$src" rev-parse --show-prefix)"; \
 		rel="$${rel%/}"; \
-		historical="$$(git -C "$$root" log --format= --name-only -- "$$rel" | sed "/^$$/d" | sort -u)"; \
+		historical="$$(git -C "$$root" log --format= --name-only -- "$$rel" | sed "/^$$/d" | LC_ALL=C sort -u)"; \
 		mkdir -p $(PI_EXTENSIONS_DIR); \
 		host="$$(cd $(PI_EXTENSIONS_DIR) && pwd -P)"; \
 		git -C "$$root" ls-files -z -- "$$rel" | \
@@ -263,8 +263,8 @@ sync-pi-extensions:
 				mkdir -p "$$host/$$(dirname "$$host_rel")"; \
 				cp "$$root/$$tracked_rel" "$$host/$$host_rel"; \
 			done; \
-		comm -13 \
-			<(git -C "$$root" ls-files -- "$$rel" | sort) \
+		LC_ALL=C comm -13 \
+			<(git -C "$$root" ls-files -- "$$rel" | LC_ALL=C sort) \
 			<(printf "%s\n" "$$historical") | \
 			while IFS= read -r stale_rel; do \
 				stale_host="$$host/$${stale_rel#$$rel/}"; \
@@ -381,7 +381,7 @@ done
 endef
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+test: lint-corpus test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "All tests passed!"
 
@@ -390,12 +390,16 @@ check: test
 
 # In-container suite behind make verify: the repo content checks, which
 # need no network and no host deployment state. The host deployment checks
-# (test-links, test-rules) stay host-only in test. The prerequisite chain
+# (test-links, test-rules) stay host-only in test. The task-storage suites
+# run their degradation contract (ISOLATION_ALLOW_DEGRADED=1: the
+# container has no bwrap, no node, and no opencode), so enforced labels
+# come only from full-mode host runs. The prerequisite chain
 # is the per-suite exit-gating loop itself: each suite target runs its own
 # runner script and make stops at the first nonzero exit, so no aggregate
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
-verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi
+verify-inner: export ISOLATION_ALLOW_DEGRADED := 1
+verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -416,6 +420,10 @@ ifneq ($(OPENCODE_PRESENT),)
 		test -L $(OPENCODE_CONFIG)/$$file || { echo "FAIL: $$file symlink missing"; exit 1; }; \
 		echo "    $$file OK"; \
 	done
+	@echo "  Checking opencode plugin deployment..."
+	@test -L $(OPENCODE_CONFIG)/plugin/task-storage-guard.ts || { echo "FAIL: task-storage-guard.ts plugin symlink missing (run 'make stow')"; exit 1; }
+	@resolved=$$(readlink -f $(OPENCODE_CONFIG)/plugin/task-storage-guard.ts) && test -f "$$resolved" || { echo "FAIL: task-storage-guard.ts plugin symlink does not resolve to a real file (dangling)"; exit 1; }
+	@echo "    task-storage-guard.ts OK"
 else
 	@echo "  Skipping opencode checks (opencode not installed)"
 endif
@@ -517,14 +525,37 @@ test-task-access-replay:
 	@echo "Testing task-access command-sufficiency replay..."
 	@bash tests/task-access/test-replay.sh
 
-# The opencode task-storage enforcement suite (ORCH-4-10-3). Its e2e
-# section drives real opencode sessions (LLM calls on the model gateway),
-# so it stays out of `make test` and `verify-inner` the same way
-# run-skeleton.sh does; ORCH-4-10-4 owns wiring the combined adversarial
-# suite into `make test`.
+# The pi task-storage enforcement suite (ORCH-4-10-2; ORCH-4-10-4 wired
+# it into make test and verify-inner). Full mode runs the node driver
+# sections and the machine-side bwrap probes; with
+# ISOLATION_ALLOW_DEGRADED=1 the missing-tool gates and dependent
+# sections are announced as skipped and the suite gates on what ran.
+# The repo tasks bin dir rides on PATH so the suite resolves the CLI
+# it enforces in both worlds.
+test-task-storage-pi: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
+test-task-storage-pi:
+	@echo "Testing pi task-storage enforcement..."
+	@bash tests/task-storage-isolation/run-suite.sh
+
+# The opencode task-storage enforcement suite (ORCH-4-10-3; ORCH-4-10-4
+# wired it into make test and verify-inner). Sections 1-4 are hermetic
+# service units; the e2e section drives real opencode sessions (LLM
+# calls on the fleet worker model) and is announced as skipped under
+# ISOLATION_ALLOW_DEGRADED=1 when opencode is missing, failing loudly
+# otherwise.
+test-task-storage-opencode: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
 test-task-storage-opencode:
 	@echo "Testing opencode task-storage enforcement..."
 	@bash tests/task-storage-isolation/test-opencode-enforcement.sh
+
+# The combined adversarial bypass suite (ORCH-4-10-4). Both harness
+# columns run through the real dispatch paths; with
+# ISOLATION_ALLOW_DEGRADED=1 the bwrap-dependent columns announce as
+# skipped and the suite gates on what ran.
+test-task-storage-adversarial: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
+test-task-storage-adversarial:
+	@echo "Testing the task-storage adversarial bypass suite..."
+	@bash tests/task-storage-isolation/run-adversarial.sh
 
 # Tier-B fixture harness skeleton (ORCH-4-9-1): per-role dispatch configs
 # validated by an ordered-rule evaluator plus the transcript audit; the
@@ -656,6 +687,9 @@ help:
 	@echo "  make test-pi-extensions - Verify deployed pi extensions match the repo source and the body pin"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo "  make test-smoke  - Validate the smoke harness instrument (scenarios, registry, grader self-test)"
+	@echo "  make test-task-storage-pi - Verify the pi task-storage enforcement suite"
+	@echo "  make test-task-storage-opencode - Verify the opencode task-storage enforcement suite"
+	@echo "  make test-task-storage-adversarial - Verify the combined adversarial bypass suite"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"

@@ -38,11 +38,19 @@
 #                         fixture boards never mutate, and the final-round
 #                         pins hold (primary-mode non-manager agents are
 #                         denied while the manager stays exempt; scout's
-#                         bridge rule is an explicit map deny).
+#                         bridge rule is an explicit map deny) plus the
+#                         closure-round pins (the ancestor walk denies a
+#                         standalone board two levels above a non-git
+#                         session cwd).
 #
 # The e2e section makes real LLM calls on the fleet worker model (override
-# with argument 1, mirroring run-skeleton.sh). Any failed assertion exits
-# non-zero; the run directory is kept for inspection on failure.
+# with argument 1, mirroring run-skeleton.sh). With
+# ISOLATION_ALLOW_DEGRADED=1 (set by the container verify chain, which
+# has no opencode) a missing opencode binary announces the section as
+# skipped instead of failing; without the flag the missing binary fails
+# the suite loudly. Enforced labels are decided by full-mode host runs
+# only. Any failed assertion exits non-zero; the run directory is kept
+# for inspection on failure.
 
 set -uo pipefail
 
@@ -50,6 +58,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE_DIR="$REPO_ROOT/tests/task-storage-isolation"
 TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
 MODEL="${1:-zai-coding-plan/glm-5.3-flash}"
+DEGRADED="${ISOLATION_ALLOW_DEGRADED:-0}"
+
+# Imports of repo-source modules (the lib service under test) must not
+# drop __pycache__ into the repo tree; the pi-extensions
+# deploy-completeness gate fails on untracked litter there.
+export PYTHONDONTWRITEBYTECODE=1
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
@@ -187,6 +201,7 @@ STATE = os.path.join(RUN, "gates-state")
 CLIENT = os.path.join(RUN, "client-copy", "oc-broker-client.py")
 os.makedirs(FIX)
 os.makedirs(STATE)
+os.chmod(STATE, 0o700)
 os.makedirs(os.path.join(RUN, "client-copy"))
 
 # seed a real board so sanctioned round-trip and body-deposit pins have
@@ -233,6 +248,12 @@ shutil.copy(os.path.join(REPO, "tests/task-storage-isolation/lib/oc-broker-clien
 
 EXPECTED_LABEL = "oc-channel-" + hashlib.sha256(b"tok-gates").hexdigest()[:16]
 
+# Degradation contract: the masked-execution expects need bwrap; the
+# container verify chain (ISOLATION_ALLOW_DEGRADED=1) announces them as
+# skipped and gates on the bwrap-free expects. Enforced labels are
+# decided by full-mode host runs only.
+HAVE_BWRAP = shutil.which("bwrap") is not None
+
 def run_client(session, agent, command, stdin_body=None):
 	return subprocess.run([sys.executable, CLIENT, "--registry", STATE, "--session", session,
 		"--agent", agent, "exec", command], capture_output=True, text=True, cwd=FIX, input=stdin_body)
@@ -242,13 +263,17 @@ def expect(label, cond, detail=""):
 	results.append(bool(cond))
 	print(("ok: " if cond else "FAIL: ") + label + (" [%s]" % detail if detail and not cond else ""))
 
-out = run_client("sess-1", "worker", "cat .tasks/reports/secret.md")
-expect("masked read denies the secret",
-	"PROVEMARK" not in out.stdout and out.returncode != 0 and "No such file" in out.stderr,
-	"rc=%s out=%r err=%r" % (out.returncode, out.stdout[:120], out.stderr[:200]))
-out = run_client("sess-1", "worker", "echo alive")
-expect("masked ordinary command runs", out.returncode == 0 and "alive" in out.stdout,
-	out.stdout[:120] + out.stderr[:200])
+if HAVE_BWRAP:
+	out = run_client("sess-1", "worker", "cat .tasks/reports/secret.md")
+	expect("masked read denies the secret",
+		"PROVEMARK" not in out.stdout and out.returncode != 0 and "No such file" in out.stderr,
+		"rc=%s out=%r err=%r" % (out.returncode, out.stdout[:120], out.stderr[:200]))
+	out = run_client("sess-1", "worker", "echo alive")
+	expect("masked ordinary command runs", out.returncode == 0 and "alive" in out.stdout,
+		out.stdout[:120] + out.stderr[:200])
+else:
+	print("skip: masked read denies the secret (bwrap not installed; degraded mode)")
+	print("skip: masked ordinary command runs (bwrap not installed; degraded mode)")
 out = run_client("sess-fake", "worker", "tasks list --json")
 expect("unregistered session refused", out.returncode == 126 and "not registered" in out.stderr, out.stderr[:200])
 pathlib.Path(token_path).write_text("tampered")
@@ -434,8 +459,11 @@ after.sendall(json.dumps({"token": "tok-gates", "session": "sess-1", "agent": "w
 after.shutdown(socket.SHUT_WR)
 resp = json.loads(after.recv(65536).decode())
 after.close()
-expect("service keeps accepting after the drop",
-	resp.get("exit") == 0 and "window-survivor" in resp.get("stdout", ""), str(resp)[:200])
+if HAVE_BWRAP:
+	expect("service keeps accepting after the drop",
+		resp.get("exit") == 0 and "window-survivor" in resp.get("stdout", ""), str(resp)[:200])
+else:
+	print("skip: service keeps accepting after the drop (bwrap not installed; degraded mode)")
 slow_svc.shutdown()
 mod.REQUEST_RECV_WINDOW_SECONDS = saved_window
 slow_log = open(os.path.join(RUN, "slow-service.log")).read()
@@ -459,6 +487,10 @@ echo "== 4. service lifecycle: spawned process and socket-removal shutdown =="
 LIFE_STATE="$RUN/life-state"
 LIFE_FIX="$RUN/life-fixture"
 mkdir -p "$LIFE_STATE" "$LIFE_FIX"
+# The broker refuses to bind outside 0700 visibility (the pi service's
+# gate, mirrored), so the fixture provisions the compliant dir itself
+# and the mode assertions below verify what the service accepted.
+chmod 700 "$LIFE_STATE"
 LIFE_LOG="$RUN/life-service.log"
 python3 "$SUITE_DIR/lib/oc-task-service.py" \
 	--socket "$LIFE_STATE/broker.sock" \
@@ -493,7 +525,9 @@ grep -q '"class": "service-stop"' "$LIFE_LOG" \
 echo "== 5. e2e enforcement: opencode sessions against fixture repos =="
 # ===========================================================================
 
-if ! command -v opencode >/dev/null 2>&1; then
+if [[ "$DEGRADED" == "1" ]]; then
+	skip_test "e2e enforcement section (ISOLATION_ALLOW_DEGRADED: no model gateway in this chain)"
+elif ! command -v opencode >/dev/null 2>&1; then
 	bad "opencode binary on PATH (e2e section)"
 else
 	PIN_VERSION="$(opencode --version | awk '{print $NF}' | sed 's/^v//')"
@@ -627,6 +661,35 @@ MD
 			| xargs -0 sha256sum | sha256sum | cut -d' ' -f1 )
 	}
 
+	guard_probe_fixture() { # $1 = session fixture dir, $2 = worker agent description
+		local fix="$1"
+		mkdir -p "$fix/.opencode/plugin" "$fix/.opencode/agents" \
+			"$fix/tests/task-storage-isolation/lib"
+		cp "$REPO_ROOT/opencode/.config/opencode/plugin/task-storage-guard.ts" \
+			"$fix/.opencode/plugin/task-storage-guard.ts"
+		cp "$SUITE_DIR/lib/oc-task-service.py" "$SUITE_DIR/lib/oc-broker-client.py" \
+			"$fix/tests/task-storage-isolation/lib/"
+		cat > "$fix/.opencode/opencode.json" <<'JSON'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permissions": [
+    { "action": "shell", "resource": "*", "effect": "allow" },
+    { "action": "external_directory", "resource": "/tmp/**", "effect": "allow" }
+  ]
+}
+JSON
+		cat > "$fix/.opencode/agents/worker.md" <<MD
+---
+description: $2
+mode: subagent
+permissions:
+  - { action: shell, resource: "*", effect: allow }
+  - { action: external_directory, resource: "/tmp/**", effect: allow }
+---
+$2 body.
+MD
+	}
+
 	oc_run() { # fixture dir, state dir, [OC_AGENT=x] VAR=VALUE env pairs..., prompt -> combined output
 		local fix="$1" state="$2"
 		shift 2
@@ -742,7 +805,12 @@ MD
 	LOOSE_HASH="$(board_hash "$LOOSE_FIX")"
 	LOOSE_STATE="$RUN/loose-state"
 	mkdir -p "$LOOSE_STATE"
-	OUT="$(oc_run "$LOOSE_FIX" "$LOOSE_STATE" \
+	# The plugin is deployed at home (make test-links green), so its global
+	# copy arms in every session and the fixture-local removal alone no
+	# longer observes a plugin-less session. TASKS_BROKER_DISABLE=1 is the
+	# plugin's documented rollback lane: it stands the global copy down so
+	# this probe pins the pre-enforcement behavior it exists to pin.
+	OUT="$(oc_run "$LOOSE_FIX" "$LOOSE_STATE" TASKS_BROKER_DISABLE=1 \
 		"Run exactly this shell command and report the output verbatim: cat .tasks/reports/secret-marker.md")"
 	printf '%s' "$OUT" > "$RUN/probeF2.out"
 	[[ "$OUT" == *PROVEMARK-secret-7712* ]] \
@@ -809,6 +877,109 @@ MD
 	[[ "$(board_hash "$PRI_FIX")" == "$PRI_HASH" ]] \
 		&& ok "DC2: scout probe leaves the board byte-identical" \
 		|| bad "DC2: scout probe leaves the board byte-identical"
+
+	echo "-- e2e: guard parent candidate denies a standalone board one level above a non-git cwd"
+	GP_BOARD="$RUN/gp-board"
+	GP_FIX="$GP_BOARD/session"
+	mkdir -p "$GP_BOARD/.tasks/reports" "$GP_FIX"
+	echo "GP-BOARD-SECRET-5e11" > "$GP_BOARD/.tasks/reports/gp-secret-marker.md"
+	echo "gp in-scope control byte" > "$GP_FIX/gp-control.txt"
+	ln -s ../.tasks/reports/gp-secret-marker.md "$GP_FIX/gp-link.md"
+	GP_HASH="$(board_hash "$GP_BOARD")"
+	guard_probe_fixture "$GP_FIX" "Guard parent-board probe worker"
+	GP_STATE="$RUN/gp-state"
+	# The pin targets the repo's plugin bytes, so the session runs with an
+	# empty XDG_CONFIG_HOME: the home deployment lags the repo file until
+	# the deploy gate re-syncs it, and its global copy arms in every
+	# session and would answer the probes with the stale shape.
+	mkdir -p "$GP_STATE" "$RUN/gp-config"
+	GP_OUT="$( cd "$GP_FIX" && env -u TASKS_DIR -u TASKS_TEST_CLOCK XDG_STATE_HOME="$GP_STATE" \
+		XDG_CONFIG_HOME="$RUN/gp-config" \
+		TASKS_SESSION=e2e-worker TASKS_BROKER_EXPECTED_VERSION="$PIN_VERSION" \
+		timeout 240 opencode run --model "$MODEL" --agent worker --auto \
+		"Use the read tool on the file gp-control.txt, then on the file gp-link.md. Report verbatim any error each attempt produces. If a read succeeds, quote the file content." 2>&1 )"
+	printf '%s' "$GP_OUT" > "$RUN/probeJ.out"
+	[[ "$GP_OUT" == *"gp in-scope control byte"* ]] \
+		&& ok "guard parent-board probe: in-scope read control succeeds" \
+		|| bad "guard parent-board probe: in-scope read control failed (probe defect)"
+	[[ "$GP_OUT" != *GP-BOARD-SECRET-5e11* ]] \
+		&& ok "guard parent-board symlink read leaks no board content" \
+		|| bad "guard parent-board symlink read leaks board content"
+	if grep '"decision":"deny"' "$GP_STATE"/task-storage-broker/*/guard.log 2>/dev/null \
+		| grep -q 'gp-link'; then
+		ok "plugin parent candidate denies the parent-board read (guard-layer record)"
+	else
+		bad "plugin parent-board deny record missing from the guard log"
+	fi
+	[[ "$(board_hash "$GP_BOARD")" == "$GP_HASH" ]] \
+		&& ok "guard parent-board fixture intact" \
+		|| bad "guard parent-board fixture intact"
+
+	echo "-- e2e: guard ancestor walk denies a standalone board two levels above a non-git cwd"
+	GP2_BOARD="$RUN/gp2-board"
+	GP2_FIX="$GP2_BOARD/l2/l2b"
+	mkdir -p "$GP2_BOARD/.tasks/reports" "$GP2_FIX"
+	echo "GP2-BOARD-SECRET-6c21" > "$GP2_BOARD/.tasks/reports/gp2-secret-marker.md"
+	echo "gp2 in-scope control byte" > "$GP2_FIX/gp2-control.txt"
+	GP2_HASH="$(board_hash "$GP2_BOARD")"
+	guard_probe_fixture "$GP2_FIX" "Guard ancestor-walk probe worker"
+	GP2_STATE="$RUN/gp2-state"
+	mkdir -p "$GP2_STATE" "$RUN/gp2-config"
+	GP2_OUT="$( cd "$GP2_FIX" && env -u TASKS_DIR -u TASKS_TEST_CLOCK XDG_STATE_HOME="$GP2_STATE" \
+		XDG_CONFIG_HOME="$RUN/gp2-config" \
+		TASKS_SESSION=e2e-worker TASKS_BROKER_EXPECTED_VERSION="$PIN_VERSION" \
+		timeout 240 opencode run --model "$MODEL" --agent worker --auto \
+		"Use the read tool on the file gp2-control.txt, then on the absolute path $GP2_BOARD/.tasks/reports/gp2-secret-marker.md. Report verbatim any error each attempt produces. If a read succeeds, quote the file content." 2>&1 )"
+	printf '%s' "$GP2_OUT" > "$RUN/probeK.out"
+	[[ "$GP2_OUT" == *"gp2 in-scope control byte"* ]] \
+		&& ok "guard ancestor-walk probe: in-scope read control succeeds" \
+		|| bad "guard ancestor-walk probe: in-scope read control failed (probe defect)"
+	[[ "$GP2_OUT" != *GP2-BOARD-SECRET-6c21* ]] \
+		&& ok "guard ancestor walk: depth-2 board read leaks no board content" \
+		|| bad "guard ancestor walk: depth-2 board read leaks board content"
+	if grep '"decision":"deny"' "$GP2_STATE"/task-storage-broker/*/guard.log 2>/dev/null \
+		| grep -q 'gp2-secret-marker'; then
+		ok "plugin ancestor walk denies the depth-2 board read (guard-layer record)"
+	else
+		bad "plugin ancestor-walk deny record missing from the guard log"
+	fi
+	[[ "$(board_hash "$GP2_BOARD")" == "$GP2_HASH" ]] \
+		&& ok "guard ancestor-walk fixture intact" \
+		|| bad "guard ancestor-walk fixture intact"
+
+	echo "-- e2e: guard resolves a symlinked session dir before the storage-path prefix match"
+	GP3_BOARD="$RUN/gp3-board"
+	GP3_REAL="$GP3_BOARD/inner/real"
+	GP3_SYM="$RUN/gp3-sym"
+	mkdir -p "$GP3_BOARD/.tasks/reports" "$GP3_REAL"
+	echo "GP3-BOARD-SECRET-6d33" > "$GP3_BOARD/.tasks/reports/gp3-secret-marker.md"
+	echo "gp3 in-scope control byte" > "$GP3_REAL/gp3-control.txt"
+	ln -s "$GP3_REAL" "$GP3_SYM"
+	GP3_HASH="$(board_hash "$GP3_BOARD")"
+	guard_probe_fixture "$GP3_REAL" "Guard symlinked-session probe worker"
+	GP3_STATE="$RUN/gp3-state"
+	mkdir -p "$GP3_STATE" "$RUN/gp3-config"
+	GP3_OUT="$( cd "$GP3_SYM" && env -u TASKS_DIR -u TASKS_TEST_CLOCK XDG_STATE_HOME="$GP3_STATE" \
+		XDG_CONFIG_HOME="$RUN/gp3-config" \
+		TASKS_SESSION=e2e-worker TASKS_BROKER_EXPECTED_VERSION="$PIN_VERSION" \
+		timeout 240 opencode run --model "$MODEL" --agent worker --auto \
+		"Use the read tool on the file gp3-control.txt, then on the absolute path $GP3_BOARD/.tasks/reports/gp3-secret-marker.md. Report verbatim any error each attempt produces. If a read succeeds, quote the file content." 2>&1 )"
+	printf '%s' "$GP3_OUT" > "$RUN/probeL.out"
+	[[ "$GP3_OUT" == *"gp3 in-scope control byte"* ]] \
+		&& ok "guard symlinked-session probe: in-scope read control succeeds" \
+		|| bad "guard symlinked-session probe: in-scope read control failed (probe defect)"
+	[[ "$GP3_OUT" != *GP3-BOARD-SECRET-6d33* ]] \
+		&& ok "guard symlinked session dir: board read leaks no board content" \
+		|| bad "guard symlinked session dir: board read leaks board content"
+	if grep '"decision":"deny"' "$GP3_STATE"/task-storage-broker/*/guard.log 2>/dev/null \
+		| grep -q 'gp3-secret-marker'; then
+		ok "plugin realpath resolution denies the symlinked-session board read (guard-layer record)"
+	else
+		bad "plugin symlinked-session deny record missing from the guard log"
+	fi
+	[[ "$(board_hash "$GP3_BOARD")" == "$GP3_HASH" ]] \
+		&& ok "guard symlinked-session fixture intact" \
+		|| bad "guard symlinked-session fixture intact"
 fi
 
 print_result

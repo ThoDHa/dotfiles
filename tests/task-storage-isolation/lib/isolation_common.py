@@ -93,6 +93,13 @@ def build_isolation_argv(command, args, env, agent_dir=None,
 	]
 	for mask_path in mask_paths:
 		argv += ["--ro-bind", mask_path, mask_path, "--tmpfs", mask_path]
+	# Transcript-copy stores (the DC2 lane): the other harness's session
+	# store hides behind a tmpfs when it exists; the string building
+	# matches the installed TS block exactly, empty HOME included.
+	transcript_store = env.get("XDG_DATA_HOME") or (env.get("HOME", "") + "/.local/share")
+	transcript_store = transcript_store + "/opencode"
+	if os.path.exists(transcript_store):
+		argv += ["--tmpfs", transcript_store]
 	argv += ["--ro-bind", socket_path, socket_path]
 	argv += agent_state
 	return ["bwrap", *argv, command, *args]

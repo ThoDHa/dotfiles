@@ -33,6 +33,13 @@
 # run is composition-only evidence (the walking skeleton covers that
 # path; ORCH-4-10-4 owns the full adversarial suite).
 #
+# Degradation contract: with ISOLATION_ALLOW_DEGRADED=1 (set by the
+# container verify chain, which lacks bwrap, node, and shellcheck)
+# the tool-dependent gates and sections are announced as skipped and
+# the suite gates on what ran; without the flag a missing tool fails
+# the suite loudly. Enforced labels are decided by full-mode host
+# runs only.
+#
 # Exit contract: non-zero unless every check passes; on failure the
 # scratch directory is kept and its path printed.
 
@@ -99,11 +106,28 @@ absorb_results() { # <label> <output> <rc>
 	fi
 }
 
+DEGRADED="${ISOLATION_ALLOW_DEGRADED:-0}"
+
+# The suite imports the repo-source wrap and service modules (digest
+# derivation, in-process service units); importlib writes __pycache__
+# beside those sources, and the pi-extensions deploy-completeness gate
+# then fails on the untracked litter. py_compile below stays on its own
+# external cache prefix because an explicit compile ignores this flag.
+export PYTHONDONTWRITEBYTECODE=1
+
 command -v python3 >/dev/null || fail_fast "python3 not installed"
-command -v node >/dev/null || fail_fast "node not installed"
-command -v bwrap >/dev/null || fail_fast "bwrap not installed (machine probes cannot run)"
 command -v tasks >/dev/null || fail_fast "tasks CLI not on PATH"
-command -v shellcheck >/dev/null || fail_fast "shellcheck not installed"
+HAVE_NODE=0
+command -v node >/dev/null && HAVE_NODE=1
+HAVE_BWRAP=0
+command -v bwrap >/dev/null && HAVE_BWRAP=1
+HAVE_SHELLCHECK=0
+command -v shellcheck >/dev/null && HAVE_SHELLCHECK=1
+if [[ "$DEGRADED" != "1" ]]; then
+	[[ "$HAVE_NODE" == "1" ]] || fail_fast "node not installed"
+	[[ "$HAVE_BWRAP" == "1" ]] || fail_fast "bwrap not installed (machine probes cannot run)"
+	[[ "$HAVE_SHELLCHECK" == "1" ]] || fail_fast "shellcheck not installed"
+fi
 
 WRAP_PY="$REPO_ROOT/pi/extensions/task-storage-isolation-wrap.py"
 SERVICE_PY="$REPO_ROOT/pi/extensions/task-storage-isolation-service.py"
@@ -125,20 +149,28 @@ SERVICE_LOG="$ESCAPE_DIR/service.log"
 TASKFILE_BASE=""
 
 echo "== 0. tool and lint gates =="
-if python3 -m py_compile "$WRAP_PY" "$SERVICE_PY" "$CLIENT_PY" "$COMMON"; then
+if PYTHONPYCACHEPREFIX="$RUN/pycache" python3 -m py_compile "$WRAP_PY" "$SERVICE_PY" "$CLIENT_PY" "$COMMON"; then
 	ok "py_compile clean on all enforcement python"
 else
 	bad "py_compile clean on all enforcement python"
 fi
-if shellcheck "$SUITE_DIR/run-suite.sh"; then
-	ok "shellcheck clean on run-suite.sh"
+if [[ "$HAVE_SHELLCHECK" == "1" ]]; then
+	if shellcheck "$SUITE_DIR/run-suite.sh"; then
+		ok "shellcheck clean on run-suite.sh"
+	else
+		bad "shellcheck clean on run-suite.sh"
+	fi
 else
-	bad "shellcheck clean on run-suite.sh"
+	skip_test "shellcheck clean on run-suite.sh (shellcheck not installed; degraded mode)"
 fi
-if node --check "$DRIVER"; then
-	ok "node parses ts-driver.mjs"
+if [[ "$HAVE_NODE" == "1" ]]; then
+	if node --check "$DRIVER"; then
+		ok "node parses ts-driver.mjs"
+	else
+		bad "node parses ts-driver.mjs"
+	fi
 else
-	bad "node parses ts-driver.mjs"
+	skip_test "node parses ts-driver.mjs (node not installed; degraded mode)"
 fi
 
 echo "== 1. constant cross-checks (anti-drift) =="
@@ -351,12 +383,14 @@ fi
 echo "== 5. driver sections (guard units, wrap parity, extension factory) =="
 mkdir -p "$RUN/driver-extension"
 cp "$RUN/patcher/activated.ts" "$RUN/driver-extension/vendored-activated.ts"
-parity_out="$(python3 - "$REPO" "$LIB" "$RUN/parity-expected.json" "$SOCKET" "$TRUST_FILE" "$AGENT_DIR" <<'PYEOF'
+mkdir -p "$RUN/xdg-data/opencode/storage/session/default"
+printf '{"content":"parity transcript seed"}\n' > "$RUN/xdg-data/opencode/storage/session/default/transcript.jsonl"
+parity_out="$(python3 - "$REPO" "$LIB" "$RUN/parity-expected.json" "$SOCKET" "$TRUST_FILE" "$AGENT_DIR" "$RUN/xdg-data" <<'PYEOF'
 import json
 import os
 import sys
 
-repo, lib, out, socket, trust, agent_dir = sys.argv[1:7]
+repo, lib, out, socket, trust, agent_dir, xdg_data_home = sys.argv[1:8]
 sys.path.insert(0, lib)
 import isolation_common as ic
 
@@ -368,6 +402,7 @@ env = {
 	"PI_TASK_STORAGE_SOCKET": socket,
 	"PI_TASK_STORAGE_TRUST_FILE": trust,
 	"PI_TASK_STORAGE_AGENT_DIR": agent_dir,
+	"XDG_DATA_HOME": xdg_data_home,
 }
 argv = ic.build_isolation_argv("node", ["child.js"], env, agent_dir=agent_dir)
 payload = {
@@ -377,6 +412,7 @@ payload = {
 	"socket": socket,
 	"trust": trust,
 	"agent_dir": agent_dir,
+	"xdg_data_home": xdg_data_home,
 }
 with open(out, "w") as handle:
 	json.dump(payload, handle)
@@ -388,16 +424,24 @@ if [[ $parity_rc -ne 0 ]]; then
 	fail_fast "parity feed failed (rc=$parity_rc): $parity_out"
 fi
 
-driver_out="$(node "$DRIVER" guard "$REPO_ROOT" "$RUN/driver-guard" 2>&1)"
-absorb_results "ts-driver guard section" "$driver_out" $?
+if [[ "$HAVE_NODE" == "1" ]]; then
+	driver_out="$(node "$DRIVER" guard "$REPO_ROOT" "$RUN/driver-guard" 2>&1)"
+	absorb_results "ts-driver guard section" "$driver_out" $?
 
-driver_out="$(node "$DRIVER" wrap "$REPO_ROOT" "$RUN/driver-wrap" "$ACTIVATED_COPY" "$RUN/parity-expected.json" 2>&1)"
-absorb_results "ts-driver wrap section (parity)" "$driver_out" $?
+	driver_out="$(node "$DRIVER" wrap "$REPO_ROOT" "$RUN/driver-wrap" "$ACTIVATED_COPY" "$RUN/parity-expected.json" 2>&1)"
+	absorb_results "ts-driver wrap section (parity)" "$driver_out" $?
 
-driver_out="$(node "$DRIVER" extension "$REPO_ROOT" "$RUN/driver-extension" "$REPO" "$TASKFILE_BASE" 2>&1)"
-absorb_results "ts-driver extension section (hosting round trip)" "$driver_out" $?
+	driver_out="$(node "$DRIVER" extension "$REPO_ROOT" "$RUN/driver-extension" "$REPO" "$TASKFILE_BASE" 2>&1)"
+	absorb_results "ts-driver extension section (hosting round trip)" "$driver_out" $?
+else
+	skip_test "ts-driver guard, wrap-parity, and extension sections (node not installed; degraded mode)"
+fi
 
 echo "== 6. machine-side bwrap probes (builder argv, parity-pinned) =="
+if [[ "$HAVE_BWRAP" != "1" ]]; then
+	skip_test "machine-side bwrap probes (bwrap not installed; degraded mode)"
+fi
+if [[ "$HAVE_BWRAP" == "1" ]]; then
 export PI_TASK_STORAGE_ISOLATION="1"
 MASK_LIST="$(python3 -c "import os; print('\n'.join([os.path.realpath('$REPO/.tasks'), os.path.realpath('$WORKTREE/.tasks')]))")"
 export PI_TASK_STORAGE_MASK_PATHS="$MASK_LIST"
@@ -582,6 +626,7 @@ for leaked in ("AUTH-MARKER", "MCPAUTH-MARKER", "TRANSCRIPT-MARKER", "TRUST-MARK
 assert "{}" in result["stdout"], f"scratch trust file not bound: {result['stdout'][:300]}"
 assert combined.count("No such file or directory") >= 3, f"hidden entries not all denied: {combined[:300]}"
 PYEOF
+fi
 
 echo "== 7. escape-channel service units =="
 # The service runs against the same fixture repo; these requests are
@@ -962,7 +1007,7 @@ chmod 700 "$watchdog_dir"
 watchdog_sh="$watchdog_dir/parent.sh"
 cat >"$watchdog_sh" <<EOF
 #!/bin/sh
-python3 "$SERVICE_PY" "$watchdog_dir/service.sock" "$REPO" "$watchdog_dir/service.log" &
+PI_TASK_STORAGE_TOKEN="$SUITE_TOKEN" python3 "$SERVICE_PY" "$watchdog_dir/service.sock" "$REPO" "$watchdog_dir/service.log" &
 pid=\$!
 printf '%s' "\$pid" > "$watchdog_dir/pid"
 wait

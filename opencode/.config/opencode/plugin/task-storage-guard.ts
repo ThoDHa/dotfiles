@@ -76,9 +76,22 @@ function runGit(directory: string, args: string[]): string | null {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function resolveSessionDirectory(directory: string): string {
+  // The session dir is resolved through realpath before any storage-path
+  // derivation or prefix match: a symlinked session dir string must be
+  // treated as its real location, or a board wrapping the real location
+  // escapes every prefix derived from the link path.
+  try {
+    return fs.realpathSync(directory);
+  } catch {
+    return directory;
+  }
+}
+
 function computeLayout(directory: string): RepoLayout {
-  const cwdRoot = runGit(directory, ["rev-parse", "--show-toplevel"]) ?? directory;
-  const commonDir = runGit(directory, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  const sessionDir = resolveSessionDirectory(directory);
+  const cwdRoot = runGit(sessionDir, ["rev-parse", "--show-toplevel"]) ?? sessionDir;
+  const commonDir = runGit(sessionDir, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
   const mainRoot = commonDir ? path.dirname(commonDir) : cwdRoot;
   const roots = new Set<string>([mainRoot, cwdRoot]);
   const listed = runGit(mainRoot, ["worktree", "list", "--porcelain"]);
@@ -88,10 +101,22 @@ function computeLayout(directory: string): RepoLayout {
     }
   }
   const libDir = path.join(mainRoot, BROKER_LIB_REL);
+  // Ancestor walk: a session cwd at any depth inside a standalone board
+  // tree needs that tree's candidate, so every ancestor of the resolved
+  // session dir up to the filesystem root joins the set; the Set dedupes
+  // against the git-root candidates, which the walk subsumes.
+  const boardRoots = new Set<string>(roots);
+  let ancestor = sessionDir;
+  for (;;) {
+    boardRoots.add(ancestor);
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
   return {
     mainRoot,
     cwdRoot,
-    storagePaths: [...roots].map((root) => path.join(root, ".tasks")),
+    storagePaths: [...boardRoots].map((root) => path.join(root, ".tasks")),
     libDir: fs.existsSync(path.join(libDir, SERVICE_SCRIPT)) ? libDir : null,
     stamp: 0,
   };
@@ -300,7 +325,7 @@ const guard = {
   id: "task-storage-guard",
   setup: async (ctx: any) => {
     if (process.env.TASKS_BROKER_DISABLE === "1") return undefined;
-    const directory: string = ctx?.location?.directory ?? process.cwd();
+    const directory: string = resolveSessionDirectory(ctx?.location?.directory ?? process.cwd());
     const xdg = process.env.XDG_STATE_HOME || path.join(process.env.HOME || "/tmp", ".local/state");
     const repoKey = crypto.createHash("sha256").update(computeLayout(directory).mainRoot).digest("hex").slice(0, 16);
     const state: GuardState = {
@@ -410,6 +435,7 @@ const guard = {
           ` --registry ${state.runtimeDir}` +
           ` --session ${String(call?.sessionID ?? "")}` +
           ` --agent ${agent}` +
+          ` --peer-ancestor ${process.pid}` +
           ` exec ${quoteSingle(input.command)}`;
         audit(state, { decision: "broker", tool, agent, session: call?.sessionID });
         return;
