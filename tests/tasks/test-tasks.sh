@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1354
+EXPECTED_ASSERTIONS=1359
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -4500,7 +4500,11 @@ assert_eq "the projection JSON is byte-stable across invocations" "$proj_uni_jso
 # (archived asserts the vocabulary advisory on the lint stream; open asserts
 # the hard class the exit gate consumes), and the reason-trim fixture pins a
 # whitespace-only Status Reason as absent on both sides (its sole advisory
-# is the reason lane).
+# is the reason lane). The empty-Status fixtures extend the dash-lane
+# pattern across both placements of an empty **Status:** value: the empty
+# value travels as the dash sentinel through the S record (an empty field
+# cannot survive the consumer's IFS-tab split), so the presence bit still
+# gates the vocabulary lane and the mirror fires invalid-status identically.
 cat >"$proj_dir/archive/HDR-1-20260615-1200-shape.md" <<'HDREOF'
 # Task: Headershape
 
@@ -4795,6 +4799,70 @@ body
 
 - 2026-06-15 12:00 - created
 HDREOF
+cat >"$proj_dir/archive/HDR-10-20260615-1200-emptystatus.md" <<'HDREOF'
+# Task: Headeremptystatus
+
+**Created:** 2026-06-15 12:00
+**Status:**
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Empty-Status archived fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
+cat >"$proj_dir/current/HDR-11-20260615-1200-emptyopen.md" <<'HDREOF'
+# Task: Headeremptyopen
+
+**Created:** 2026-06-15 12:00
+**Status:**
+**Priority:** Medium
+**Progress:** 0%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Empty-Status open fixture objective.
+
+## Success Criteria
+
+- [ ] empty open
+
+## Work Log
+
+### 2026-06-15 12:00: worker: created
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
 proj_lint_stream="$(t lint --dir "$proj_dir" --verbose 2>/dev/null || true)"
 assert_contains "an archived literal-dash Status fires the vocabulary advisory on the lint stream" \
 	"$proj_lint_stream" \
@@ -4808,6 +4876,15 @@ assert_contains "an archived Cancelled with a whitespace-only Status Reason fire
 assert_eq "the sole advisory on the whitespace-only Status Reason is the reason lane" \
 	"ADVISORY archive/HDR-9-20260615-1200-reasontrim.md: Status Cancelled requires a Status Reason (the header contract ties it to Blocked/Cancelled)" \
 	"$(printf '%s\n' "$proj_lint_stream" | grep -E '^ADVISORY archive/HDR-9-20260615-1200-reasontrim\.md: ' || true)"
+assert_contains "an archived empty Status value fires the vocabulary advisory on the lint stream" \
+	"$proj_lint_stream" \
+	"ADVISORY archive/HDR-10-20260615-1200-emptystatus.md: header Status not a CLI-recognized value: '-'"
+assert_contains "an open empty Status value fires the hard vocabulary finding the exit gate consumes" \
+	"$proj_lint_stream" \
+	"HARD current/HDR-11-20260615-1200-emptyopen.md: header Status not a CLI-recognized value: '-'"
+assert_contains "an archived empty Status value fires the advisory pointer on the mirror" \
+	"$(t show --dir "$proj_dir" HDR-10-20260615-1200-emptystatus.md --project)" \
+	"advisory findings present on this file"
 for proj_x_file in "$proj_dir"/current/*.md "$proj_dir"/archive/*.md; do
 	proj_x_rel="${proj_x_file#"$proj_dir"/}"
 	proj_x_pat="${proj_x_rel//./\.}"
