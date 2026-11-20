@@ -3865,7 +3865,10 @@ LINT_ADVISORY_CAP=20
 
 # The lint scanner itself: one awk pass over every task file, emitting
 # tab-separated records the bash side classifies. S (file, status, archive
-# bit, have-status), O (file, Owner value), C (file, checked, unchecked,
+# bit, have-status; status travels as "-" when the field is absent or its
+# value is empty, because an empty field cannot survive the consumer's
+# IFS-tab split and the presence bit stays the canonical signal), O (file,
+# Owner value), C (file, checked, unchecked,
 # superseded Success Criteria boxes, then the verdict counts verified,
 # refuted, unverifiable, and unverifiable-without-a-documented-exception,
 # all counted by the shared criteria counter AWK_CRITERIA_COUNTER the
@@ -4043,7 +4046,7 @@ lint_scan_files() { # tasks_dir files...
 				}
 			}
 			close(td fpath)
-			print "S" sep rel sep (have_status ? status : "-") sep archbit sep have_status
+			print "S" sep rel sep ((have_status && length(status) > 0) ? status : "-") sep archbit sep have_status
 			print "O" sep rel sep owner
 			print "R" sep rel sep reason
 			print "C" sep rel sep checked sep unchecked sep superseded sep verified sep refuted sep unverifiable sep unexcepted

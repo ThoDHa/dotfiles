@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1359
+EXPECTED_ASSERTIONS=1361
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -4863,6 +4863,38 @@ body
 
 - 2026-06-15 12:00 - created
 HDREOF
+cat >"$proj_dir/archive/HDR-12-20260615-1200-wsonlystatus.md" <<HDREOF
+# Task: Headerwsonlystatus
+
+**Created:** 2026-06-15 12:00
+**Status:**${proj_hdr_ws}
+**Priority:** Medium
+**Progress:** 100%
+**Owner:**
+**Updated:** 2026-06-15 12:00
+
+## Table of Contents
+
+- Objective
+
+## Objective
+
+Whitespace-only-Status archived fixture objective.
+
+## Success Criteria
+
+- [x] all done
+
+## Work Log
+
+### 2026-06-15 12:00: worker: finished
+
+body
+
+## Execution Log
+
+- 2026-06-15 12:00 - created
+HDREOF
 proj_lint_stream="$(t lint --dir "$proj_dir" --verbose 2>/dev/null || true)"
 assert_contains "an archived literal-dash Status fires the vocabulary advisory on the lint stream" \
 	"$proj_lint_stream" \
@@ -4882,6 +4914,9 @@ assert_contains "an archived empty Status value fires the vocabulary advisory on
 assert_contains "an open empty Status value fires the hard vocabulary finding the exit gate consumes" \
 	"$proj_lint_stream" \
 	"HARD current/HDR-11-20260615-1200-emptyopen.md: header Status not a CLI-recognized value: '-'"
+assert_contains "a whitespace-only Status value folds into the empty case and travels the identical sentinel route on the lint stream" \
+	"$proj_lint_stream" \
+	"ADVISORY archive/HDR-12-20260615-1200-wsonlystatus.md: header Status not a CLI-recognized value: '-'"
 assert_contains "an archived empty Status value fires the advisory pointer on the mirror" \
 	"$(t show --dir "$proj_dir" HDR-10-20260615-1200-emptystatus.md --project)" \
 	"advisory findings present on this file"
