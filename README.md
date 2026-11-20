@@ -34,6 +34,7 @@ dotfiles/
 │   └── .local/bin/     # -> ~/.local/bin
 │       ├── oc-continue
 │       ├── pi-continue
+│       ├── task-metrics
 │       └── tasks
 ├── tmux/               # Tmux configuration
 │   ├── .tmux.conf      # -> ~/.tmux.conf
@@ -71,6 +72,10 @@ dotfiles/
 ├── tests/              # Host-side tests (make test)
 ├── lib/                # Shared generator library for the rules compilers (not stowed)
 ├── pi/                 # pi agent design note, extensions, and generator (not stowed)
+│   ├── DESIGN.md
+│   ├── extensions/
+│   ├── generate-agents-md.sh
+│   └── generate-pi-agents.sh
 ├── Makefile
 └── README.md
 ```

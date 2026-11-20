@@ -1,7 +1,8 @@
 #!/bin/bash
 # Generate pi agent files from the opencode fleet agents.
 #
-# Single source of truth: the opencode agent .md files in this directory.
+# Single source of truth: the opencode agent .md files in the opencode
+# fleet agents directory.
 # Each dual-harness source carries a "# pi: model=<bare-id> tools=<list>"
 # comment in its frontmatter; this script compiles that comment together
 # with the filename (the agent name), description, and body into a real
@@ -25,10 +26,10 @@ set -e
 SCRIPT_FILE="$(readlink -f "${BASH_SOURCE[0]}")"
 source "$(git -C "$(dirname "$SCRIPT_FILE")" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/.dotfiles")/lib/rules-generator-common.sh"
 
-# Paths: sources sit next to this script, resolved through any stow
-# symlink so a repo-side invocation reads the same directory it lives in.
+# Paths: the fleet sources no longer sit next to the script after its
+# move into pi/; resolve them from the repo root one level above.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-AGENT_SRC_DIR="$SCRIPT_DIR"
+AGENT_SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)/opencode/.config/opencode/agents"
 
 # Output location: an optional first argument redirects the generated
 # files into a scratch directory (used by the sync test to regenerate

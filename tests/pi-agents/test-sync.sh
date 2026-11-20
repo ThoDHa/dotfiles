@@ -15,7 +15,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GENERATOR="$REPO_ROOT/opencode/.config/opencode/agents/generate-pi-agents.sh"
+GENERATOR="$REPO_ROOT/pi/generate-pi-agents.sh"
 HOST_DIR="$HOME/.pi/agent/agents"
 REMEDIATION="run make sync-pi-agents"
 DIFF_SUMMARY_LINES=12

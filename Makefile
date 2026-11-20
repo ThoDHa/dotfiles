@@ -34,7 +34,7 @@ OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
 OPENCODE_CONFIG := $(STOW_TARGET)/.config/opencode
 
 # pi agent generator (compiled from the opencode fleet agents)
-PI_AGENTS_GENERATOR := $(CURDIR)/opencode/.config/opencode/agents/generate-pi-agents.sh
+PI_AGENTS_GENERATOR := $(CURDIR)/pi/generate-pi-agents.sh
 
 # pi manager-mode extension source, deployed verbatim by sync-pi-extensions
 PI_EXTENSIONS_SRC := $(CURDIR)/pi/extensions
