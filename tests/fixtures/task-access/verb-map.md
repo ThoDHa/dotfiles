@@ -3,7 +3,7 @@
 The durable contract migrating the seven fleet roles from direct `.tasks/` access to
 CLI-only access. Authored by ORCH-4-9-1, reconciled against the landed tasks CLI at base
 `1cd4fad` (the ORCH-4-4 surface is fully landed and the binary in
-`opencode/.local/bin/tasks` is the ground truth). ORCH-4-9-2 (skill homes) and ORCH-4-9-3
+`shell/.local/bin/tasks` is the ground truth). ORCH-4-9-2 (skill homes) and ORCH-4-9-3
 (charters, staged) implement the deltas recorded here; ORCH-4-9-4 runs the representative
 executions. The executable form of the per-role command sets is `role-verbs.sh` beside
 this file: the replay suite expands exactly those commands against a seeded fixture board

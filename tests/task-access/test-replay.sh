@@ -17,7 +17,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
+TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 ROLE_VERBS="$REPO_ROOT/tests/fixtures/task-access/role-verbs.sh"
 
 source "$REPO_ROOT/tests/lib/harness.sh"

@@ -56,7 +56,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE_DIR="$REPO_ROOT/tests/task-storage-isolation"
-TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
+TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 MODEL="${1:-zai-coding-plan/glm-5.3-flash}"
 DEGRADED="${ISOLATION_ALLOW_DEGRADED:-0}"
 
@@ -208,8 +208,8 @@ os.makedirs(os.path.join(RUN, "client-copy"))
 # an entry to act on; the clock pin keeps the entry name deterministic.
 # The PATH prepend goes into THIS process's environ so the in-process
 # service's sanitized env resolves the repo tasks CLI hermetically.
-TASKS_BIN = os.path.join(REPO, "opencode/.local/bin/tasks")
-os.environ["PATH"] = os.path.join(REPO, "opencode/.local/bin") + os.pathsep + os.environ.get("PATH", "")
+TASKS_BIN = os.path.join(REPO, "shell/.local/bin/tasks")
+os.environ["PATH"] = os.path.join(REPO, "shell/.local/bin") + os.pathsep + os.environ.get("PATH", "")
 seed_env = dict(os.environ)
 seed_env["TASKS_DIR"] = os.path.join(FIX, ".tasks")
 seed_env["TASKS_TEST_CLOCK"] = "2026-11-18 09:00"

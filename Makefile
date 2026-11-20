@@ -532,7 +532,7 @@ test-task-access-replay:
 # sections are announced as skipped and the suite gates on what ran.
 # The repo tasks bin dir rides on PATH so the suite resolves the CLI
 # it enforces in both worlds.
-test-task-storage-pi: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
+test-task-storage-pi: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
 test-task-storage-pi:
 	@echo "Testing pi task-storage enforcement..."
 	@bash tests/task-storage-isolation/run-suite.sh
@@ -543,7 +543,7 @@ test-task-storage-pi:
 # calls on the fleet worker model) and is announced as skipped under
 # ISOLATION_ALLOW_DEGRADED=1 when opencode is missing, failing loudly
 # otherwise.
-test-task-storage-opencode: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
+test-task-storage-opencode: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
 test-task-storage-opencode:
 	@echo "Testing opencode task-storage enforcement..."
 	@bash tests/task-storage-isolation/test-opencode-enforcement.sh
@@ -552,7 +552,7 @@ test-task-storage-opencode:
 # columns run through the real dispatch paths; with
 # ISOLATION_ALLOW_DEGRADED=1 the bwrap-dependent columns announce as
 # skipped and the suite gates on what ran.
-test-task-storage-adversarial: export PATH := $(CURDIR)/opencode/.local/bin:$(PATH)
+test-task-storage-adversarial: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
 test-task-storage-adversarial:
 	@echo "Testing the task-storage adversarial bypass suite..."
 	@bash tests/task-storage-isolation/run-adversarial.sh

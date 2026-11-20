@@ -8,7 +8,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
+TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 EXPECTED_ASSERTIONS=1354

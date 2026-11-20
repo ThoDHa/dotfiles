@@ -194,7 +194,7 @@ else
 fi
 cp -R "$SCRATCH/repo" "$SCRATCH/board-repo"
 cp -R "$LIVE_BOARD" "$SCRATCH/board-repo/.tasks"
-rollback_tasks="$SCRATCH/board-repo/opencode/.local/bin/tasks"
+rollback_tasks="$SCRATCH/board-repo/shell/.local/bin/tasks"
 export_records="$SCRATCH/rollback-export.jsonl"
 # lint is deliberately excluded here: its commit-reachability check
 # inspects the git context around the board copy, and the scratch clone

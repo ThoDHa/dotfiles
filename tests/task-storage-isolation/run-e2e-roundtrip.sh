@@ -48,7 +48,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUITE_DIR="$REPO_ROOT/tests/task-storage-isolation"
-TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
+TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 MODEL="${1:-}"
 HARNESS="${2:-both}"

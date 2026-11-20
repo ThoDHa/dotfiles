@@ -596,7 +596,7 @@ RUN = os.path.join(os.path.dirname(FIX), "oc-state")
 os.makedirs(RUN, exist_ok=True)
 os.chmod(RUN, 0o700)
 
-TASKS_BIN_DIR = os.path.join(os.environ["REPO_ROOT"], "opencode/.local/bin")
+TASKS_BIN_DIR = os.path.join(os.environ["REPO_ROOT"], "shell/.local/bin")
 os.environ["PATH"] = TASKS_BIN_DIR + os.pathsep + os.environ.get("PATH", "")
 
 spec = importlib.util.spec_from_file_location(
@@ -1349,7 +1349,7 @@ PYEOF
 absorb_results "routed findings R3/R4" "$RF_OUT" "${rf_rc:-0}"
 
 echo "== 6. routed finding: output-cap pump-and-kill (oc) =="
-TASKS_BIN="$REPO_ROOT/opencode/.local/bin/tasks"
+TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 R2_OUT="$(REPO_ROOT="$REPO_ROOT" ISOLATION_LIB="$LIB" ISOLATION_FIX="$REPO_FIX" TASKS_BIN="$TASKS_BIN" \
 	python3 - <<'PYEOF'
 import json
@@ -1454,7 +1454,7 @@ absorb_results "routed finding R2 (output cap)" "$R2_OUT" "${r2_rc:-0}"
 
 echo "== 7. recovery and concurrency (claims, lock, crashed child; pi column) =="
 if [[ "$HAVE_BWRAP" == "1" ]]; then
-RECOVERY_TASKS_BIN="$REPO_ROOT/opencode/.local/bin"
+RECOVERY_TASKS_BIN="$REPO_ROOT/shell/.local/bin"
 RECOVERY_OUT="$(REPO_ROOT="$REPO_ROOT" ISOLATION_LIB="$LIB" ISOLATION_FIX="$REPO_FIX" \
 	ISOLATION_WORKTREE="$WORKTREE_FIX" ISOLATION_TASKFILE="$TASKFILE_BASE" \
 	ISOLATION_SOCKET="$SOCKET" ISOLATION_CLIENT="$CLIENT_PY" \

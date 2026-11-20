@@ -34,7 +34,7 @@
 EXEC_DIR="$ROOT/executions"
 EXEC_TRANSCRIPTS="$EXEC_DIR/transcripts"
 EXEC_SHIM="$EXEC_DIR/shims"
-EXEC_TASKS="$REPO_ROOT/opencode/.local/bin/tasks"
+EXEC_TASKS="$REPO_ROOT/shell/.local/bin/tasks"
 # The scenario commands spell the contract surface ("tasks <verb>"); this
 # indirection resolves the leading token to the repo binary regardless of
 # PATH (role-verbs.sh's consuming-suite contract; the verify container has
