@@ -1300,34 +1300,25 @@ The board directory is located from --dir, then $TASKS_DIR, then the
 project's explicit store mapping (a .tasks-map marker file in the project
 directory naming its namespace, else a reverse lookup of the derived
 project path in the store registry $TASKS_DEV_ROOT/tasks/mapping.yaml),
-then the project's derived central-store slice, then by walking up from
-the current directory, then ./.tasks as a last resort. The store maps a
+then the project's derived central-store slice. The store maps a
 project under $TASKS_DEV_ROOT (default /home/khave/dev) to
 $TASKS_DEV_ROOT/tasks/<project> where <project> is the topmost directory
 under the dev root with any leading dot stripped (.dotfiles maps to
 tasks/dotfiles); a cwd outside the dev root falls back to the git
 repository root and its basename. A derived name that the registry binds
 to a different project refuses with a store namespace collision error
-instead of crossing boards. An existing slice takes over every board
-operation; until it exists the legacy local search above runs unchanged.
-Writing commands refuse the bare last resort; show and render only warn
-about it.
+instead of crossing boards. A board is always a store slice under
+$TASKS_DEV_ROOT/tasks: local .tasks directories are never resolved, and
+a chain that ends with nothing dies with the no-board error. init
+additionally claims a not-yet-existing slice through the explicit
+mapping or, for an unmapped dev-root project, the derivation.
 EOF
 }
 
-# How the last resolve_tasks_dir call reached its answer: flag (--dir), env
-# (TASKS_DIR), marker (a .tasks-map namespace), registry (the store
-# registry's reverse lookup of the project path), store (the project's
-# derived central-store slice), walkup (an upward search that found an
-# existing board), or fallback (the bare ./.tasks last resort). The guards
-# below hang off this marker: writers refuse the fallback root, readers
-# only warn, and every other branch passes either way.
-RESOLVED_VIA=""
-# The resolved directory itself. Resolution assigns both globals in the
+# The resolved directory itself. Resolution assigns the global in the
 # caller's shell instead of printing the directory: a printf contract
 # would run inside the $( ) command substitution every caller wraps this
-# in, stranding both markers in the subshell where the guards never see
-# them.
+# in, stranding the value in the subshell where the caller never sees it.
 RESOLVED_TASKS_DIR=""
 
 # The dev root the central board store hangs off. A project's board lives
@@ -1346,9 +1337,10 @@ TASKS_DEV_ROOT="${TASKS_DEV_ROOT%/}"
 # derivable root), dev-walk (the topmost directory under the dev root), or
 # git-fallback (the git repository root for a cwd outside the dev root).
 # init's create mode claims a not-yet-existing derived slice only for a
-# dev-walk root, so an unmapped non-dev project keeps its legacy creation
-# behavior; an explicitly mapped project (marker or registry) claims its
-# named namespace however the root was derived.
+# dev-walk root, so an unmapped non-dev project gets no claim and every
+# verb there refuses with the no-board error; an explicitly mapped
+# project (marker or registry) claims its named namespace however the
+# root was derived.
 PROJECT_ROOT_VIA="none"
 # The derived project root itself (the dev-walk topmost directory or the
 # git repository root), empty when none is derivable: the store registry
@@ -1402,8 +1394,8 @@ project_store_slice() {
 # because explicit beats derived: a project whose layout would mislead
 # the walk (nested repos, renamed directories, symlinked entry paths)
 # plants the marker and pins its namespace regardless of how the
-# invocation cwd derives. Searched upward from the cwd like the legacy
-# .tasks walk, nearest marker winning, so one marker per project covers
+# invocation cwd derives. Searched upward from the cwd, nearest marker
+# winning, so one marker per project covers
 # every cwd inside it and a nested project's own marker shadows the
 # parent's. The name carries no path structure: a namespace is one flat
 # store-slice name, so a hostile or typoed marker value cannot point the
@@ -1566,90 +1558,59 @@ refuse_registry_namespace_conflict() {
 # Resolve the board directory: explicit --dir wins, then the TASKS_DIR
 # pin, then the project's explicit store mapping (the nearest .tasks-map
 # marker naming the namespace, else the registry's reverse lookup of the
-# derived project path), then the derived central-store slice, then the
-# legacy upward search, else the bare ./.tasks default. An explicit
-# mapping whose slice does not exist yet suppresses the derived guesses
-# below it and falls to the legacy search, so planting a marker or a
-# registry entry never silently re-homes a project onto a neighboring
-# namespace while its slice is still staging. The optional second
-# argument (create mode, passed by init) additionally claims a
-# not-yet-existing slice as the last resort before the bare fallback: the
+# derived project path), then the derived central-store slice. An
+# explicit mapping whose slice does not exist yet suppresses the derived
+# guesses below it, so planting a marker or a registry entry never
+# silently re-homes a project onto a neighboring namespace while its
+# slice is still staging. The optional second argument (create mode,
+# passed by init) additionally claims a not-yet-existing slice: the
 # marker's namespace first, then the registry's, then a dev-walk
 # derivation, so unpinned init scaffolds the explicit target when one
 # exists and the store location for unmapped dev-root projects; every
-# other verb resolves through the same precedence with no create mode,
-# which is what keeps the slice's existence the single switch that
-# migrates a project from its legacy local board to the store. A derived
+# other verb resolves through the same precedence with no create mode.
+# Local .tasks directories are never resolved: the chain stands alone,
+# and a chain that ends with nothing dies with the named no-board error
+# (the legacy local-board search is retired; a local directory stays
+# reachable only through an explicit --dir or TASKS_DIR pin). A derived
 # name the registry binds to a different project refuses with a store
 # namespace collision error instead of resolving.
 resolve_tasks_dir() {
-	local explicit="${1:-}" create="${2:-}" dir slice reg_ns=""
-	if [[ -n "$explicit" ]]; then RESOLVED_VIA=flag; RESOLVED_TASKS_DIR="$explicit"; return; fi
-	if [[ -n "${TASKS_DIR:-}" ]]; then RESOLVED_VIA=env; RESOLVED_TASKS_DIR="$TASKS_DIR"; return; fi
-	# The empty-slice return is the no-project outcome the walkup and
-	# fallback branches below consume, so it is consumed here: a bare call
-	# returning non-zero would trip set -e and kill the verb silently.
+	local explicit="${1:-}" create="${2:-}" slice reg_ns=""
+	if [[ -n "$explicit" ]]; then RESOLVED_TASKS_DIR="$explicit"; return; fi
+	if [[ -n "${TASKS_DIR:-}" ]]; then RESOLVED_TASKS_DIR="$TASKS_DIR"; return; fi
+	# The empty-slice return is the no-project outcome the no-board die
+	# below consumes, so it is consumed here: a bare call returning
+	# non-zero would trip set -e and kill the verb silently.
 	project_tasks_marker || true
 	load_store_registry
 	project_store_slice || true
 	if [[ -n "$MARKER_NAMESPACE" ]]; then
 		refuse_registry_namespace_conflict "$TASKS_MAP_MARKER at $MARKER_DIR" "$MARKER_NAMESPACE" "$MARKER_DIR"
 		slice="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"
-		if [[ -d "$slice" ]]; then RESOLVED_VIA=marker; RESOLVED_TASKS_DIR="$slice"; return; fi
+		if [[ -d "$slice" ]]; then RESOLVED_TASKS_DIR="$slice"; return; fi
 	elif store_registry_namespace_for_path "$PROJECT_ROOT"; then
 		reg_ns="$REGISTRY_NAMESPACE"
 		slice="$TASKS_DEV_ROOT/tasks/$reg_ns"
-		if [[ -d "$slice" ]]; then RESOLVED_VIA=registry; RESOLVED_TASKS_DIR="$slice"; return; fi
+		if [[ -d "$slice" ]]; then RESOLVED_TASKS_DIR="$slice"; return; fi
 	else
 		if [[ -n "$PROJECT_STORE_SLICE" && -d "$PROJECT_STORE_SLICE" ]]; then
 			refuse_registry_namespace_conflict "the derived namespace of this project (root $PROJECT_ROOT)" "${PROJECT_STORE_SLICE##*/}" "$PROJECT_ROOT"
-			RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+			RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
 		fi
 	fi
-	dir="$PWD"
-	while [[ "$dir" != "/" ]]; do
-		if [[ -d "$dir/.tasks" ]]; then RESOLVED_VIA=walkup; RESOLVED_TASKS_DIR="$dir/.tasks"; return; fi
-		dir="$(dirname "$dir")"
-	done
 	if [[ "$create" == "create" ]]; then
 		if [[ -n "$MARKER_NAMESPACE" ]]; then
-			RESOLVED_VIA=marker; RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"; return
+			RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"; return
 		fi
 		if [[ -n "$reg_ns" ]]; then
-			RESOLVED_VIA=registry; RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$reg_ns"; return
+			RESOLVED_TASKS_DIR="$TASKS_DEV_ROOT/tasks/$reg_ns"; return
 		fi
 		if [[ "$PROJECT_ROOT_VIA" == "dev-walk" ]]; then
 			refuse_registry_namespace_conflict "the derived namespace of this project (root $PROJECT_ROOT)" "${PROJECT_STORE_SLICE##*/}" "$PROJECT_ROOT"
-			RESOLVED_VIA=store; RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
+			RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
 		fi
 	fi
-	RESOLVED_VIA=fallback
-	RESOLVED_TASKS_DIR="$PWD/.tasks"
-
-}
-
-# Refuse the bare ./.tasks last resort for mutations: a write pinned by
-# nothing (no --dir, no TASKS_DIR) that finds no board walking up would
-# land in a stray root at an arbitrary cwd, the stray-board incident class
-# this guard exists for.
-refuse_fallback_tasks_dir() {
-	[[ "$RESOLVED_VIA" == "fallback" ]] || return 0
-	die "refusing to write to the bare ./.tasks fallback at $1 (no board found walking up from $PWD); pass --dir, export TASKS_DIR, or run from inside the board's tree"
-}
-
-# Writer chokepoint: the fallback refusal first (its remediation covers the
-# missing-board case too), then the existence check.
-require_tasks_dir_for_write() {
-	refuse_fallback_tasks_dir "$1"
-	require_tasks_dir "$1"
-}
-
-# Reader chokepoint: announce the bare last resort without refusing it, so
-# show and render keep their existing outcome (succeed on an existing
-# fallback root, keep the missing-board die otherwise).
-warn_fallback_tasks_dir() {
-	[[ "$RESOLVED_VIA" == "fallback" ]] || return 0
-	err "warning: no board found walking up from $PWD; using the bare ./.tasks fallback at $1 (writes refuse it; pass --dir or export TASKS_DIR to pin the board)"
+	diec "$CODE_NO_BOARD" "no task board found from $PWD (no --dir, no TASKS_DIR, no .tasks-map marker, no registry entry, and no derived slice under $TASKS_DEV_ROOT/tasks); plant a .tasks-map marker, pass --dir, or run 'tasks init' inside a project under $TASKS_DEV_ROOT"
 }
 
 # Resolve a task file argument to a real path: as given, or under current/,
@@ -1907,9 +1868,11 @@ render_unlocked() {
 	trap - EXIT
 }
 
-# Fail unless the .tasks directory exists.
+# Fail unless the resolved board directory exists. Unpinned resolution
+# already died inside resolve_tasks_dir when the chain found nothing, so
+# this fires only for a --dir or TASKS_DIR pin naming a missing directory.
 require_tasks_dir() {
-	[[ -d "$1" ]] || diec "$CODE_NO_BOARD" "no .tasks directory at $1 (run 'tasks init')"
+	[[ -d "$1" ]] || diec "$CODE_NO_BOARD" "no task board directory at $1 (run 'tasks init')"
 }
 
 # Acquire the board lock on fd 9 for this process. The lock is released
@@ -2321,7 +2284,6 @@ cmd_init() {
 		esac
 	done
 	local tasks_dir; resolve_tasks_dir "$dir" create; tasks_dir="$RESOLVED_TASKS_DIR"
-	refuse_fallback_tasks_dir "$tasks_dir"
 	mkdir -p "$tasks_dir/$CURRENT_DIR" "$tasks_dir/$ARCHIVE_DIR"
 	render "$tasks_dir"
 	printf '%s\n' "$tasks_dir"
@@ -2337,7 +2299,6 @@ cmd_render() {
 		esac
 	done
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	render "$tasks_dir"
 }
 
@@ -2382,7 +2343,7 @@ cmd_new() {
 	valid_priority "$priority" || die "new: unknown priority: $priority (valid: $PRIORITY_VALUES)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 
 	# An ID names one piece of work across the whole board, current/ and
@@ -2538,7 +2499,7 @@ cmd_set() {
 	done
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
@@ -2678,7 +2639,7 @@ cmd_claim() {
 	[[ -n "$owner" ]] || owner="$(session_id)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	local claim="$file$CLAIM_SUFFIX"
@@ -2745,7 +2706,7 @@ cmd_release() {
 	[[ -n "$target" ]] || die "release: usage: tasks release <taskfile> [--generation TOKEN] [--outcome fail|error]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	# BEHAVIOR CHANGE (G15, documented): the foreign-release recovery unlock
@@ -2796,7 +2757,6 @@ cmd_claims() {
 		esac
 	done
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 
 	local -a claims=()
@@ -2868,7 +2828,7 @@ cmd_reclaim() {
 	[[ -n "$target" ]] || die "reclaim: usage: tasks reclaim <taskfile> [--owner ID]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 	local claim="$file$CLAIM_SUFFIX"
@@ -3112,7 +3072,7 @@ cmd_stamp() {
 	((${#args[@]} == 1)) || die "stamp: usage: tasks stamp <taskfile> [--repair]"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
@@ -3201,7 +3161,7 @@ cmd_archive() {
 	[[ -n "$target" ]] || die "archive: usage: tasks archive <taskfile>"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target")"
 
@@ -3467,7 +3427,7 @@ cmd_close() {
 		&& die "close: --force gates the completion path only; --cancelled closure already requires a deliberate Status Reason"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
@@ -3602,7 +3562,7 @@ cmd_report() {
 	[[ "$from" != *$'\n'* && "$from" != *$'\r'* ]] || die "report: --from must be a single line"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 
 	# Read the report content before taking the board lock: content is not
 	# board state, an unreadable or empty source must fail before anything
@@ -3689,7 +3649,7 @@ cmd_log() {
 	done <<<"$message"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 	acquire_board_lock "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "$target_arg")"
 
@@ -3735,7 +3695,7 @@ cmd_edit() {
 	[[ -n "$section" ]] || die "edit: --section is required"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	require_tasks_dir_for_write "$tasks_dir"
+	require_tasks_dir "$tasks_dir"
 
 	# Read the new body before taking the board lock: content is not board
 	# state, an unreadable or empty source must fail before anything changes,
@@ -3854,7 +3814,8 @@ lint_class_hard() { # rel; reads status_of/arch_of from the caller's scope
 # reconciliation, dead ../reports/ links (markdown and (evidence: ...)
 # tag forms alike), claim-sidecar hygiene, archive
 # hygiene, and closure push-reconcile (every recorded commit hash must be
-# reachable from some ref). Severity: open-task structural findings (header
+# reachable from some ref of the mapped project repo). Severity: open-task
+# structural findings (header
 # shape, sections, claim drift, unreachable commits) are hard; body-space
 # findings (dead links, checkbox drift) stay advisory everywhere, and all
 # findings on terminal or archived files stay advisory, so legacy noise
@@ -3877,14 +3838,21 @@ LINT_ADVISORY_CAP=20
 # ../reports/ link target, either the markdown form or the criteria
 # evidence tag), T (file, line, commit-hash candidate). Links
 # inside code spans or fences and lines that
-# carry an explicit "dead link" annotation are skipped; hash lines that
-# document known drift ("unreachable", "superseded", "accepted-lost") are
-# skipped, so a recorded disposition never re-reports itself. Hash
-# candidates are word-bounded 7..40 char hex runs, never pure decimal
-# (board date stamps), and runs of 8+ chars count only on a line carrying
-# commit-context words (commit, landed, pushed, merged, integrated, hash,
-# revert) - 7-char runs are the conventional short-hash form and count
-# anywhere. Empty header values mean absent, which the header contract
+# carry an explicit "dead link" annotation are skipped; hashes named
+# inside a bracketed reshape-annotation tag carrying a drift word
+# ("unreachable", "superseded", "accepted-lost") form the dispositioned
+# set and stay skipped wherever they occur on the line (the annotation is
+# appended to a line that already cited them), so a recorded disposition
+# never re-reports itself while hashes the tag does not name keep
+# reporting (the disposition is hash-scoped, not line-scoped, and a drift
+# word outside a tag disposes nothing). Hash
+# candidates are word-bounded 7..40 char hex runs; 8-digit pure-decimal
+# runs stay invisible (board date stamps), 7-digit pure-decimal runs
+# count only on a line carrying commit-context words, and other runs of
+# 8+ chars need the same context guard (commit, landed, pushed, merged,
+# integrated, hash, revert) - shorter non-decimal runs are the
+# conventional short-hash form and count anywhere. Empty header values
+# mean absent, which the header contract
 # allows, so only non-empty values are shape-checked. Character classes are
 # explicit throughout: mawk lacks [[:space:]] and brace intervals, so the
 # program stays inside the gawk/mawk intersection.
@@ -3908,6 +3876,8 @@ lint_scan_files() { # tasks_dir files...
 			hexrun = "[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]"
 			linkre = "\\((\\.\\./reports/|evidence: \\.\\./reports/)[^)]+\\)"
 			wordc = "[0-9A-Za-z_]"
+			annre = "\\[[^]]*reshape annotation: [^]]*\\]"
+			commitre = "(commit|landed|pushed|merged|integrated|hash|revert)"
 		}
 		BEGIN {
 			shapere["Created"] = tsre
@@ -3940,27 +3910,63 @@ lint_scan_files() { # tasks_dir files...
 				off += RLENGTH - 1
 			}
 		}
-		function scan_hashes(line, rel, ln,    low, n, i, c, tok, start, prev, nxt) {
-			low = tolower(line)
-			if (low ~ /unreachable|superseded|accepted-lost/) return
-			if (line !~ hexrun) return
-			n = length(line)
+		function scan_hashes(line, rel, ln,    low, kept, off, tag, n, i, c, tok, start, prev, nxt, isdec, disposed, m, j, ch, js, tname, jp, jn) {
+			kept = line
+			off = 0
+			while (match(substr(kept, off + 1), annre)) {
+				tag = tolower(substr(kept, off + RSTART, RLENGTH))
+				if (tag ~ /unreachable|superseded|accepted-lost/) {
+					# The tag hashes form the dispositioned set: they stay
+					# skipped wherever they occur on the line (the annotation
+					# was appended to a line that already cited them), while
+					# hashes the tag does not name keep reporting.
+					m = length(tag)
+					j = 1
+					while (j <= m) {
+						ch = substr(tag, j, 1)
+						if (ch ~ /[0-9a-f]/) {
+							js = j
+							tname = ""
+							while (j <= m && substr(tag, j, 1) ~ /[0-9a-f]/) {
+								tname = tname substr(tag, j, 1)
+								j++
+							}
+							jp = (js > 1) ? substr(tag, js - 1, 1) : " "
+							jn = (j <= m) ? substr(tag, j, 1) : " "
+							if (jp !~ wordc && jn !~ wordc && length(tname) >= 7 && length(tname) <= 40) {
+								disposed[tname] = 1
+							}
+						} else {
+							j++
+						}
+					}
+					kept = substr(kept, 1, off + RSTART - 1) " " \
+						substr(kept, off + RSTART + RLENGTH)
+				} else {
+					off += RSTART + RLENGTH - 1
+				}
+			}
+			low = tolower(kept)
+			if (low !~ hexrun) return
+			n = length(kept)
 			i = 1
 			while (i <= n) {
-				c = substr(line, i, 1)
+				c = substr(kept, i, 1)
 				if (c ~ /[0-9a-f]/) {
 					start = i
 					tok = ""
-					while (i <= n && substr(line, i, 1) ~ /[0-9a-f]/) {
-						tok = tok substr(line, i, 1)
+					while (i <= n && substr(kept, i, 1) ~ /[0-9a-f]/) {
+						tok = tok substr(kept, i, 1)
 						i++
 					}
-					prev = (start > 1) ? substr(line, start - 1, 1) : " "
-					nxt = (i <= n) ? substr(line, i, 1) : " "
+					prev = (start > 1) ? substr(kept, start - 1, 1) : " "
+					nxt = (i <= n) ? substr(kept, i, 1) : " "
+					isdec = (tok ~ /^[0-9]+$/)
 					if (prev !~ wordc && nxt !~ wordc \
 						&& length(tok) >= 7 && length(tok) <= 40 \
-						&& tok !~ /^[0-9]+$/ \
-						&& (length(tok) == 7 || low ~ /(commit|landed|pushed|merged|integrated|hash|revert)/)) {
+						&& (!(tok in disposed)) \
+						&& (!isdec || length(tok) == 7) \
+						&& (low ~ commitre || (length(tok) == 7 && !isdec))) {
 						print "T" sep rel sep ln sep tok
 					}
 				} else {
@@ -4056,6 +4062,28 @@ lint_scan_files() { # tasks_dir files...
 	' "$@"
 }
 
+# Resolve the repository the reachability pass consults for a board. A
+# store-slice board ($TASKS_DEV_ROOT/tasks/<namespace>) resolves its
+# project repo through the store registry's forward lookup (namespace to
+# local path), so recorded project commits are judged against the
+# project's own history; the store repo's own history is board
+# bookkeeping and must never serve as the reachability ground, where
+# every project commit would report unreachable (the migration geometry
+# class). A board outside the store is an explicit --dir or TASKS_DIR
+# pin, and the history around the board itself serves as the ground.
+# Prints the repo directory, or nothing when no ground
+# exists (the caller skips the pass with a note): a slice whose namespace
+# has no registry entry, or a bound path that is not a git work tree.
+lint_reach_repo() { # <tasks_dir>
+	local tasks_dir="$1" ns bound
+	[[ "$tasks_dir" == "$TASKS_DEV_ROOT/tasks/"* ]] || { printf '%s\n' "$tasks_dir"; return; }
+	ns="${tasks_dir#"$TASKS_DEV_ROOT/tasks/"}"
+	if [[ -z "$ns" || "$ns" == */* ]] || ! store_registry_path_for_namespace "$ns"; then return 0; fi
+	bound="$REGISTRY_LOCAL_PATH"
+	[[ -n "$(git -C "$bound" rev-parse --git-dir 2>/dev/null)" ]] || return 0
+	printf '%s\n' "$bound"
+}
+
 # Classified lint findings for a file set: the lint pipeline's scan,
 # reconcile, classification, and claim-hygiene passes in one function,
 # emitting the final "HARD rel: msg" / "ADVISORY rel: msg" records on
@@ -4069,16 +4097,14 @@ lint_scan_files() { # tasks_dir files...
 # named files, and the claim-hygiene owner and staleness branches only
 # for named files' sidecars; orphan-sidecar records stay unconditional
 # because a missing task file can never be in any caller's named set.
-# Global markers follow the resolve_tasks_dir pattern (a printf contract
-# would strand them in a $() subshell): LINT_SKIPPED_RECONCILE carries
-# the reconcile-skip note and LINT_CLAIM_COUNT the sorted sidecar count.
+# The reconcile-skip note rides the record stream as a SKIP record: the
+# sole consumer (cmd_lint) reads this function through a process
+# substitution, where a global assignment would strand.
 # Read-only: the only subprocess is git rev-list over read-only plumbing.
-LINT_SKIPPED_RECONCILE=""
 LINT_CLAIM_COUNT=0
 lint_classified_findings() { # <tasks_dir> <rel>...
 	local tasks_dir="$1"; shift
 	local -a files=("$@")
-	LINT_SKIPPED_RECONCILE=""
 	LINT_CLAIM_COUNT=0
 
 	# ---- pass 1: one awk scan over every named task file -------------------
@@ -4108,15 +4134,20 @@ lint_classified_findings() { # <tasks_dir> <rel>...
 	done
 
 	# ---- pass 2: closure push-reconcile ------------------------------------
-	# Every recorded hash must be reachable from some ref. One rev-list
-	# stream merges against the sorted candidate list (cands collected while
-	# consuming the scan records), so a board with hundreds of recorded
-	# hashes costs one git process total. Without a usable history (board
-	# outside a repo, or a repo with no commits) the pass is skipped with a
-	# note rather than reporting every hash unreachable.
+	# Every recorded hash must be reachable from some ref of the repo it was
+	# recorded against: the project repo, resolved through the store mapping
+	# (lint_reach_repo). One rev-list stream merges against the sorted
+	# candidate list (cands collected while consuming the scan records), so
+	# a board with hundreds of recorded hashes costs one git process total.
+	# Without a usable ground (a store slice with no registry binding to its
+	# project, a bound project that is not a repository, a board outside any
+	# repo, or a repo with no commits) the pass is skipped with a note
+	# rather than reporting every hash unreachable.
+	local reach_repo=""
+	((${#cands[@]} > 0)) && reach_repo="$(lint_reach_repo "$tasks_dir")"
 	local -A cand_reach=()
 	local have_history=0
-	if ((${#cands[@]} > 0)); then
+	if ((${#cands[@]} > 0)) && [[ -n "$reach_repo" ]]; then
 		local -a uniq_cands=()
 		mapfile -t uniq_cands < <(printf '%s\n' "${cands[@]}" | LC_ALL=C sort -u)
 		local ci=0 nc=${#uniq_cands[@]}
@@ -4133,9 +4164,11 @@ lint_classified_findings() { # <tasks_dir> <rel>...
 				break
 			done
 			((ci >= nc)) && break
-		done < <(git -C "$tasks_dir" rev-list --all 2>/dev/null | LC_ALL=C sort)
+		done < <(git -C "$reach_repo" rev-list --all 2>/dev/null | LC_ALL=C sort)
 		$saw_any && have_history=1
-		((have_history)) || LINT_SKIPPED_RECONCILE="no reachable git history found from $tasks_dir"
+		((have_history)) || printf 'SKIP\t%s\n' "no reachable git history found from $reach_repo"
+	elif ((${#cands[@]} > 0)); then
+		printf 'SKIP\t%s\n' "no project repository resolved for $tasks_dir (a store-slice board needs a registry binding to its project; reachability has no ground without it)"
 	fi
 
 	# ---- pass 3: classify every finding ------------------------------------
@@ -4289,7 +4322,6 @@ cmd_lint() {
 		esac
 	done
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	# Same option-poisoning defusing as render_unlocked: the path is handed
 	# to git and re-parsed below.
@@ -4305,15 +4337,15 @@ cmd_lint() {
 		done
 	done
 
-	local -a lint_recs=() hard_out=() advisory_out=()
+	local -a lint_recs=() hard_out=() advisory_out=() skip_notes=()
 	local rec
-	LINT_SKIPPED_RECONCILE=""
 	LINT_CLAIM_COUNT=0
 	if ((${#files[@]} > 0)); then
 		mapfile -t lint_recs < <(lint_classified_findings "$tasks_dir" "${files[@]}")
 		for rec in "${lint_recs[@]+${lint_recs[@]}}"; do
 			case "$rec" in
 				HARD*) hard_out+=("$rec") ;;
+				SKIP*) skip_notes+=("${rec#SKIP$'\t'}") ;;
 				*) advisory_out+=("$rec") ;;
 			esac
 		done
@@ -4336,7 +4368,10 @@ cmd_lint() {
 			adv_printed=$((adv_printed + 1))
 		fi
 	done
-	[[ -n "$LINT_SKIPPED_RECONCILE" ]] && printf 'note: push-reconcile skipped: %s\n' "$LINT_SKIPPED_RECONCILE"
+	local note
+	for note in "${skip_notes[@]+${skip_notes[@]}}"; do
+		printf 'note: push-reconcile skipped: %s\n' "$note"
+	done
 	printf 'lint: %d hard, %d advisory across %d task files (%d claim sidecars)\n' \
 		"$hard_count" "$advisory_count" "${#files[@]}" "$LINT_CLAIM_COUNT"
 	((hard_count == 0)) || exit 1
@@ -4505,7 +4540,6 @@ cmd_doctor() {
 		esac
 	done
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 
 	local -a problems=() # "code\tfile\tdetail" records, sorted before emission
@@ -4800,7 +4834,6 @@ cmd_frontier() {
 	done
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 
 	local -a files=()
@@ -5019,7 +5052,6 @@ cmd_events() {
 	[[ -z "$limit" || "$limit" =~ ^[1-9][0-9]*$ ]] || diec "$CODE_USAGE" "events: --limit must be a positive integer, got: $limit"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local ledger="$tasks_dir/$EVENT_LOG_NAME"
 	if [[ ! -f "$ledger" ]]; then
@@ -5495,7 +5527,6 @@ cmd_stuck() {
 	metrics_ledger="${f_metrics:-${!STUCK_METRICS_LEDGER_VAR:-}}"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local now now_epoch
 	now="$(now)"
@@ -6891,7 +6922,6 @@ cmd_show() {
 	fi
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 	local rel file_r board_r
@@ -6967,7 +6997,6 @@ cmd_list() {
 		|| diec "$CODE_USAGE" "list: unknown lane: $lane (valid: Triage, Ready, In Progress, Blocked/Cancelled, Completed, Archive)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 
 	local -a files=()
@@ -7118,7 +7147,6 @@ cmd_reports() {
 	[[ "$offset" =~ ^[0-9]+$ ]] || diec "$CODE_USAGE" "reports: --offset expects a non-negative integer, got: $offset"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 	local file; file="$(resolve_task_file "$tasks_dir" "${args[0]}")"
 
@@ -7310,7 +7338,6 @@ cmd_export() {
 	[[ "$format" == "jsonl" ]] || diec "$CODE_USAGE" "export: unsupported format: $format (supported: jsonl)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
-	warn_fallback_tasks_dir "$tasks_dir"
 	require_tasks_dir "$tasks_dir"
 
 	local -a files=() all_rels=() all_paths=()

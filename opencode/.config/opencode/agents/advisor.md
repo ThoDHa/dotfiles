@@ -10,6 +10,8 @@ permissions:
   - { action: edit, resource: "**/.tasks/**", effect: deny }
   - { action: read, resource: ".tasks/**", effect: deny }
   - { action: read, resource: "**/.tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/**", effect: deny }
+  - { action: read, resource: "/home/khave/dev/tasks/**", effect: deny }
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git status *", effect: allow }
   - { action: shell, resource: "git diff *", effect: allow }

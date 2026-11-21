@@ -10,6 +10,8 @@ permissions:
   - { action: edit, resource: "**/.tasks/**", effect: deny }
   - { action: read, resource: ".tasks/**", effect: deny }
   - { action: read, resource: "**/.tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/**", effect: deny }
+  - { action: read, resource: "/home/khave/dev/tasks/**", effect: deny }
   # read-only relief: v2 permission rules are ordered and the last matching rule wins, so the deny sits first with the exception allows after, mirroring the edit maps
   - { action: shell, resource: "*", effect: deny }
   - { action: shell, resource: "git status *", effect: allow }

@@ -25,6 +25,7 @@ permissions:
   - { action: edit, resource: "*", effect: deny }
   - { action: edit, resource: ".tasks/**", effect: deny }
   - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/**", effect: deny }
   - { action: subagent, resource: "*", effect: deny }
 # fixture denial tail (fixture-only rules; not part of the target map)
   - { action: edit, resource: ".tasks/**", effect: deny }

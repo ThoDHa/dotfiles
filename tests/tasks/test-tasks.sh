@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1361
+EXPECTED_ASSERTIONS=1377
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -2339,7 +2339,8 @@ lint_dead="$(t lint --dir "$lint_dir" --verbose | grep -c 'dead report link')"
 assert_eq "the skipped pair adds no dead-link finding" "1" "$lint_dead"
 
 # Push-reconcile: a reachable recorded hash is silent, an unreachable one
-# is hard on an open task, and a line documenting known drift is skipped.
+# is hard on an open task, and a hash named inside a drift annotation tag
+# is skipped (hash-scoped: co-located unnamed hashes still report).
 t log --dir "$lint_dir" "$(basename "$f_lp")" "landed commit $lint_reach on the branch" >/dev/null
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_not_contains "a reachable recorded commit is silent" "$lint_out" "unreachable from any branch"
@@ -2347,10 +2348,27 @@ printf '%s\n' 'commit deadbee99 pushed to origin' >>"$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
 assert_contains "lint flags an unreachable recorded commit as hard" "$lint_out" \
 	"recorded commit deadbee99"
-printf '%s\n' 'commit deadbe00 recorded landed+pushed but unreachable everywhere; superseded by re-land' >>"$f_lp"
+printf '%s\n' 'commit deadbe00 landed and reverted; co-located deadbeef0 still owes its own check [2026-06-15 12:00 reshape annotation: deadbe00 superseded by the re-land]' >>"$f_lp"
 lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
-assert_not_contains "a drift-disposition hash line is skipped" "$lint_out" "deadbe00"
-sed -i '/commit deadbee99 pushed to origin/d' "$f_lp"
+assert_not_contains "a hash named inside a drift annotation tag is skipped" "$lint_out" "deadbe00"
+assert_contains "a co-located hash the annotation does not name still reports" "$lint_out" "recorded commit deadbeef0"
+printf '%s\n' 'commit deadbee98 landed then lost, unreachable everywhere, superseded by re-land' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "a drift word outside an annotation tag disposes nothing" "$lint_out" "recorded commit deadbee98"
+printf '%s\n' 'commit deadbe01 lost entirely [2026-06-15 12:00 reshape annotation: deadbe01 accepted-lost, absent from every ref; the change survives on main as cafe5678, reverted by the later re-land]' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "an accepted-lost annotation accepts an on-main pointer extension" "$lint_out" "deadbe01"
+assert_not_contains "the pointer hashes inside the disposed tag stay skipped" "$lint_out" "cafe5678"
+printf '%s\n' 'commit 4654591 squashed into the series branch' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_contains "a pure-decimal short hash under commit context reports" "$lint_out" "recorded commit 4654591"
+printf '%s\n' 'counted 4654592 events in the window' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "a pure-decimal number without commit context stays invisible" "$lint_out" "4654592"
+printf '%s\n' 'rebuild landed 20261120 across the window' >>"$f_lp"
+lint_out="$(t lint --dir "$lint_dir" 2>&1 || true)"
+assert_not_contains "the 8-digit date stamp stays invisible to the hash scan" "$lint_out" "20261120"
+sed -i '/commit deadbee99 pushed to origin/d; /co-located deadbeef0 still owes/d; /commit deadbee98 landed then lost/d; /commit deadbe01 lost entirely/d; /commit 4654591 squashed into/d; /counted 4654592 events/d; /rebuild landed 20261120 across/d' "$f_lp"
 
 # Claim hygiene: Owner without sidecar, sidecar without Owner, and an
 # owner mismatch are hard on an open task; parity passes silently. Owner
@@ -3269,54 +3287,68 @@ assert_contains "usage places --append after --section" "$usage_out" \
 assert_not_contains "usage does not place --append before --section" "$usage_out" \
 	"--append] --section"
 
-section "canonical-root guard (fallback root: writes refuse, reads warn)"
-# The guard fixture must sit OUTSIDE the battery root's chain: walk-up from
-# anywhere under ROOT finds the battery board, so a sibling temp root whose
-# ancestors carry no board is what puts the CLI in bare-fallback territory
-# (a host with a board at /tmp or / would fail these probes loudly). Probes
-# run inside command substitutions; every assert runs in the parent because
-# the harness counters are in-process and a subshell assert is lost. The
-# subshells also unset the pinned clock: a TASKS_TEST_CLOCK export without
-# TASKS_DIR dies at startup under the clock's co-gate, which would mask
-# the fallback behavior under test.
+section "no-board refusal: the chain stands alone, a local .tasks is never found"
+# The retirement fixture (STORE-1 slice B): resolution is the chain
+# (flag, env, marker, registry, derived slice) and nothing else. The
+# guard fixture sits OUTSIDE the battery root's chain: its ancestors
+# carry no board and no marker, and the derived chain has no slice for
+# it. The fixture plants a local .tasks explicitly, a directory the
+# pre-retirement CLI resolved through the walkup and the bare fallback;
+# the unpinned verbs must now refuse with the named no-board error
+# while the planted board stays reachable exactly through an explicit
+# pin. Probes run inside command substitutions; every assert runs in
+# the parent because the harness counters are in-process and a subshell
+# assert is lost. The subshells also unset the pinned clock: a
+# TASKS_TEST_CLOCK export without TASKS_DIR dies at startup under the
+# clock's co-gate, which would mask the no-board behavior under test.
 guard_root="$(mktemp -d)"
 guard_board="$guard_root/.tasks"
 trap 'rm -rf "$ROOT" "$guard_root"' EXIT
 
-refuse_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-1 --name "Fallback Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
-assert_contains "new refuses the bare fallback root" "$refuse_err" "refusing to write to the bare ./.tasks fallback"
-assert_contains "fallback refusal carries the pin remediation" "$refuse_err" "pass --dir, export TASKS_DIR"
+mkdir -p "$guard_board/current"
+refuse_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-1 --name "No Board Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
+assert_contains "new refuses when only a local .tasks exists" "$refuse_err" "no task board found from"
+assert_contains "the refusal enumerates the chain that resolved nothing" "$refuse_err" "no .tasks-map marker, no registry entry"
+assert_contains "the refusal leads with the universal remediations, init conditioned on dev-root derivability" "$refuse_err" "plant a .tasks-map marker, pass --dir, or run 'tasks init' inside a project under"
+assert_contains "the no-board refusal carries the coded exit contract" "$refuse_err" "(code: NO_BOARD)"
 set_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
-assert_contains "set refuses the bare fallback root" "$set_err" "refusing to write to the bare ./.tasks fallback"
+assert_contains "set refuses the unresolving root" "$set_err" "no task board found from"
 log_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t log nosuchfile.md "guard probe message" </dev/null 2>&1 >/dev/null || true )"
-assert_contains "log refuses the bare fallback root" "$log_err" "refusing to write to the bare ./.tasks fallback"
+assert_contains "log refuses the unresolving root" "$log_err" "no task board found from"
 report_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t report nosuchfile.md --slug guard-probe --digest "probe" </dev/null 2>&1 >/dev/null || true )"
-assert_contains "report refuses the bare fallback root" "$report_err" "refusing to write to the bare ./.tasks fallback"
+assert_contains "report refuses the unresolving root" "$report_err" "no task board found from"
 init_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t init </dev/null 2>&1 >/dev/null || true )"
-assert_contains "init refuses to scaffold the bare fallback root" "$init_err" "refusing to write to the bare ./.tasks fallback"
-[[ -e "$guard_root/.tasks" ]] && bad "refused probes leave no fallback root behind" || ok "refused probes leave no fallback root behind"
+assert_contains "init refuses to scaffold outside the dev root with no mapping" "$init_err" "no task board found from"
+if ls "$guard_board/current/"GRD-1-*.md >/dev/null 2>&1; then
+	bad "the refused probes wrote nothing into the local .tasks"
+else
+	ok "the refused probes wrote nothing into the local .tasks"
+fi
+if [[ -d "$guard_board" ]]; then
+	ok "the planted local .tasks stays in place, unresolved"
+else
+	bad "the planted local .tasks stays in place, unresolved"
+fi
 
 render_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t render </dev/null 2>&1 >/dev/null || true )"
-assert_contains "render warns on the bare fallback root" "$render_err" "warning: no board found walking up from"
-assert_contains "render keeps the missing-board die on the fallback root" "$render_err" "no .tasks directory"
+assert_contains "render dies with the no-board error on the unresolving root" "$render_err" "no task board found from"
+assert_not_contains "no read verb announces a fallback anymore" "$render_err" "warning:"
 show_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t show nosuchfile.md </dev/null 2>&1 >/dev/null || true )"
-assert_contains "show warns on the bare fallback root" "$show_err" "warning: no board found walking up from"
-assert_contains "show keeps the missing-board die on the fallback root" "$show_err" "no .tasks directory"
+assert_contains "show dies with the no-board error on the unresolving root" "$show_err" "no task board found from"
 
-# The accepted pins, probed in the same walk-up-empty territory: explicit
-# --dir, exported TASKS_DIR, and the upward find each let writes through.
+# The pins that survive retirement: explicit --dir and exported
+# TASKS_DIR are chain members and reach the planted local board
+# directly; the board is reachable exactly when named.
 t init --dir "$guard_board" >/dev/null
 flag_file="$(t new --id GRD-2 --name "Flag Pin Probe" --dir "$guard_board")"
 [[ -f "$flag_file" ]] && ok "write lands under an explicit --dir pin" || bad "write lands under an explicit --dir pin"
 env_file="$( TASKS_DIR="$guard_board"; t new --id GRD-3 --name "Env Pin Probe" )"
 [[ -f "$env_file" ]] && ok "write lands under a TASKS_DIR pin" || bad "write lands under a TASKS_DIR pin"
 mkdir "$guard_root/nested"
-walk_file="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-4 --name "Walk-up Probe" )"
-[[ -f "$walk_file" ]] && ok "write walks up to the found board" || bad "write walks up to the found board"
-assert_contains "walk-up write lands in the walked-up board" "$walk_file" "$guard_board/"
-walk_show_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$walk_file")" </dev/null 2>&1 >/dev/null )"
-assert_eq "walk-up read succeeds" "0" "$?"
-assert_not_contains "walk-up read emits no fallback warning" "$walk_show_err" "warning:"
+nested_err="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$flag_file")" </dev/null 2>&1 >/dev/null || true )"
+assert_contains "a nested cwd no longer walks up to a local board" "$nested_err" "no task board found from"
+nested_rc="$( cd "$guard_root/nested" && unset TASKS_DIR TASKS_TEST_CLOCK && t show "$(basename "$flag_file")" --dir "$guard_board" >/dev/null 2>&1; echo $? )"
+assert_eq "a nested cwd with an explicit --dir pin still reaches the local board" "0" "$nested_rc"
 
 section "resolve: task file arguments are contained to the board root"
 # resolve_task_file admits bare names, in-board paths, and archive paths,
@@ -6463,11 +6495,10 @@ assert_contains "the rendered dashboard lives inside the store slice" "$(cat "$s
 
 section "store seam: init creates the store slice for a slice-less dev project"
 # init is the only verb with create mode: unpinned init in a dev project
-# with no slice and no local board claims the store location, while any
-# other verb refuses and leaves no slice behind. The probe runs on its
-# own dev root outside the battery scratch tree: the shared seam root
-# sits under the pinned battery board, so the legacy walkup would find
-# that board before the create branch could claim the slice.
+# with no slice claims the store location, while any other verb refuses
+# and leaves no slice behind. The probe runs on its own dev root so
+# TASKS_DEV_ROOT scopes the derivation to the scratch store, never the
+# real one.
 seam_init_root="$(mktemp -d)"
 mkdir -p "$seam_init_root/freshproj/deeper" "$seam_init_root/noverbproj"
 seam_out="$(cd "$seam_init_root/freshproj/deeper" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_init_root" "$TASKS_BIN" init)"
@@ -6489,44 +6520,66 @@ else
 fi
 rm -rf "$seam_init_root"
 
-section "store seam: legacy fallback board"
+section "store seam: the retired legacy local board"
+# The retirement proof (STORE-1 slice B): a dev project whose only board
+# is a local .tasks resolves nothing unpinned — not from the project
+# root (the bare fallback is gone) and not from a nested cwd (the
+# walkup is gone) — while the planted board stays reachable through the
+# explicit --dir pin and the store slices beside it keep serving. The
+# board is planted through init --dir, the one path that still names a
+# local directory.
 mkdir -p "$seam_devroot/legacyproj/deep"
 seam_t "$seam_devroot/legacyproj" init --dir "$seam_devroot/legacyproj/.tasks" >/dev/null
-seam_task="$(seam_t "$seam_devroot/legacyproj" new --id SEAM-2 --name "Legacy Fallback Board" --status Triage)"
-if [[ -f "$seam_task" && "$seam_task" == "$seam_devroot/legacyproj/.tasks/current/"* && ! -e "$seam_store/legacyproj" ]]; then
-	ok "a dev project without a slice keeps the local .tasks board"
+seam_rc=0
+seam_err="$(seam_t "$seam_devroot/legacyproj" new --id SEAM-2 --name "Retired Legacy Board" --status Triage </dev/null 2>&1 >/dev/null)" || seam_rc=$?
+if ((seam_rc != 0)); then
+	ok "a dev project with only a local .tasks refuses unpinned writes"
 else
-	bad "a dev project without a slice keeps the local .tasks board"
+	bad "a dev project with only a local .tasks refuses unpinned writes"
 fi
-seam_task_base="$(basename "$seam_task")"
-seam_out="$(seam_t "$seam_devroot/legacyproj/deep" show "$seam_task_base" --json)"
-assert_contains "the legacy board resolves from a nested cwd through the walkup" "$seam_out" "SEAM-2"
+assert_contains "the refusal names the no-board error" "$seam_err" "no task board found from"
+if [[ -d "$seam_devroot/legacyproj/.tasks/current" && -z "$(ls "$seam_devroot/legacyproj/.tasks/current/" 2>/dev/null)" ]]; then
+	ok "the refused write left the local board untouched"
+else
+	bad "the refused write left the local board untouched"
+fi
+seam_rc=0
+seam_err="$(seam_t "$seam_devroot/legacyproj/deep" show nowhere.md </dev/null 2>&1 >/dev/null)" || seam_rc=$?
+if ((seam_rc != 0)); then
+	ok "a nested cwd no longer walks up to the local board"
+else
+	bad "a nested cwd no longer walks up to the local board"
+fi
+seam_task="$(seam_t "$seam_devroot/legacyproj" new --id SEAM-2 --name "Explicit Pin Probe" --status Triage --dir "$seam_devroot/legacyproj/.tasks")"
+assert_contains "the local board stays reachable through the explicit --dir pin" "$seam_task" "$seam_devroot/legacyproj/.tasks/current/"
+seam_out="$(seam_t "$seam_devroot/myproj" list)"
+assert_contains "the store chain beside the retired board keeps serving" "$seam_out" "SEAM-1"
 
 section "store seam: non-dev project unaffected"
-# Outside the battery root's chain, like the canonical-root guard fixture:
-# a cwd under $ROOT would walk up into the battery board and mask the
-# bare-fallback behavior under test. Cleaned up at the section's end (the
-# shared EXIT trap owns only the battery's own roots).
+# Outside the battery root's chain, like the no-board guard fixture:
+# a cwd under $ROOT must not see the battery board through the
+# derivation either. Cleaned up at the section's end (the shared EXIT
+# trap owns only the battery's own roots).
 seam_nonde="$(mktemp -d)"
-# The git-root fallback derives the slice from the repo basename, so the
+# The git-root derivation derives the slice from the repo basename, so the
 # probe slice carries the scratch repo's real name, not a hardcoded one.
 seam_nonde_slice="$seam_store/$(basename "$seam_nonde")"
 git -C "$seam_nonde" init -q
 if seam_t "$seam_nonde" init </dev/null >/dev/null 2>&1; then
-	bad "a non-dev project still refuses the unpinned bare fallback"
+	bad "a non-dev project still refuses the unpinned write"
 else
-	ok "a non-dev project still refuses the unpinned bare fallback"
+	ok "a non-dev project still refuses the unpinned write"
 fi
 seam_t "$seam_nonde" init --dir "$seam_nonde/.tasks" >/dev/null
-seam_task="$(seam_t "$seam_nonde" new --id SEAM-3 --name "Non Dev Unaffected" --status Triage)"
+seam_task="$(seam_t "$seam_nonde" new --id SEAM-3 --name "Non Dev Unaffected" --status Triage --dir "$seam_nonde/.tasks")"
 if [[ -f "$seam_task" && "$seam_task" == "$seam_nonde/.tasks/current/"* && ! -e "$seam_nonde_slice" ]]; then
-	ok "a non-dev git repo without a slice keeps local behavior untouched"
+	ok "a non-dev git repo keeps its explicitly pinned local board, and nothing else"
 else
-	bad "a non-dev git repo without a slice keeps local behavior untouched"
+	bad "a non-dev git repo keeps its explicitly pinned local board, and nothing else"
 fi
 mkdir -p "$seam_nonde_slice"
 seam_out="$(seam_t "$seam_nonde" init)"
-assert_contains "the git-root fallback binds a non-dev repo to its basename slice" "$seam_out" "$seam_nonde_slice"
+assert_contains "the git-root derivation binds a non-dev repo to its basename slice" "$seam_out" "$seam_nonde_slice"
 seam_task="$(seam_t "$seam_nonde" new --id SEAM-4 --name "Slice Takes Over" --status Triage)"
 if [[ -f "$seam_task" && "$seam_task" == "$seam_nonde_slice/current/"* ]] \
 	&& ! ls "$seam_nonde/.tasks/current/"SEAM-4-*.md >/dev/null 2>&1; then
@@ -6616,18 +6669,18 @@ fi
 assert_contains "the marker contradiction names the collision" "$seam_err" "store namespace collision"
 rm -rf "$seam_clash_repo"
 
-section "store seam: marker wins over derived and legacy"
+section "store seam: marker wins over the derived slice with a local board inert"
 mkdir -p "$seam_devroot/dualproj" "$seam_store/dualproj" "$seam_store/markwin"
 printf 'namespace: markwin\n' > "$seam_devroot/dualproj/.tasks-map"
 seam_t "$seam_devroot/dualproj" init --dir "$seam_devroot/dualproj/.tasks" >/dev/null
 seam_out="$(seam_t "$seam_devroot/dualproj" init)"
-assert_contains "the marker outranks the derived slice and the legacy board together" "$seam_out" "$seam_store/markwin"
+assert_contains "the marker resolves the slice with a local .tasks sitting inert" "$seam_out" "$seam_store/markwin"
 seam_task="$(seam_t "$seam_devroot/dualproj" new --id SEAM-8 --name "Marker Wins" --status Triage)"
 if [[ -f "$seam_task" && "$seam_task" == "$seam_store/markwin/current/"* ]] \
 	&& ! ls "$seam_devroot/dualproj/.tasks/current/"SEAM-8-*.md >/dev/null 2>&1; then
-	ok "the write lands in the marker slice, never the legacy board"
+	ok "the write lands in the marker slice, never the inert local board"
 else
-	bad "the write lands in the marker slice, never the legacy board"
+	bad "the write lands in the marker slice, never the inert local board"
 fi
 if [[ ! -f "$seam_store/dualproj/dashboard.md" ]]; then
 	ok "the derived-name slice stays untouched beside a marker"
@@ -6640,9 +6693,9 @@ section "store seam: init claims the explicit namespace when no slice exists"
 # first (marker, then registry) before the dev-walk derivation, and the
 # derived claim is collision-checked against the registry, so a project
 # mapped before its slice is staged scaffolds the named namespace and an
-# unmapped-but-bound name is never minted. Dedicated dev root: the shared
-# seam root sits under the battery board, whose legacy walkup would
-# preempt the create branch.
+# unmapped-but-bound name is never minted. Dedicated dev root:
+# TASKS_DEV_ROOT must scope the derivation and the registry lookup to
+# the scratch store, not the real one.
 seam_map_root="$(mktemp -d)"
 mkdir -p "$seam_map_root/mkinproj" "$seam_map_root/reginit" "$seam_map_root/noinproj" "$seam_map_root/tasks"
 printf 'namespace: mkinmark\n' > "$seam_map_root/mkinproj/.tasks-map"
@@ -6661,10 +6714,56 @@ else
 fi
 rm -rf "$seam_map_root"
 
-section "store seam: bare repos and no-git cwds keep the fallback refusal"
-# Derivation yields nothing for a bare repository and for a directory with
-# no git work tree, so both fall through to the bare fallback and writers
-# refuse it (the seam review's fixture gap).
+section "store seam: lint reachability resolves the project repo through the mapping"
+# STORE-1 Half A.1: recorded project hashes are judged against the
+# project's own history, resolved through the store registry (namespace
+# to local path). Dedicated dev root: TASKS_DEV_ROOT must scope the
+# derivation and the registry lookup to the scratch store, not the real
+# one. The scratch store is itself a
+# repository with an unrelated commit, so a lint that consulted the store
+# repo would report every recorded hash unreachable — the migration
+# geometry class this resolution kills.
+reach_root="$(mktemp -d)"
+reach_devroot="$reach_root/devroot"
+reach_store="$reach_devroot/tasks"
+reach_t() { # <cwd> <args...>: run the CLI from <cwd> under the dedicated dev root
+	local cwd="$1"; shift
+	(cd "$cwd" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$reach_devroot" "$TASKS_BIN" "$@")
+}
+mkdir -p "$reach_devroot/reachproj" "$reach_store"
+git -C "$reach_store" init -q
+git -C "$reach_store" config user.email seam@invalid
+git -C "$reach_store" config user.name "Seam Probe"
+echo store-seed >"$reach_store/seed.txt"
+git -C "$reach_store" add seed.txt
+git -C "$reach_store" commit -qm "store seed"
+git -C "$reach_devroot/reachproj" init -q
+git -C "$reach_devroot/reachproj" config user.email seam@invalid
+git -C "$reach_devroot/reachproj" config user.name "Seam Probe"
+echo one >"$reach_devroot/reachproj/one.txt"
+git -C "$reach_devroot/reachproj" add one.txt
+git -C "$reach_devroot/reachproj" commit -qm "one"
+reach_reach="$(git -C "$reach_devroot/reachproj" rev-parse HEAD)"
+reach_t "$reach_devroot/reachproj" init >/dev/null
+printf '# store registry: one "name: /local/path" entry per line\nreachproj: %s\n' "$reach_devroot/reachproj" > "$reach_store/mapping.yaml"
+f_reach="$reach_store/reachproj/current/20260602-0900-reach-probe.md"
+printf '%s\n' '# Task: Reach Probe' '' '**Created:** 2026-06-02 09:00' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2026-06-02 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '- landed commit '"$reach_reach"' on the branch' '' '## Execution Log' >"$f_reach"
+printf '%s\n' 'commit deadbee97 pushed to origin' >>"$f_reach"
+lint_out="$(reach_t "$reach_devroot/reachproj" lint 2>&1 || true)"
+assert_not_contains "a project-reachable hash reports no unreachable finding" "$lint_out" "$reach_reach"
+assert_contains "an unreachable hash still reports as hard" "$lint_out" "recorded commit deadbee97"
+assert_not_contains "the store repo's own history never serves as the ground" "$lint_out" "push-reconcile skipped"
+grep -v '^reachproj:' "$reach_store/mapping.yaml" > "$reach_store/mapping.yaml.tmp" && mv "$reach_store/mapping.yaml.tmp" "$reach_store/mapping.yaml"
+lint_out="$(reach_t "$reach_devroot/reachproj" lint 2>&1 || true)"
+assert_contains "an unbound slice skips the pass with a named note" "$lint_out" "no project repository resolved"
+assert_not_contains "the skipped pass reports no reachability finding" "$lint_out" "unreachable from any"
+rm -rf "$reach_root"
+
+section "store seam: bare repos and no-git cwds refuse with the no-board error"
+# Derivation yields nothing for a bare repository and for a directory
+# with no git work tree, so nothing in the chain resolves and the verbs
+# die with the named no-board error (the seam review's fixture gap,
+# retained under the retired-resolution semantics).
 seam_bare="$(mktemp -d)"
 git -C "$seam_bare" init -q --bare
 if seam_t "$seam_bare" log nowhere.md --from probe "message" </dev/null >/dev/null 2>&1; then

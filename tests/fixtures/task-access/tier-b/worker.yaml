@@ -22,6 +22,7 @@ permissions:
   - { action: edit, resource: "*", effect: allow }
   - { action: edit, resource: ".tasks/**", effect: deny }
   - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/**", effect: deny }
   - { action: shell, resource: "*", effect: allow }
   - { action: shell, resource: "git push*", effect: deny }
   - { action: shell, resource: "git commit --amend*", effect: deny }

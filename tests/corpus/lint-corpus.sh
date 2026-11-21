@@ -24,7 +24,7 @@
 #                             out of the corpus; corpus-docs class:
 #                             tracked .md outside the excluded trees)
 #   6. line budgets           per-file agent budgets (manager 385,
-#                             worker 130, verifier 120, reviewer 150,
+#                             worker 130, verifier 120, reviewer 152,
 #                             planner 125, advisor 95, scout 105), rules 190,
 #                             SKILL.md 935, README/DESIGN under 335;
 #                             this enumeration is parsed and compared
@@ -122,7 +122,7 @@ CORPUS_DOCS_DIR="."
 # never substitute for the measured layer. Agent files budget per file,
 # not as a class, so one file's growth cannot spend another file's
 # slack; where the headroom formula exceeds the prior value the prior
-# value stands (reviewer 150, advisor 95). The one exception to that
+# value stands (reviewer 152, advisor 95). The one exception to that
 # floor is the additive raise: a raise requires a growth event
 # sanctioned by a dispatch or parent plan, with the sanctioning unit
 # recorded in this registry; absent that record the prior value
@@ -146,7 +146,7 @@ declare -A BUDGET_AGENT_FILE_LINES=(
 	[opencode/.config/opencode/agents/manager.md]=385
 	[opencode/.config/opencode/agents/worker.md]=130
 	[opencode/.config/opencode/agents/verifier.md]=120
-	[opencode/.config/opencode/agents/reviewer.md]=150
+	[opencode/.config/opencode/agents/reviewer.md]=152
 	[opencode/.config/opencode/agents/planner.md]=125
 	[opencode/.config/opencode/agents/advisor.md]=95
 	[opencode/.config/opencode/agents/scout.md]=105
@@ -717,7 +717,7 @@ VERIFIER_SHELL_FIRST='- { action: shell, resource: "*", effect: deny }'
 VERIFIER_SHELL_ENV_DENY='- { action: shell, resource: "* *.env*", effect: deny }'
 VERIFIER_SHELL_PUSH_DENY='- { action: shell, resource: "git push*", effect: deny }'
 VERIFIER_SHELL_RULE_COUNT=60
-VERIFIER_LIST_ITEM_COUNT=69
+VERIFIER_LIST_ITEM_COUNT=71
 
 check_verifier_map_order() {
 	assert_present "$VERIFIER_SHELL_FILE"

@@ -86,6 +86,10 @@ for role in "${TASK_ACCESS_ROLES[@]}"; do
 	config="$TIERB/$role.yaml"
 	expect_verdict "$role: edit on .tasks/dashboard.md denied" "deny" "$config" edit ".tasks/dashboard.md"
 	expect_verdict "$role: edit on .tasks/current/seed.md denied" "deny" "$config" edit ".tasks/current/seed.md"
+	if [[ "$role" != manager ]]; then
+		expect_verdict "$role: edit on a store-board task file denied" "deny" "$config" edit "/home/khave/dev/tasks/dotfiles/current/x.md"
+		expect_verdict "$role: edit on the store registry denied" "deny" "$config" edit "/home/khave/dev/tasks/mapping.yaml"
+	fi
 	for probe in \
 		"cat .tasks/dashboard.md" \
 		"cat /abs/repo/.tasks/dashboard.md" \
@@ -114,6 +118,9 @@ expect_verdict "advisor: tasks show allowed byte-identically with planner" "allo
 expect_verdict "advisor: territory cat stays allowed" "allow" "$TIERB/advisor.yaml" shell "cat README.md"
 expect_verdict "reviewer: tasks reports allowed (read-verb delta)" "allow" "$TIERB/reviewer.yaml" shell "tasks reports /tmp/board/current/x.md --include-body --json"
 expect_verdict "reviewer: tasks report write stays allowed" "allow" "$TIERB/reviewer.yaml" shell "tasks report /tmp/board/current/x.md --slug review --digest d"
+expect_verdict "planner: the store research-deposit path stays allowed" "allow" "$TIERB/planner.yaml" edit "/home/khave/dev/tasks/researchns/reports/research/01-recon.md"
+expect_verdict "planner: a store non-research write stays denied" "deny" "$TIERB/planner.yaml" edit "/home/khave/dev/tasks/researchns/current/x.md"
+expect_verdict "manager: a store-board write stays behind the catch-all deny, writes ride the CLI channels" "deny" "$TIERB/manager.yaml" edit "/home/khave/dev/tasks/dotfiles/current/x.md"
 expect_verdict "worker: territory edit stays allowed under the allow-first map" "allow" "$TIERB/worker.yaml" edit "src/main.ts"
 expect_verdict "worker: tasks verbs flow through the blanket shell allow" "allow" "$TIERB/worker.yaml" shell "tasks log /tmp/board/current/x.md --from worker m"
 expect_verdict "manager: retained .tasks edit allow overridden by the fixture deny" "deny" "$TIERB/manager.yaml" edit ".tasks/dashboard.md"

@@ -59,6 +59,8 @@ permissions:
   - { action: subagent, resource: "scout", effect: allow }
   - { action: edit, resource: ".tasks/**", effect: deny }
   - { action: edit, resource: "**/.tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/**", effect: deny }
+  - { action: edit, resource: "/home/khave/dev/tasks/*/reports/research/**", effect: allow }
   - { action: edit, resource: ".tasks/reports/research/**", effect: allow }
 # fixture denial tail (fixture-only rules; not part of the target map)
   - { action: shell, resource: "*cat *.tasks*", effect: deny }
