@@ -1,6 +1,6 @@
 ---
 name: task-files
-description: "Task file protocol covering the .tasks directory, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode (a loading trigger only: the activation never creates task files, it triggers only the Large Task Offer gate), or themselves mentions dashboard.md or .tasks. The mere presence of a .tasks directory (including a fresh `tasks init` scaffold) in the project or in tool output does NOT activate this skill."
+description: "Task file protocol covering the central task store, dashboard board, task IDs, child task files, checkpoint slicing, the agent reports namespace, and the tasks CLI. Use ONLY when the user explicitly requests task files, a task board or dashboard, in-depth documentation of work such as full reports, activates Manager Mode (a loading trigger only: the activation never creates task files, it triggers only the Large Task Offer gate), or themselves mentions dashboard.md or the task store. The mere presence of a board (a `.tasks-map` marker resolving to a store slice, a legacy `.tasks/` directory, or a fresh `tasks init` scaffold) in the project or in tool output does NOT activate this skill."
 ---
 
 > Manager Mode mechanics are defined in the `delegation` skill. Load it when Manager Mode activates.
@@ -36,9 +36,9 @@ Manager Mode activation is a loading trigger, not a creation trigger: activating
 
 Task files MUST NOT be created proactively without user request. Standard todo tracking via TodoWrite is sufficient for most operations.
 
-### Directory Presence Is Not Activation
+### Board Presence Is Not Activation
 
-An existing `.tasks/` directory (from prior sessions, other work, or `tasks init`) does NOT activate this protocol. Implementations MUST NOT load this skill, create task files, or update the dashboard merely because the directory exists or appears in tool output (listings, glob results, context hints). Usage begins ONLY through the explicit triggers in [Creation Triggers](#creation-triggers); absent such a trigger, track work with TodoWrite and leave the directory the `tasks init` scaffold created untouched.
+A project has a board when its `.tasks-map` marker resolves to its store slice; the resolving marker, the slice, or a legacy local `.tasks/` directory (from prior sessions, other work, or a fresh `tasks init` scaffold) does NOT activate this protocol. Implementations MUST NOT load this skill, create task files, or update the dashboard merely because a board resolves or board artifacts appear in tool output (listings, glob results, context hints). Usage begins ONLY through the explicit triggers in [Creation Triggers](#creation-triggers); absent such a trigger, track work with TodoWrite and leave the mapped board untouched.
 
 ### Large Task Offer
 
@@ -50,10 +50,13 @@ When a task generates 4 or more todos, implementations MUST offer task file trac
 
 ### Required Structure
 
+Boards live in one central store rather than in project workspaces: the store root is `$TASKS_DEV_ROOT/tasks` (default `/home/khave/dev/tasks`), a dedicated git repository holding one flat namespace per project:
+
 ```
-Project Root/
-└── .tasks/
-    ├── dashboard.md                              # Jira-style dashboard board
+<dev-root>/tasks/                     # the store: its own repository
+├── mapping.yaml                      # flat registry: one "name: /local/project/path" entry per namespace
+└── <namespace>/                      # one slice per project (e.g. tasks/dotfiles for this repo)
+    ├── dashboard.md                  # Jira-style dashboard board
     ├── current/
     │   └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Active and recently completed task files
     ├── reports/
@@ -65,11 +68,22 @@ Project Root/
         └── PREFIX-N-YYYYMMDD-HHMM-task-description.md  # Archived task files
 ```
 
-Only `dashboard.md` and `reports/` sit at the top of `.tasks/` as the `tasks init` scaffold lays them out; every individual task file lives in `current/` or `archive/`, and verbatim agent reports live under `reports/` (see [Reports Namespace](#reports-namespace)). When a task is moved to the dashboard's Archive table through `tasks archive`, its file MUST be moved from `current/` into `archive/`; its reports never move. The directory is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live under their own namespaces.
+Only `dashboard.md` and `reports/` sit at the top of a namespace slice as `tasks init` lays it out; every individual task file lives in `current/` or `archive/`, and verbatim agent reports live under `reports/` (see [Reports Namespace](#reports-namespace)). When a task is moved to the dashboard's Archive table through `tasks archive`, its file MUST be moved from `current/` into `archive/`; its reports never move. The slice is dedicated to task tracking; other artifacts (for example `.opencode/no-verify.log`) live in their own project trees, never inside the store.
 
-### Gitignore Recommendation
+### Project-to-Store Mapping
 
-Users SHOULD add the `.tasks/` directory the `tasks init` scaffold creates to their global gitignore, or MAY commit it selectively if task history should be preserved.
+The mapping between a project and its store slice is bidirectional and explicit; derivation and legacy search survive only as fallbacks:
+
+- **Project side.** A `.tasks-map` marker file in the project root names the project's namespace: one `namespace: <name>` line (blank lines and `#` comments allowed; the name is one flat store-slice name, letters, digits, dots, dashes, underscores, no leading dot or slash). The CLI reads the nearest marker walking up from the invocation cwd, so one marker covers every cwd inside the project and a nested project's own marker shadows its parent's.
+- **Store side.** The flat `mapping.yaml` registry at the store root records, one `name: /local/project/path` entry per line, where each namespace is linked locally; it is the where-is-it-linked view. When no marker resolves, the CLI reverse-lookups the registry by the derived project path.
+- **Derivation.** An unmapped project maps to `$TASKS_DEV_ROOT/tasks/<project>` where `<project>` is the topmost directory under the dev root with any leading dot stripped (`/home/khave/dev/.dotfiles` maps to `tasks/dotfiles`); a cwd outside the dev root falls back to the git repository root and its basename.
+- **Legacy local.** A per-project `.tasks/` directory left by the pre-store `tasks init` layout resolves as the board of last resort; it is transition machinery, retired once every project carries its marker and the local boards are gone.
+
+Resolution precedence: flag (`--dir`), then `TASKS_DIR`, then the marker, then the registry reverse lookup, then an existing derived slice, then the legacy local walk-up. An existing slice takes over every board operation; an explicit mapping (marker or registry) naming a slice that does not exist suppresses derived guessing rather than silently creating one, and a derived name the registry binds to a different project refuses with a named store-namespace-collision error instead of crossing boards. Only `tasks init` creates a slice, claiming the namespace a marker or registry entry names and the derived namespace of a project under the dev root.
+
+### The Store Is Its Own Repository
+
+The store is a dedicated git repository and board history is tracked there as ordinary files. No project-level gitignore decision exists because project workspaces carry no board directory; tracking, committing, and pushing board state are store-repository concerns under the same git discipline as any other repository.
 
 ### File Naming Convention
 
@@ -251,14 +265,14 @@ Concurrent operation requires a mutation tool performing the lock-rebuild-releas
 
 In this environment the tool is the `tasks` command (on `PATH` at `~/.local/bin/tasks`):
 
-- `tasks init` scaffolds `.tasks/` (dashboard, `current/`, `archive/`)
+- `tasks init` scaffolds the board (dashboard, `current/`, `archive/`) at its resolved location; unpinned init inside a project under the dev root initializes the project's central-store slice at `$TASKS_DEV_ROOT/tasks/<namespace>`, the namespace claimed from the `.tasks-map` marker, the registry, or derivation with the collision check applied, and no local directory is created beside the project; outside the store geometry init scaffolds only into a legacy local `.tasks/` board found walking up and refuses when no board resolves (transition only)
 - `tasks render` rebuilds `dashboard.md` under a `flock` on `.tasks/.lock`; the derived `Last updated` is the newest **Updated** timestamp among tasks, not wall-clock time
 - `tasks claim <taskfile>` / `tasks release <taskfile>` perform the `O_EXCL` claim (writing **Owner**) and its reverse, then render
 - `tasks set <taskfile> Key=Value...` updates canonical header fields (refreshing **Updated**) and renders; unknown keys are rejected with exit 1 before any write, an empty value (`Key=`) deletes the field instead of writing an empty line (except `Updated=`, which refreshes the timestamp rather than deleting the field the dashboard depends on), and **Status Reason** is coupled to **Status**: a Blocked/Cancelled status requires a non-empty reason (same call or already on the file), leaving those states drops it automatically, and a non-empty reason paired with any other status is refused; the CLI-owned header fields take no direct writes (**Created**, **Updated**, **Completed**, **Duration**, and **Latest Update** are stamped only by the CLI's own operations, **Owner** is claim-owned through `tasks claim` / `tasks release`, and terminal closure refuses with a redirect: **Status=Completed** must go through `tasks close` and **Status=Cancelled** through `tasks close --cancelled`), so neither terminal status carries hand-derived closure data
 - `tasks close <taskfile> [--cancelled]` performs the terminal closure in one locked write, then renders: plain close sets **Status: Completed**, **Completed** from the CLI clock, the elapsed **Duration** derived from the Work Log anchors (`N/A` when they cannot produce a span), and **Updated**, dropping **Status Reason** and releasing any claim (a terminal task owns nothing: **Owner** is cleared and the sidecar dropped), and refusing the closure before any write when the Success Criteria carry unticked boxes or a child task declared on a dedicated dependency surface is still open; a Success Criteria line marked `- ~ [ ] ` is a **superseded annotation** that counts as resolved for the gate while staying visibly unfulfilled, so a close that passes on ~-marked criteria records them in its Work Log entry as superseded and the `--force` override note carries the superseded list alongside the overridden findings, and the dedicated dependency surfaces are the `## Dependencies` section, the template's `**Dependencies:**` field lines, and explicit `**Child tasks:**` declaration lines, so prose citations in Work Log entries, risk notes, and report digests never block closure (`--force` closes past the gate and records the override in the Work Log); `--cancelled` sets **Status: Cancelled** with the same **Duration** and **Updated** stamps but no **Completed** field, keeping the **Status Reason** already on file and refusing the closure before any write when the file carries no non-empty **Status Reason** (the header contract ties the reason to Blocked/Cancelled; set the reason while Blocked and it survives the closure)
 - `tasks stamp <taskfile>` re-stamps an already-Completed task's closure (**Completed**, **Duration**, **Updated**) from the CLI clock and Work Log anchors, then renders; `--repair` inspects each stamped timeline field (**Updated**, **Duration**, **Completed**, **Latest Update**) against its canonical shape and re-stamps only the malformed ones, on any task, re-stamping **Completed** from the clock on a Completed file and deleting it on an open one, the sanctioned repair for a malformed CLI-owned header field no other CLI write can fix
 - `tasks archive <taskfile>` moves a terminal (Completed or Cancelled) task file from `current/` into `archive/` under the board lock, dropping any claim sidecar, then renders; non-terminal tasks are refused
-- `tasks new --id <ID> --name <Name>` creates a task file with canonical header fields, then renders; `--status` accepts only Triage or Ready (deeper states are lifecycle positions reachable through set/claim/release/close, and a test board pinning the clock seam may create them for fixtures)
+- `tasks new --id <ID> --name <Name>` creates a task file with canonical header fields in the resolved board (the project's store slice for mapped projects), then renders; `--status` accepts only Triage or Ready (deeper states are lifecycle positions reachable through set/claim/release/close, and a test board pinning the clock seam may create them for fixtures)
 - `tasks edit <taskfile> --section <heading> [--append] [<file>|-]` replaces or appends a section body (the lines from its heading to the next same-or-higher-level heading) from a file or stdin, creates a missing template-defined section at its canonical template position when one is named, refreshes **Updated** and renders, all as one serialized operation under the same lock; body lines may carry headings strictly deeper than the section's own level (the template's `### Decision Log` inside `## Technical Approach`, `### Task` entries inside `## Task Breakdown`), while same-or-higher-level headings are refused; this is the manager's channel for body prose (see [Serialized Task-File Body Edits](#serialized-task-file-body-edits) and [Agent Write Path](#agent-write-path))
 - `tasks log <taskfile> [--from <worker>] "<message>"` appends a Work Log entry whose heading is `### <timestamp>: <from>: <first line>`, refreshing **Updated** and rendering, all as one serialized operation under the same lock; dispatched agents pass `--from` with their agent identifier to record interim progress (see [Agent Write Path](#agent-write-path))
 - `tasks report <taskfile> --slug <slug> [--from <worker>] --digest "<line>" [<file>|-]` deposits a report file under `.tasks/reports/` and appends its link+digest Work Log entry, refreshing header fields and rendering, all as one serialized operation under the same lock; dispatched agents pass `--from` with their agent identifier to deposit their final report (see [Agent Write Path](#agent-write-path))
@@ -747,7 +761,7 @@ Dispatched agent reports follow the reports-as-files mechanism:
 
 ### Agent Write Path
 
-A dispatched agent's `.tasks/` writes are exactly the tasks CLI channels below (`tasks log` and `tasks report`) plus the retained research-deposit exception (the direct file write into the reserved `research/` namespace per the [Reports Namespace](#reports-namespace)); anything else, any hand write included, is forbidden:
+A dispatched agent's board writes are exactly the tasks CLI channels below (`tasks log` and `tasks report`) plus the retained research-deposit exception (the direct file write into the reserved `research/` namespace per the [Reports Namespace](#reports-namespace)); anything else, any hand write included, is forbidden. The store geometry backs the rule: board files live in the central store outside every project workspace; the store path is controlled by the normative channel rule and by workspace absence; and the fleet's direct-access guards police only local-`.tasks` residue (their denies key on `.tasks`-named paths) and carry no store-path coverage:
 
 - Interim progress: `tasks log <taskfile> --from <agent-identifier> "<message>"` appends a Work Log entry as one serialized operation under the lock.
 - Final report: `tasks report <taskfile> --slug <slug> --from <agent-identifier> --digest "<line>" [<file>|-]` performs the report-file write, the Work Log entry, the header refresh, and the dashboard render as one serialized operation under the lock.
