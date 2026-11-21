@@ -23,3 +23,4 @@ Thumbs.db
 
 # Manager Mode worktrees
 .worktrees/
+.tasks-map
