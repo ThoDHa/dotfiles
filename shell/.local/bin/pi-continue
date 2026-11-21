@@ -12,10 +12,11 @@
 #                                        N = productive-cycle cap; without
 #                                        it the ride is unbounded. Cycle 1
 #                                        sends the prompt (the caller's
-#                                        words, or a truthful default),
-#                                        later cycles a short resumption
-#                                        note, and every prompt asks the
-#                                        session to end its final message
+#                                        words, or a truthful default with
+#                                        none), later cycles a short
+#                                        resumption note, and every
+#                                        prompt-carrying session is asked
+#                                        to end its final message
 #                                        with the terminal line
 #                                        PI-CONTINUE: COMPLETE only once
 #                                        nothing remains of the whole
@@ -29,7 +30,9 @@
 #                                        the Nth productive cycle. A
 #                                        clean exit stops a bare resume
 #                                        ride (no prompt: the
-#                                        interrupted work is done), while
+#                                        interrupted work is done, and
+#                                        no marker protocol is sent on
+#                                        one), while
 #                                        a prompt-carrying ride treats a
 #                                        clean marker-less turn as one
 #                                        productive cycle and invokes the
@@ -37,7 +40,12 @@
 #                                        parking only on quota walls, so
 #                                        it runs back-to-back sessions
 #                                        until the confirmed marker ends
-#                                        it; consecutive no-progress
+#                                        it; consecutive clean turns
+#                                        (default 90,
+#                                        PI_CONTINUE_CLEAN_TURN_LIMIT to
+#                                        tune) park the ride instead of
+#                                        continuing hot, never ending it,
+#                                        and consecutive no-progress
 #                                        attempts (default 90,
 #                                        PI_CONTINUE_NO_PROGRESS_LIMIT to
 #                                        tune) end the ride with a
@@ -138,7 +146,13 @@
 # canonicalized to the two-token wire form at every invocation (see
 # Sessions); its value never rides in the verbatim set. Known value-taking
 # flags (PI_VALUE_FLAGS, tracked against
-# `pi --help`) consume their value token; others can use --flag=value.
+# `pi --help`) consume their value token, and an =-form of a table
+# flag is canonicalized to that two-token shape at split time (pi's
+# parser has no =-forms for its known flags: forwarded verbatim the
+# token hard-errors as an unknown option), with an empty =-value or a
+# bare `--` =-value refusing rc 2 (the canonicalized pair would hand
+# pi the `--` as its value, the exact corruption the two-token guard
+# refuses); others can use --flag=value.
 # -n is pi-continue's: pi spells session naming `--name, -n <name>`, and on
 # overlap the supervisor wins, so -n never reaches pi and callers name
 # sessions with the long form --name.
@@ -158,21 +172,25 @@
 # parser lets a trailing valueless -p swallow the next token as the first
 # message, and an unknown bare long flag consumes the next non-flag token
 # as its value, so without `--` a forwarded unknown flag adjacent to the
-# prompt could eat the prompt and run with zero messages. --session-dir
-# is rejected (rc 2, before detaching): its =-form always, because pi's
-# parser has no =-form for it and the root would never reach pi; its
-# two-token form unless an explicit --session pin rides with it,
-# because pi gives --session-dir top precedence over the root
+# prompt could eat the prompt and run with zero messages. A value flag
+# whose next surviving token is `--` refuses rc 2 pre-detach: pi
+# consumes a value flag's next token unconditionally, so the `--` would
+# be eaten as the value. --session-dir
+# is refused without an explicit --session pin (rc 2, before
+# detaching): pi gives --session-dir top precedence over the root
 # auto-resolution reads (PI_CODING_AGENT_SESSION_DIR or the default),
 # so an auto-resolved pin would not exist in the --session-dir root and
-# the ride would die detached. Unknown flags are still forwarded
+# the ride would die detached; its =-form canonicalizes to the
+# two-token form at split, the only spelling pi accepts.
+# Unknown flags are still forwarded
 # verbatim (pi knows its surface better than this script) and surface
 # as pi's own clear startup error, classified as a non-quota failure;
 # an =-form of one of pi's known value flags is not parsed by pi at all
 # (its parser has no =-forms for known flags): it lands in pi's
 # extension-flag values and hard-errors the invocation as an unknown
-# option, which is exactly the divergence the --session
-# canonicalization closes. No prompt given: the
+# option, which is exactly the divergence the PI_VALUE_FLAGS
+# canonicalization closes (--session was the first entry; every table
+# flag's =-form now splits to the two-token wire form). No prompt given: the
 # resume-the-interrupted-turn default is used.
 #
 # Permission gate: rides load the user's pi config and extensions. The
@@ -229,7 +247,15 @@
 #                              tolerated before the engine concludes the
 #                              limit never reset (default 90: about 15h at
 #                              the default 10m park); a productive session
-#                              resets the count
+#                              resets the count (nonnegative integer;
+#                              other values refuse the start)
+#   PI_CONTINUE_CLEAN_TURN_LIMIT consecutive clean marker-less turns a
+#                              prompt-carrying ride runs back-to-back
+#                              before parking instead of continuing at
+#                              once (default 90); the cap parks, it
+#                              never ends the ride, and any productive
+#                              session resets the count (nonnegative
+#                              integer; other values refuse the start)
 #   PI_CONTINUE_STATE_DIR      state directory override (testing)
 #   PI_CONTINUE_SESSION_ID     the ride's pinned session id, set by the
 #                              launcher for the detached engine (internal)
@@ -264,6 +290,12 @@ MIN_PROGRESS_SECONDS="${PI_CONTINUE_MIN_PROGRESS_SECONDS:-20}"
 # concludes the limit never reset and quits; a productive session or a
 # clean completion resets the count.
 NO_PROGRESS_LIMIT="${PI_CONTINUE_NO_PROGRESS_LIMIT:-90}"
+# Consecutive clean marker-less turns a prompt-carrying ride may run
+# back-to-back before parking instead of continuing at once: the park
+# throttles a degenerate ride shape (a session that exits 0 with no
+# output, no quota signal, and no marker) to one burst per window while
+# never ending the ride; any productive session resets the count.
+CLEAN_TURN_LIMIT="${PI_CONTINUE_CLEAN_TURN_LIMIT:-90}"
 # Anchored so a bare 429 inside a number or a timestamp must not read as
 # a quota event; the word alternatives are oc-continue's proven list plus
 # pi-ai's non-retryable billing strings (available balance, out of
@@ -287,18 +319,25 @@ ANSI_ESC=$'\e'
 COMPLETE_MARKER='PI-CONTINUE: COMPLETE'
 # The whole-objective completion instruction appended to a caller prompt
 # (cycle 1 only, skipped when the prompt already carries the marker) and
-# built into the default and resumption prompts: the terminal line is
-# earned only when nothing remains anywhere on the launched objective's
-# todo list or task board, never after a single step or unit.
+# built into the prompt-carrying ride's resumption prompt: the terminal
+# line is earned only when nothing remains anywhere on the launched
+# objective's todo list or task board, never after a single step or
+# unit. A bare resume never receives it: the carve-out ends a bare ride
+# on any clean exit, so instructing the protocol would hand the session
+# a stop rule the engine does not honor.
 MARKER_INSTRUCTION='When nothing remains of the entire launched objective (not just the current step or unit, but every remaining item on the todo list or task board), do a terse final verification (no new work) and end your final message with the single terminal line: PI-CONTINUE: COMPLETE. If any part of the objective remains, end without that line.'
 # The no-prompt default, sent verbatim as the cycle-1 ride default and by
 # the one-shot at/in commands: truthful about the interruption, no
 # re-orientation from scratch, no redoing of finished steps.
 DEFAULT_PROMPT='Your last turn was cut off by a provider rate limit, not by finished work. Resume the interrupted turn: check the todo list and the current state of the files on disk, then finish the remaining work without redoing completed steps. Do not claim the quota is fresh beyond that.'
 # Cycles 2 and up never re-send the original prompt, only this note (plus
-# the marker instruction).
+# the marker instruction on a prompt-carrying ride; a bare resume sends
+# the note alone).
 RESUME_NOTE='The quota window reset mid-work; resume from where your last turn stopped, do not re-orient from scratch, and do not repeat finished steps.'
 RESUME_PROMPT="$RESUME_NOTE $MARKER_INSTRUCTION"
+# A bare ride's cycles-2+ prompt: the resumption note alone, no marker
+# protocol (see MARKER_INSTRUCTION).
+BARE_RESUME_PROMPT="$RESUME_NOTE"
 # The single challenge a completion claim earns: it forces an enumeration
 # of remaining work instead of a confirmation, and only an empty list may
 # re-earn the terminal line.
@@ -407,14 +446,15 @@ made_progress() {
 
 # The cycle-1 prompt of a ride: the caller's words verbatim when given,
 # plus the marker instruction unless the prompt already carries the
-# marker; otherwise the truthful default. It is re-sent after every
-# no-progress attempt, which spends no cycle, and cycles 2 and up never
-# re-send any of this, only the resumption prompt.
+# marker; otherwise the truthful default alone, since a bare resume
+# receives no marker protocol (the carve-out ends a bare ride on any
+# clean exit). It is re-sent after every no-progress attempt, which
+# spends no cycle, and cycles 2 and up never re-send any of this, only
+# the resumption prompt.
 cycle_one_prompt() {
     local caller="${1:-}"
     if [[ -z "$caller" ]]; then
-        print -r -- "$DEFAULT_PROMPT
-$MARKER_INSTRUCTION"
+        print -r -- "$DEFAULT_PROMPT"
     elif [[ "$caller" == *"$COMPLETE_MARKER"* ]]; then
         print -r -- "$caller"
     else
@@ -504,6 +544,39 @@ reject_session_flag() {
             ;;
     esac
     return 0
+}
+
+# The shared needs-a-value refusal line; callers return 2 after it.
+say_needs_value() {
+    printf 'pi-continue: %s needs a value\n' "$1" >&2
+}
+
+# True when the value is not a canonical nonnegative integer. The
+# consecutive-count limit seams feed zsh arithmetic under set -u, where
+# a garbage value errors the check itself and silently disables the
+# bound (the degenerate ride the cap throttles then spins back-to-back
+# unbounded), and a leading zero drops into zsh's octal reading (08
+# errors, 075 shifts value). Prints the pointed refusal and returns 1
+# exactly then; callers return 2 after it.
+reject_non_numeric_limit() {
+    [[ "$2" =~ ^(0|[1-9][0-9]*)$ ]] && return 0
+    printf "pi-continue: %s needs a nonnegative integer (got '%s'); refusing to start\n" "$1" "$2" >&2
+    return 1
+}
+
+# True when the token ($1) is an adjacent spelling of a declared short
+# value flag (-n3, -n=3): the exact-match split never sees it, and
+# forwarded verbatim the token dies detached as a pi unknown option.
+# Prints the pointed refusal and returns 0 exactly then.
+reject_adjacent_declared() {
+    local f
+    for f in ${PI_RUN_VALUE_FLAGS[@]+"${PI_RUN_VALUE_FLAGS[@]}"}; do
+        if [[ "$1" == "$f"?* ]]; then
+            printf 'pi-continue: %s is rejected: %s takes its value as a separate argument (%s N); see the header\n' "$1" "$f" "$f" >&2
+            return 0
+        fi
+    done
+    return 1
 }
 
 # Resolve the ride's session id from existing storage, never creating
@@ -596,12 +669,14 @@ split_run_args() {
                         pi_declared_args+=("$1" "$2")
                         shift 2
                     else
-                        printf 'pi-continue: %s needs a value\n' "$1" >&2
+                        say_needs_value "$1"
                         return 2
                     fi
                 elif [[ "$pi_declared" == true ]] && (( ${PI_RUN_BOOL_FLAGS[(Ie)$1]} )); then
                     pi_declared_args+=("$1")
                     shift
+                elif [[ "$pi_declared" == true ]] && reject_adjacent_declared "$1"; then
+                    return 2
                 elif reject_bad_mode "$1" "${2:-}"; then
                     # Before the valueless rejection below, so --mode names
                     # its own hazard, not a missing value.
@@ -637,14 +712,40 @@ split_run_args() {
                     printf 'pi-continue: %s is rejected: the supervisor already invokes pi in print mode; see the header\n' "$1" >&2
                     return 2
                 elif (( $# == 1 )) && (( ${PI_VALUE_FLAGS[(Ie)$1]} )); then
-                    printf 'pi-continue: %s needs a value\n' "$1" >&2
+                    say_needs_value "$1"
                     return 2
+                elif [[ "$1" == *=* ]] && \
+                     (( ${PI_VALUE_FLAGS[(Ie)${1%%=*}]} )); then
+                    # An =-form of a table flag: pi's parser has no
+                    # =-forms for its known flags, so forwarded verbatim
+                    # the token hard-errors as an unknown option; split
+                    # it into the two-token wire form here. An empty
+                    # =-value refuses, and so does a bare `--` value:
+                    # the canonicalized pair would be the exact corrupt
+                    # shape the two-token guard below refuses (pi would
+                    # consume the `--` as the value).
+                    local key="${1%%=*}" val="${1#*=}"
+                    if [[ -z "$val" || "$val" == '--' ]]; then
+                        say_needs_value "$key"
+                        return 2
+                    fi
+                    pi_flags+=("$key" "$val")
+                    shift
                 else
                     pi_flags+=("$1")
-                    if [[ -n "${2:-}" && "${2:-}" != -* ]] && \
-                       (( ${PI_VALUE_FLAGS[(Ie)$1]} )); then
-                        shift
-                        pi_flags+=("$1")
+                    if (( ${PI_VALUE_FLAGS[(Ie)$1]} )); then
+                        # pi consumes a value flag's next token
+                        # unconditionally, so a bare `--` in the value
+                        # seat would be eaten as the value; refuse
+                        # pre-detach instead of corrupting the invocation.
+                        if [[ "${2:-}" == '--' ]]; then
+                            say_needs_value "$1"
+                            return 2
+                        fi
+                        if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                            shift
+                            pi_flags+=("$1")
+                        fi
                     fi
                     shift
                 fi
@@ -656,12 +757,11 @@ split_run_args() {
         esac
     done
     # Checked after the scan so the pin may ride on either side of it.
-    # The =-form is refused always, pin or not: pi's parser has no
-    # =-form for --session-dir (the token lands in pi's unknown flags
-    # and hard-errors the invocation while pi resolves sessions from
-    # the default root), so the two-token form is the only usable
-    # spelling. The two-token form is refused without a pin: pi gives
-    # --session-dir top precedence over the root auto-resolution reads
+    # The =-form never survives the scan as one token: the PI_VALUE_FLAGS
+    # canonicalization rewrites it into the two-token form, the only
+    # spelling pi's parser accepts for --session-dir. That two-token
+    # form is refused without a pin: pi gives --session-dir top
+    # precedence over the root auto-resolution reads
     # (PI_CODING_AGENT_SESSION_DIR or the default), so an auto-resolved
     # id would not exist in that root and the ride would die detached.
     # With an explicit pin the caller has made the root match their
@@ -669,10 +769,6 @@ split_run_args() {
     local f
     for f in ${pi_flags[@]+"${pi_flags[@]}"}; do
         case "$f" in
-            --session-dir=*)
-                printf "pi-continue: %s is rejected: pi's parser has no =-form for --session-dir, so the root would never reach pi (the token hard-errors as an unknown option); pass it as two tokens: --session-dir <path>\n" "$f" >&2
-                return 2
-                ;;
             --session-dir)
                 if [[ -z "$session_pin" ]]; then
                     printf 'pi-continue: %s is rejected without an explicit --session pin: auto-resolution reads PI_CODING_AGENT_SESSION_DIR or the default root while pi gives --session-dir top precedence, so the pin would not exist in that root; pass --session <id|path> to use --session-dir\n' "$f" >&2
@@ -681,6 +777,16 @@ split_run_args() {
                 ;;
         esac
     done
+    # A table flag left unpaired as pi_flags' last element pairs with
+    # nothing: invoke_pi's own `--` separator lands directly in its
+    # value seat, pi consumes the separator as the value, and the
+    # prompt rides as a plain message. Refuse before detaching; the
+    # mid-stream flag-flag mispair stays the documented passthrough
+    # trap, only this trailing shape is provably corrupt.
+    if (( ${#pi_flags} )) && (( ${PI_VALUE_FLAGS[(Ie)${pi_flags[-1]}]} )); then
+        say_needs_value "${pi_flags[-1]}"
+        return 2
+    fi
     return 0
 }
 
@@ -753,6 +859,10 @@ persist_failed() {
 
 cmd_run() {
     pi_declared=true
+    # A directly invoked engine bypasses the launcher's validation, so
+    # the guard runs here too: the debug path keeps its bounds.
+    reject_non_numeric_limit PI_CONTINUE_NO_PROGRESS_LIMIT "$NO_PROGRESS_LIMIT" || return 2
+    reject_non_numeric_limit PI_CONTINUE_CLEAN_TURN_LIMIT "$CLEAN_TURN_LIMIT" || return 2
     split_run_args "$@" || return 2
     interpret_run_flags || return 2
     # Empty means unbounded: the ride runs until a challenge-confirmed
@@ -769,9 +879,11 @@ cmd_run() {
     # sessions against the cap when one is set; no_progress counts
     # consecutive no-progress quota fails against NO_PROGRESS_LIMIT,
     # resets on any productive session, and is mirrored to $FAILED_FILE
-    # for `status` on every change. challenged arms the single challenge
-    # session a completion claim earns.
-    local session=1 cycles=0 no_progress=0 challenged=0
+    # for `status` on every change. clean_streak counts consecutive
+    # clean marker-less turns against CLEAN_TURN_LIMIT and resets on
+    # any productive session or quota fail. challenged arms the single
+    # challenge session a completion claim earns.
+    local session=1 cycles=0 no_progress=0 challenged=0 clean_streak=0
     if [[ -n "$sessions" ]]; then
         log_line "run start (pid $$): budget $sessions productive cycle(s), pi=${PI_BIN} ${pi_flags[*]}"
         printf 'pi-continue: starting; budget %s productive cycle(s)\n' "$sessions"
@@ -796,6 +908,8 @@ cmd_run() {
             prompt="$CHALLENGE_PROMPT"
         elif (( cycles == 0 )); then
             prompt=$(cycle_one_prompt "$caller_prompt")
+        elif [[ -z "$caller_prompt" ]]; then
+            prompt="$BARE_RESUME_PROMPT"
         else
             prompt="$RESUME_PROMPT"
         fi
@@ -843,6 +957,7 @@ cmd_run() {
             # the bound counts only hits after the claim.
             no_progress=0
             persist_failed 0
+            clean_streak=0
             challenged=1
             session=$(( session + 1 ))
             log_line "session $(( session - 1 )): completion marker claimed; challenging the claim in session $session"
@@ -864,6 +979,7 @@ cmd_run() {
             # finite; only quota walls park.
             no_progress=0
             persist_failed "$no_progress"
+            clean_streak=$(( clean_streak + 1 ))
             cycles=$(( cycles + 1 ))
             if [[ -n "$sessions" ]] && (( cycles >= sessions )); then
                 log_line "session $session: clean turn $cycles of budget $sessions; budget spent, quitting"
@@ -871,6 +987,20 @@ cmd_run() {
                 return 0
             fi
             session=$(( session + 1 ))
+            if (( clean_streak >= CLEAN_TURN_LIMIT )); then
+                # Park instead of continuing hot: a degenerate ride
+                # shape (rc 0, no output, no marker) would spin the
+                # loop back-to-back forever, and one park per burst
+                # throttles it without ending a ride the budget or the
+                # marker still governs.
+                wait_s=$(park_seconds) || { printf 'pi-continue: bad PI_CONTINUE_WAIT_UNTIL\n' >&2; return 2; }
+                log_line "session $(( session - 1 )): clean turn $clean_streak of $CLEAN_TURN_LIMIT consecutive; clean-turn cap reached, parking ${wait_s}s until session $session"
+                printf 'pi-continue: clean-turn cap (clean turn %s of %s consecutive); parked %ss, then session %s (pi-continue stop to cancel)\n' \
+                    "$clean_streak" "$CLEAN_TURN_LIMIT" "$wait_s" "$session"
+                clean_streak=0
+                sleep "$wait_s" || { log_line 'park interrupted'; return 1; }
+                continue
+            fi
             if [[ -n "$sessions" ]]; then
                 log_line "session $(( session - 1 )): clean turn $cycles of budget $sessions; continuing immediately with session $session"
                 printf 'pi-continue: clean turn (cycle %s of %s); session %s proceeding now (pi-continue stop to cancel)\n' \
@@ -890,6 +1020,7 @@ cmd_run() {
         fi
 
         if (( rc != 0 )) && ! made_progress "$session_out" "$elapsed"; then
+            clean_streak=0
             no_progress=$(( no_progress + 1 ))
             persist_failed "$no_progress"
             if (( no_progress >= NO_PROGRESS_LIMIT )); then
@@ -917,6 +1048,7 @@ cmd_run() {
         # does not.
         no_progress=0
         persist_failed "$no_progress"
+        clean_streak=0
         challenged=0
         cycles=$(( cycles + 1 ))
         hit_kind='productive quota hit'
@@ -1089,6 +1221,11 @@ cmd_clean() {
 # the launcher knows whether to tail after spawning.
 validate_launch() {
     local sub="$1"; shift
+    # The detached engine inherits these seams; a garbage value would
+    # disable a bound mid-ride with the refusal invisible in the
+    # detached stderr, so preflight them with everything else.
+    reject_non_numeric_limit PI_CONTINUE_NO_PROGRESS_LIMIT "$NO_PROGRESS_LIMIT" || return 2
+    reject_non_numeric_limit PI_CONTINUE_CLEAN_TURN_LIMIT "$CLEAN_TURN_LIMIT" || return 2
     case "$sub" in
         run)
             pi_declared=true

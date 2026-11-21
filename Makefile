@@ -591,8 +591,8 @@ test-oc-continue: $(CORPUS_GATES)
 	@echo "Testing oc-continue runner..."
 	@bash tests/oc-continue/test-oc-continue.sh
 
-# Test the pi-continue runner (quota-riding supervisor: session lockstep,
-# marker protocol, hermetic fake pi)
+# Test the pi-continue runner (quota-riding supervisor: attach-only
+# sessions, marker protocol, hermetic fake pi)
 test-pi-continue: $(CORPUS_GATES)
 	@echo "Testing pi-continue runner..."
 	@bash tests/pi-continue/test-pi-continue.sh

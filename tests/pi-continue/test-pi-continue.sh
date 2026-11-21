@@ -106,7 +106,9 @@ cat >"$FAKE" <<'EOF'
 #   all the classifier has),
 # productive (one stdout content line, then the quota fail; real pi
 #   cannot produce this shape, a failed call prints no stdout, it
-#   exists to pin the content half of made_progress),
+#   exists to pin the content half of made_progress), silent (exit 0
+#   with no stdout and no marker: the degenerate clean-turn shape the
+#   consecutive-clean-turn cap exists for),
 # slowquota (a FAKE_SLOW wait, then the quota fail: the real-pi primary
 #   productive signal, elapsed time over the floor),
 # deadwindow (pi's real first-use session warning on stderr, then the
@@ -157,6 +159,7 @@ case "${mode:-ok}" in
 	notice_quote)    echo "Session found in different project: /elsewhere/project"; quota_fail ;;
 	aborted_only)    echo "model output that happens to end in pi's abort line"; echo "Aborted."; exit 0 ;;
 	nosuchsession)   echo "No session found matching 'deadpin'" >&2; exit 1 ;;
+	silent)          exit 0 ;;
 	fail)            echo "fatal: unrecoverable failure" >&2; exit 3 ;;
 	slow)            echo "slow line one"; sleep "${FAKE_SLOW:-5}"; echo "slow line two"; exit 0 ;;
 	*)               echo "fake session $n start"; sleep "${FAKE_OK_SLEEP:-0.3}"; echo "fake session $n done"; exit 0 ;;
@@ -734,18 +737,114 @@ assert_contains "the ride ended on the confirmed marker, not the clean turn" "$l
 	"challenge confirmed"
 assert_not_contains "a loop ride never reports a clean completion" "$log" "completed cleanly"
 
+fresh clean_turn_cap_parks
+# the degenerate ride: a session that exits 0 with no output loops the
+# clean-turn path with no quota signal and no marker; the
+# consecutive-clean-turn cap parks it with the clean-turn-cap signal,
+# throttling the burst without ending the ride (the trailing fail
+# session terminates the ride deterministically for the test)
+printf 'silent\nsilent\nsilent\nsilent\nsilent\nfail\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_CLEAN_TURN_LIMIT=2 PI_CONTINUE_WAIT_SECONDS=0.5)
+pc run silent loop >/dev/null 2>&1
+PC_ENV=()
+wait_for 15 grep -q "clean-turn cap reached" "$STATE/engine.log" \
+	&& ok "the degenerate clean loop parks at the cap" \
+	|| bad "the degenerate clean loop parks at the cap"
+wait_for 15 grep -q "session 3: invoking pi" "$STATE/engine.log" \
+	&& ok "the ride ran past the cap park to the next session" \
+	|| bad "the ride ran past the cap park to the next session"
+wait_for 15 engine_idle \
+	&& ok "the trailing fail session ended the degenerate ride" \
+	|| bad "the trailing fail session ended the degenerate ride"
+log="$(cat "$STATE/engine.log")"
+assert_contains "the cap park names the clean-turn cap and the next session" "$log" \
+	"clean turn 2 of 2 consecutive; clean-turn cap reached, parking 0.5s until session 3"
+assert_eq "the cap parks once per two-clean-turn burst, twice over the five-silent ride" "2" \
+	"$(grep -c 'clean-turn cap reached' "$STATE/engine.log")"
+assert_not_contains "the cap park never borrows the no-progress wording" "$log" \
+	"no-progress quota hit"
+assert_not_contains "the cap never fires the never-reset bound" "$log" "limit never reset"
+
+fresh clean_turn_cap_continues
+# a working ride crosses the cap and keeps going: the cap parks, it
+# never kills, so six clean sessions over a limit of two produce three
+# parks and still end on the challenge-confirmed marker
+printf 'ok\nok\nok\nok\nok\nok\ncomplete\ncomplete\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_CLEAN_TURN_LIMIT=2 PI_CONTINUE_WAIT_SECONDS=0.5)
+pc run working past the cap >/dev/null 2>&1
+PC_ENV=()
+wait_for 20 engine_idle && ok "a working ride continues past the cap" \
+	|| bad "a working ride continues past the cap"
+assert_eq "all six clean sessions ran before the claim" "8" "$(fake_calls)"
+log="$(cat "$STATE/engine.log")"
+assert_eq "the cap parked once per burst, three times" "3" \
+	"$(grep -c 'clean-turn cap reached' "$STATE/engine.log")"
+assert_contains "the ride still ended on the confirmed marker" "$log" "challenge confirmed"
+assert_not_contains "the cap never ends a working ride" "$log" "quitting"
+assert_not_contains "a capped working ride never reports a clean completion" "$log" \
+	"completed cleanly"
+
+fresh clean_turn_cap_terminal_line
+# the cap park's operator-facing line maps its four values into four
+# conversions: the streak, the cap, the park seconds, and the next
+# session number, exactly one line per park (run through a directly
+# detached engine because the launcher's child prints to the detached
+# stdout, which no test can capture)
+printf 'silent\nsilent\nfail\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_DETACHED=1 PI_CONTINUE_CLEAN_TURN_LIMIT=2 PI_CONTINUE_WAIT_SECONDS=0.5)
+out="$(pc run silent loop 2>/dev/null)"
+PC_ENV=()
+assert_contains "the cap park's terminal line names the streak, the cap, the park, and the next session" "$out" \
+	"clean-turn cap (clean turn 2 of 2 consecutive); parked 0.5s, then session 3 (pi-continue stop to cancel)"
+assert_eq "each cap park prints exactly one terminal line" "1" \
+	"$(grep -c 'clean-turn cap' <<<"$out")"
+
 fresh bare_resume_clean_exit
-# a bare resume ride (no prompt) keeps the old contract: a clean
-# completion ends the ride, the interrupted work being done
+# a bare resume ride (no prompt) keeps the carve-out contract: a clean
+# completion ends the ride, the interrupted work being done; and since
+# the engine stops it on any clean exit, the ride's session receives no
+# marker protocol, because instructing the marker there would hand the
+# session a stop rule the engine does not honor
 printf 'ok\n' >"$FAKE_STATE/plan"
 pc run >/dev/null 2>&1
 wait_for 10 engine_idle && ok "a bare resume ends on the clean completion" \
 	|| bad "a bare resume ends on the clean completion"
 assert_eq "the bare resume ran exactly one session" "1" "$(fake_calls)"
+assert_invocation "the bare resume's session receives no marker protocol" 1 \
+	-p --session "$(ride_id)" -- "$default_prompt"
 assert_contains "the bare resume logged the clean completion" "$(cat "$STATE/engine.log")" \
 	"session 1: run completed cleanly"
 assert_not_contains "the bare resume never spends budget on the clean exit" \
 	"$(cat "$STATE/engine.log")" "budget spent"
+
+fresh bare_resume_renotes
+# cycles 2 and up of a bare ride (reached after a productive quota hit)
+# follow the same no-protocol rule: the resumption note rides alone,
+# since the carve-out still ends the ride on any clean exit
+printf 'productive\nok\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5)
+pc run >/dev/null 2>&1
+PC_ENV=()
+wait_for 15 engine_idle && ok "a bare ride stops on the clean turn after a productive hit" \
+	|| bad "a bare ride stops on the clean turn after a productive hit"
+assert_eq "the bare ride ran the productive hit and the resumption session" "2" "$(fake_calls)"
+assert_invocation "the bare ride's resumption session receives only the note, no marker protocol" 2 \
+	-p --session "$(ride_id)" -- "$resume_note"
+assert_contains "the bare ride still ends by the carve-out on the clean turn" \
+	"$(cat "$STATE/engine.log")" "session 2: run completed cleanly"
+
+fresh bare_resume_spontaneous_marker
+# the output-based marker check stays armed with no marker protocol
+# sent: a bare-ride session that ends in the marker anyway earns the
+# same challenge cycle as a prompt-carrying ride's
+printf 'complete\ncomplete\n' >"$FAKE_STATE/plan"
+pc run >/dev/null 2>&1
+wait_for 15 engine_idle && ok "a bare ride's spontaneous marker earns the challenge" \
+	|| bad "a bare ride's spontaneous marker earns the challenge"
+assert_invocation "the challenge ran the enumeration prompt" 2 \
+	-p --session "$(ride_id)" -- "$challenge_prompt"
+assert_contains "the confirmed marker ended the bare ride" \
+	"$(cat "$STATE/engine.log")" "challenge confirmed"
 
 echo "== unbounded ride =="
 fresh unbounded
@@ -1175,12 +1274,15 @@ fresh session_pin_ordering
 # the pin is re-emitted immediately after -p, ahead of the caller's
 # flags: pi consumes a value flag's next token unconditionally
 # (dash-leading or not), so only front placement survives a caller's
-# bare value flag like --system-prompt
+# bare value flag like --system-prompt; the bare flag rides mid-stream
+# here, since a trailing unpaired one refuses (see
+# refuse_trailing_valueflag below) and where the mispaired value lands
+# is pi's parser's business, not this composition pin's
 printf 'ok\n' >"$FAKE_STATE/plan"
-pc run -n 1 --system-prompt --session pinned-after-bare fix >/dev/null 2>&1
+pc run -n 1 --system-prompt --model m --session pinned-after-bare fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the bare-value-flag ride completes" || bad "the bare-value-flag ride completes"
 assert_invocation "the pin rides first, ahead of a caller's bare value flag" 1 \
-	-p --session pinned-after-bare --system-prompt -- "$(with_marker fix)"
+	-p --session pinned-after-bare --system-prompt --model m -- "$(with_marker fix)"
 assert_eq "the split-time pin persists in session.id" "pinned-after-bare" "$(ride_id)"
 
 fresh session_pin_duplicate
@@ -1238,8 +1340,8 @@ assert_eq "the session-dir refusals spawned no invocation" "" "$(cat "$FAKE_STAT
 fresh session_dir_pinned
 # with an explicit pin the root is the caller's decision: the two-token
 # --session-dir <path> spelling passes through verbatim, tested in the
-# pin-then-dir order; the =-form is always refused even with a pin,
-# covered by session_dir_pinned_equals below
+# pin-then-dir order; the =-form canonicalizes to that same two-token
+# passthrough, covered by session_dir_pinned_equals below
 printf 'ok\n' >"$FAKE_STATE/plan"
 pc run -n 1 --session pinned-dir --session-dir "$ROOT/session_dir_pinned/sdroot" fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "the pinned session-dir ride completes" \
@@ -1247,19 +1349,79 @@ wait_for 10 engine_idle && ok "the pinned session-dir ride completes" \
 assert_invocation "a pinned --session-dir forwards verbatim" 1 \
 	-p --session pinned-dir --session-dir "$ROOT/session_dir_pinned/sdroot" -- "$(with_marker fix)"
 
+fresh session_dir_pinned_reversed
+# the reversed caller order (dir first, pin second) must split the same:
+# the dir pairs its value before the pin is seen, the pin still re-emits
+# first on the wire, and the pin-presence rule passes either order
+printf 'ok\n' >"$FAKE_STATE/plan"
+pc run -n 1 --session-dir "$ROOT/session_dir_pinned_reversed/sdroot" --session dir-then-pin fix >/dev/null 2>&1
+wait_for 10 engine_idle && ok "the reversed-order pinned session-dir ride completes" \
+	|| bad "the reversed-order pinned session-dir ride completes"
+assert_invocation "a reversed-order pinned --session-dir forwards verbatim" 1 \
+	-p --session dir-then-pin --session-dir "$ROOT/session_dir_pinned_reversed/sdroot" -- "$(with_marker fix)"
+
 fresh session_dir_pinned_equals
-# the =-form is refused even with a pin: pi's parser has no =-form for
-# --session-dir, so the token could never carry the root to pi; the
-# two-token form (session_dir_pinned above, pin-then-dir order) is
-# the only usable spelling
-refuse_rc 2 "an equals-form --session-dir refuses even with a pin" \
-	run --session-dir="$ROOT/session_dir_pinned_equals/sdroot" --session pinned-eq fix
-err="$(pc run --session-dir="$ROOT/session_dir_pinned_equals/sdroot" --session pinned-eq fix 2>&1 >/dev/null || true)"
-assert_contains "the =-form refusal names pi's missing =-form" "$err" "no =-form for --session-dir"
-assert_contains "the =-form refusal points at the two-token spelling" "$err" "--session-dir <path>"
-assert_eq "the =-form refusals spawned no invocation" "" "$(cat "$FAKE_STATE/args")"
-[[ ! -f "$STATE/run.pid" ]] && ok "the =-form refusals armed no pid file" \
-	|| bad "the =-form refusals armed no pid file"
+# the =-form canonicalizes to the sanctioned two-token spelling even
+# with a pin: pi's parser has no =-form for --session-dir, so the split
+# rewrites it to the only shape pi accepts; the no-pin refusal still
+# fires on the canonicalized bare form (session_dir_unpinned above)
+printf 'ok\n' >"$FAKE_STATE/plan"
+pc run -n 1 --session-dir="$ROOT/session_dir_pinned_equals/sdroot" --session pinned-eq fix >/dev/null 2>&1
+wait_for 10 engine_idle && ok "the equals-form pinned session-dir ride completes" \
+	|| bad "the equals-form pinned session-dir ride completes"
+assert_invocation "an equals-form --session-dir canonicalizes to the two-token passthrough" 1 \
+	-p --session pinned-eq --session-dir "$ROOT/session_dir_pinned_equals/sdroot" -- "$(with_marker fix)"
+
+fresh refuse_valueflag_dashdash
+# pi consumes a value flag's next token unconditionally, so a bare `--`
+# in a table flag's value seat would be eaten as the value (the root or
+# the model becomes literally `--`) and the invocation corrupts
+# silently; refuse rc 2 pre-detach with the needs-a-value message
+# instead
+refuse_rc 2 "a pinned --session-dir before bare -- refuses" \
+	run --session pinned-dd --session-dir -- fix
+refuse_rc 2 "a table flag before bare -- refuses" run --model -- fix it
+refuse_rc 2 "a table flag before bare -- at the end refuses" run --model --
+err="$(pc run --model -- fix it 2>&1 >/dev/null || true)"
+assert_contains "the bare-double-dash refusal says --model needs a value" "$err" \
+	"--model needs a value"
+err="$(pc run --session pinned-dd --session-dir -- fix 2>&1 >/dev/null || true)"
+assert_contains "the pinned session-dir bare-double-dash refusal names the flag" "$err" \
+	"--session-dir needs a value"
+assert_eq "the bare-double-dash refusals spawned no invocation" "" "$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the bare-double-dash refusals armed no pid file" \
+	|| bad "the bare-double-dash refusals armed no pid file"
+refuse_rc 2 "an equals-form table flag with a bare -- value refuses" \
+	run --model=-- fix it
+refuse_rc 2 "an equals-form --session-dir with a bare -- value refuses" \
+	run --session pinned-dd --session-dir=-- fix it
+err="$(pc run --model=-- fix it 2>&1 >/dev/null || true)"
+assert_contains "the equals-form bare-double-dash refusal names the flag" "$err" \
+	"--model needs a value"
+assert_eq "the equals-form bare-double-dash refusals spawned no invocation" "" \
+	"$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the equals-form bare-double-dash refusals armed no pid file" \
+	|| bad "the equals-form bare-double-dash refusals armed no pid file"
+
+fresh refuse_trailing_valueflag
+# a table flag left unpaired as the last forwarded token pairs with
+# nothing: the supervisor's own -- separator lands directly in its
+# value seat, pi consumes the separator as the value, and the prompt
+# rides as a plain message; refuse before detaching (the mid-stream
+# flag-flag mispair stays the documented passthrough trap, only the
+# trailing shape is provably corrupt)
+printf 'fail\n' >"$FAKE_STATE/plan"
+refuse_rc 2 "a trailing unpaired table flag refuses" \
+	run --system-prompt --session pin fix it
+refuse_rc 2 "a trailing unpaired table flag after a paired flag refuses" \
+	run --provider openai --system-prompt --session pin fix it
+err="$(pc run --system-prompt --session pin fix it 2>&1 >/dev/null || true)"
+assert_contains "the trailing-value-flag refusal names the flag" "$err" \
+	"--system-prompt needs a value"
+assert_eq "the trailing-value-flag refusals spawned no invocation" "" \
+	"$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the trailing-value-flag refusals armed no pid file" \
+	|| bad "the trailing-value-flag refusals armed no pid file"
 
 echo "== cross-project pin: pi's abort classifies as a fatal non-quota stop =="
 fresh crossproject
@@ -1313,6 +1475,22 @@ assert_contains "the terminal stop names the foreign project and the pinned id" 
 	"pinned session is from a different project (project: /elsewhere/project, session: foreign-pin)"
 assert_eq "a directly detached engine pins the caller's --session, not a re-resolved id" \
 	"foreign-pin" "$(ride_id)"
+
+fresh crossproject_summary_once
+# the one-shot's caller-facing summary mirrors the ride's, parsed by the
+# same cross_project_summary from the same notice line: run through a
+# directly detached engine because the launcher's child prints its
+# summary to the detached stdout, which no test can capture
+printf 'crossproject\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_DETACHED=1)
+out="$(pc in 0 --session foreign-once-pin cross project once)"
+summary_rc=$?
+PC_ENV=()
+assert_eq "the direct-detached one-shot cross-project stop exits nonzero" "1" "$summary_rc"
+assert_contains "the one-shot stop names the foreign project and the pinned id" "$out" \
+	"pinned session is from a different project (project: /elsewhere/project, session: foreign-once-pin)"
+assert_eq "a directly detached one-shot pins the caller's --session, not a re-resolved id" \
+	"foreign-once-pin" "$(ride_id)"
 
 fresh crossproject_notice_quote
 # model output legitimately quoting pi's notice line (plausible when a
@@ -1452,8 +1630,17 @@ assert_invocation "value flags pair with their tokens, long and short forms alik
 fresh pass_equals
 pc run -n 1 --model=zhipu/glm fix >/dev/null 2>&1
 wait_for 10 engine_idle && ok "equals-form run completes" || bad "equals-form run completes"
-assert_invocation "an equals-form flag forwards verbatim as one token" 1 \
-	-p --session "$(ride_id)" --model=zhipu/glm -- "$(with_marker fix)"
+assert_invocation "an equals-form table flag canonicalizes to the two-token wire form" 1 \
+	-p --session "$(ride_id)" --model zhipu/glm -- "$(with_marker fix)"
+assert_not_contains "no table flag ever rides the wire as an =-form" \
+	"$(cat "$FAKE_STATE/args")" "--model="
+
+fresh pass_equals_short
+pc run -n 1 -e=./ext.js fix >/dev/null 2>&1
+wait_for 10 engine_idle && ok "equals-form short-flag run completes" \
+	|| bad "equals-form short-flag run completes"
+assert_invocation "an equals-form short flag canonicalizes to two tokens" 1 \
+	-p --session "$(ride_id)" -e ./ext.js -- "$(with_marker fix)"
 
 fresh pass_after
 # a synchronous case must never carry --follow: the launcher execs into
@@ -1513,8 +1700,8 @@ assert_invocation "flags after the first prompt word stay prompt" 1 \
 fresh pass_default
 pc run >/dev/null 2>&1
 wait_for 10 engine_idle && ok "default-prompt run completes" || bad "default-prompt run completes"
-assert_invocation "no prompt falls back to the truthful default plus the marker line" 1 \
-	-p --session "$(ride_id)" -- "$(with_marker "$default_prompt")"
+assert_invocation "no prompt falls back to the truthful default, sent without any marker protocol" 1 \
+	-p --session "$(ride_id)" -- "$default_prompt"
 assert_not_contains "the ride default never claims your quota is fresh" \
 	"$(invocation_args 1)" "your quota is fresh"
 
@@ -1544,8 +1731,9 @@ fresh model_explicit_equals
 pc run -n 1 --model=other/model pin me >/dev/null 2>&1
 wait_for 10 engine_idle && ok "equals-form explicit-model run completes" \
 	|| bad "equals-form explicit-model run completes"
-assert_eq "an equals-form --model forwards verbatim, never appended to" "1" \
-	"$(invocation_args 1 | grep -c '^--model=other/model$')"
+assert_eq "an equals-form --model canonicalizes exactly once, never duplicated" \
+	"$(printf '%s\n' --model other/model)" \
+	"$(invocation_args 1 | grep -A1 '^--model$')"
 
 echo "== refusals =="
 fresh refuse_usage
@@ -1557,6 +1745,37 @@ assert_contains "non-numeric budget refusal says why" "$err" "-n needs a number"
 assert_eq "usage refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
 [[ ! -f "$STATE/run.pid" ]] && ok "usage refusals arm no pid file" \
 	|| bad "usage refusals arm no pid file"
+
+fresh refuse_adjacent_short
+# an adjacent spelling of the declared short value flag (-n3, -n=3)
+# misses the exact-match split and would forward verbatim, dying
+# detached as a pi unknown option; refuse before detaching (pi spells
+# session naming --name, -n, and on overlap the supervisor wins, so
+# -n-prefixed tokens belong to the supervisor's namespace)
+printf 'fail\n' >"$FAKE_STATE/plan"
+refuse_rc 2 "an adjacent -n3 spelling refuses" run -n3 fix it
+refuse_rc 2 "an adjacent -n=3 spelling refuses" run -n=3 fix it
+err="$(pc run -n3 fix it 2>&1 >/dev/null || true)"
+assert_contains "the adjacent-spelling refusal points at the separate value" "$err" \
+	"takes its value as a separate argument"
+assert_eq "the adjacent-spelling refusals spawned no invocation" "" \
+	"$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the adjacent-spelling refusals armed no pid file" \
+	|| bad "the adjacent-spelling refusals armed no pid file"
+
+fresh refuse_empty_equals
+# an =-form with an empty value would canonicalize to a flag holding an
+# empty string, a value the caller cannot have meant pi to receive:
+# refuse with the needs-a-value message instead of forwarding the
+# misrepresentation
+refuse_rc 2 "an empty equals-form table flag refuses" run --model= fix it
+refuse_rc 2 "an empty equals-form short flag refuses" run -e= fix it
+refuse_rc 2 "an empty equals-form --session-dir refuses" run --session-dir= fix it
+err="$(pc run --model= fix it 2>&1 >/dev/null || true)"
+assert_contains "the empty equals-form refusal names the bare flag" "$err" "--model needs a value"
+assert_eq "the empty equals-form refusals spawned no invocation" "" "$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the empty equals-form refusals armed no pid file" \
+	|| bad "the empty equals-form refusals armed no pid file"
 
 fresh refuse_modes
 # Pins the hazard's enforcement split: the preflight rejects --mode
@@ -1603,6 +1822,64 @@ assert_eq "session-identity refusals spawn no invocation" "" "$(cat "$FAKE_STATE
 [[ ! -f "$STATE/run.pid" ]] && ok "session-identity refusals arm no pid file" \
 	|| bad "session-identity refusals arm no pid file"
 
+fresh refuse_limit_env
+# the consecutive-count limit env seams feed zsh arithmetic under the
+# script's set -u, where a garbage value errors the check itself
+# (parameter not set, bad math expression), so the bound silently
+# disables: the degenerate clean-turn ride the cap exists to throttle
+# spins back-to-back unbounded, and a quota-windowed ride never
+# concludes. A leading zero drops into zsh's octal reading (08 errors,
+# 075 shifts value). Both seams refuse before detaching.
+printf 'fail\nfail\nfail\nfail\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_CLEAN_TURN_LIMIT=abc)
+refuse_rc 2 "a garbage clean-turn limit refuses the launch" run silent loop
+err="$(pc run silent loop 2>&1 >/dev/null || true)"
+assert_contains "the clean-turn limit refusal names the variable and the value" "$err" \
+	"PI_CONTINUE_CLEAN_TURN_LIMIT needs a nonnegative integer (got 'abc')"
+PC_ENV=(PI_CONTINUE_NO_PROGRESS_LIMIT=abc)
+refuse_rc 2 "a garbage no-progress limit refuses the launch" run fix it
+err="$(pc run fix it 2>&1 >/dev/null || true)"
+assert_contains "the no-progress limit refusal names the variable and the value" "$err" \
+	"PI_CONTINUE_NO_PROGRESS_LIMIT needs a nonnegative integer (got 'abc')"
+PC_ENV=()
+assert_eq "the limit refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the limit refusals arm no pid file" \
+	|| bad "the limit refusals arm no pid file"
+
+fresh refuse_limit_env_engine
+# a directly invoked engine bypasses the launcher's validation, so the
+# engine refuses the same garbage at its own start: the debug path
+# must not lose its bounds to a value the launcher would have refused
+printf 'fail\nfail\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_DETACHED=1 PI_CONTINUE_CLEAN_TURN_LIMIT=abc)
+engine_rc=0; err="$(pc run silent loop 2>&1 >/dev/null)" || engine_rc=$?
+assert_eq "a directly invoked engine refuses a garbage clean-turn limit" "2" "$engine_rc"
+assert_contains "the engine's clean-turn limit refusal names the variable and the value" "$err" \
+	"PI_CONTINUE_CLEAN_TURN_LIMIT needs a nonnegative integer (got 'abc')"
+PC_ENV=(PI_CONTINUE_DETACHED=1 PI_CONTINUE_NO_PROGRESS_LIMIT=abc)
+engine_rc=0; err="$(pc run fix it 2>&1 >/dev/null)" || engine_rc=$?
+PC_ENV=()
+assert_eq "a directly invoked engine refuses a garbage no-progress limit" "2" "$engine_rc"
+assert_contains "the engine's no-progress limit refusal names the variable and the value" "$err" \
+	"PI_CONTINUE_NO_PROGRESS_LIMIT needs a nonnegative integer (got 'abc')"
+assert_eq "the engine limit refusals spawn no invocation" "" "$(cat "$FAKE_STATE/args")"
+[[ ! -f "$STATE/run.pid" ]] && ok "the engine limit refusals arm no pid file" \
+	|| bad "the engine limit refusals arm no pid file"
+
+fresh limit_zero_accepted
+# zero is a legitimate nonnegative limit (a no-tolerance bound: the
+# first no-progress hit ends the ride), so the numeric guard accepts
+# it and the bound behaves unchanged
+printf 'quota\n' >"$FAKE_STATE/plan"
+PC_ENV=(PI_CONTINUE_WAIT_SECONDS=0.5 PI_CONTINUE_NO_PROGRESS_LIMIT=0)
+pc run -n 3 zero tolerance >/dev/null 2>&1
+PC_ENV=()
+wait_for 15 engine_idle && ok "a zero no-progress limit starts the ride" \
+	|| bad "a zero no-progress limit starts the ride"
+assert_eq "the zero-limit ride ends at the first no-progress hit" "1" "$(fake_calls)"
+assert_contains "the zero-limit end is the never-reset bound" "$(cat "$STATE/engine.log")" \
+	"no-progress quota hit 1 consecutive; limit never reset, quitting"
+
 echo "== live-pi parser probe: the divergence canonicalization defends against =="
 # Hermetic against real storage: both probes pass --session-dir temp
 # roots and no message, so pi never calls a model (print mode with no
@@ -1614,7 +1891,7 @@ echo "== live-pi parser probe: the divergence canonicalization defends against =
 # why split_run_args canonicalizes the pin instead of forwarding it.
 if real_pi="$(command -v pi)"; then
 	probe_root="$ROOT/live-probe"
-	mkdir -p "$probe_root/two-token" "$probe_root/equals"
+	mkdir -p "$probe_root/two-token" "$probe_root/equals" "$probe_root/model-equals" "$probe_root/model-two-token"
 	live_rc=0
 	timeout 60 "$real_pi" -p --session live-probe-no-such-session --session-dir "$probe_root/two-token" \
 		</dev/null >/dev/null 2>"$probe_root/pin.err" || live_rc=$?
@@ -1638,6 +1915,30 @@ if real_pi="$(command -v pi)"; then
 		bad "live pi's =-form rejection creates nothing"
 	else
 		ok "live pi's =-form rejection creates nothing"
+	fi
+	live_rc=0
+	timeout 60 "$real_pi" -p --model=zhipu/glm-5.3 --session-dir "$probe_root/model-equals" \
+		</dev/null >/dev/null 2>"$probe_root/model-equals.err" || live_rc=$?
+	assert_eq "live pi's =-form --model never reaches session resolution" "1" "$live_rc"
+	assert_contains "live pi rejects the =-form --model as an unknown option" \
+		"$(cat "$probe_root/model-equals.err")" "Unknown option: --model"
+	if find "$probe_root/model-equals" -name '*.jsonl' | grep -q .; then
+		bad "live pi's =-form --model rejection creates nothing"
+	else
+		ok "live pi's =-form --model rejection creates nothing"
+	fi
+	live_rc=0
+	timeout 60 "$real_pi" -p --model zhipu/glm-5.3 --session live-probe-no-such-session --session-dir "$probe_root/model-two-token" \
+		</dev/null >/dev/null 2>"$probe_root/model-two-token.err" || live_rc=$?
+	assert_eq "live pi's two-token --model parses the flag zone and fails on the pin" "1" "$live_rc"
+	assert_contains "the two-token --model refusal names the pin, not the flag" \
+		"$(cat "$probe_root/model-two-token.err")" "No session found matching 'live-probe-no-such-session'"
+	assert_not_contains "the canonical wire shape never dies Unknown option on real pi" \
+		"$(cat "$probe_root/model-two-token.err")" "Unknown option"
+	if find "$probe_root/model-two-token" -name '*.jsonl' | grep -q .; then
+		bad "live pi's two-token --model refusal creates nothing"
+	else
+		ok "live pi's two-token --model refusal creates nothing"
 	fi
 else
 	skip_test "live-pi parser probe (no real pi on PATH)"
