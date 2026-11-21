@@ -44,7 +44,7 @@ PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus check verify-inner
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus test-gate-wiring check verify-inner
 .PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
 
 # Default target
@@ -380,8 +380,23 @@ for pkg in $(1); do \
 done
 endef
 
+# Corpus gates that ride every suite target (the 10-3 gate-list gap):
+# a landing gate list can cherry-pick suites and skip the corpus
+# checks (10-3 never ran lint-corpus; advisor.md landed 99 lines
+# against the 95 budget), so the gates travel as prerequisites of
+# every suite target a gate list can name instead of only these
+# aggregates. Make runs a prerequisite once per invocation, so a full
+# make test pays the gates once. The census checks (INVENTORY counts
+# and membership) ride inside lint-corpus; the sync checks are the
+# three test-sync suites. The gate targets themselves stay
+# prerequisite-free so the graph stays acyclic: a gate list naming any
+# test target then meets all four gates, because a target that is not
+# a gate carries them and a target that is one is a gate. The wiring
+# pin is test-gate-wiring.
+CORPUS_GATES := lint-corpus test-agents-md test-pi-agents test-pi-extensions
+
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
+test: lint-corpus test-gate-wiring test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "All tests passed!"
 
@@ -399,12 +414,12 @@ check: test
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
 verify-inner: export ISOLATION_ALLOW_DEGRADED := 1
-verify-inner: lint-corpus test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
+verify-inner: lint-corpus test-gate-wiring test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "Container verification suite passed!"
 
 # Test deployment completeness and that all expected symlinks exist
-test-links:
+test-links: $(CORPUS_GATES)
 	$(call check_deploy_completeness,$(STOW_PACKAGES))
 	@echo "Testing opencode symlinks..."
 ifneq ($(OPENCODE_PRESENT),)
@@ -455,7 +470,7 @@ endif
 	@echo "Symlink tests passed!"
 
 # Test that opencode loads all rules files correctly
-test-rules:
+test-rules: $(CORPUS_GATES)
 	@echo "Testing opencode rules loading..."
 ifneq ($(OPENCODE_PRESENT),)
 	@echo "  Running opencode to verify rules are loaded..."
@@ -492,36 +507,43 @@ lint-corpus:
 	@echo "Linting the corpus..."
 	@bash tests/corpus/lint-corpus.sh
 
+# Wiring pin for the corpus gates (the 10-3 gate-list gap): proves
+# every suite target a landing gate list can name executes the full
+# corpus gate set, so a gate-list omission still meets the gates.
+test-gate-wiring: $(CORPUS_GATES)
+	@echo "Testing the corpus gate wiring pin..."
+	@bash tests/corpus/test-gate-wiring.sh
+
 # Smoke-harness validate mode: hermetic scenario shape, registry, fixture,
 # and grader checks for the manager routing smoke set (no model calls;
 # the live runner tests/smoke/run-smoke.sh is explicit-invocation only).
-test-smoke:
+test-smoke: $(CORPUS_GATES)
 	@echo "Testing the smoke harness instrument..."
 	@bash tests/smoke/run-smoke.sh --validate
 
 # Test the tasks board tool (render, atomic claim, lane placement)
-test-tasks:
+test-tasks: $(CORPUS_GATES)
 	@echo "Testing tasks board tool..."
 	@bash tests/tasks/test-tasks.sh
 
 # Characterization suite for the tasks CLI parser's heading-delimiter
 # hazard (FM-1..FM-12): reproduced-pins document current corruption and
 # flip only with the parser-fix follow-up; safe-pins must stay green.
-test-tasks-hazard:
+test-tasks-hazard: $(CORPUS_GATES)
 	@echo "Testing tasks CLI parser hazard pins..."
 	@bash tests/tasks/test-tasks-hazard.sh
 
 # Task-access drift check (ORCH-4-9-1, Tier A): green on the empty
 # migrated-surfaces list at landing, red on every planted failure fixture;
 # ORCH-4-9-2 and ORCH-4-9-3 extend the list per migration stage.
-test-task-access-drift:
+test-task-access-drift: $(CORPUS_GATES)
 	@echo "Testing task-access drift check..."
 	@bash tests/task-access/test-drift.sh
 
 # Command-sufficiency replay (ORCH-4-9-1, Tier A): each role's authorized
 # command set replayed against a seeded TASKS_DIR fixture board under PATH
 # shims refusing direct .tasks arguments.
-test-task-access-replay:
+test-task-access-replay: $(CORPUS_GATES)
 	@echo "Testing task-access command-sufficiency replay..."
 	@bash tests/task-access/test-replay.sh
 
@@ -533,7 +555,7 @@ test-task-access-replay:
 # The repo tasks bin dir rides on PATH so the suite resolves the CLI
 # it enforces in both worlds.
 test-task-storage-pi: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
-test-task-storage-pi:
+test-task-storage-pi: $(CORPUS_GATES)
 	@echo "Testing pi task-storage enforcement..."
 	@bash tests/task-storage-isolation/run-suite.sh
 
@@ -544,7 +566,7 @@ test-task-storage-pi:
 # ISOLATION_ALLOW_DEGRADED=1 when opencode is missing, failing loudly
 # otherwise.
 test-task-storage-opencode: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
-test-task-storage-opencode:
+test-task-storage-opencode: $(CORPUS_GATES)
 	@echo "Testing opencode task-storage enforcement..."
 	@bash tests/task-storage-isolation/test-opencode-enforcement.sh
 
@@ -553,36 +575,36 @@ test-task-storage-opencode:
 # ISOLATION_ALLOW_DEGRADED=1 the bwrap-dependent columns announce as
 # skipped and the suite gates on what ran.
 test-task-storage-adversarial: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
-test-task-storage-adversarial:
+test-task-storage-adversarial: $(CORPUS_GATES)
 	@echo "Testing the task-storage adversarial bypass suite..."
 	@bash tests/task-storage-isolation/run-adversarial.sh
 
 # Tier-B fixture harness skeleton (ORCH-4-9-1): per-role dispatch configs
 # validated by an ordered-rule evaluator plus the transcript audit; the
 # representative executions themselves are ORCH-4-9-4's.
-test-task-access-tierb:
+test-task-access-tierb: $(CORPUS_GATES)
 	@echo "Testing task-access Tier-B fixture skeleton..."
 	@bash tests/task-access/test-tier-b.sh
 
 # Test the oc-continue runner (budgets, retention, follow, flag contract)
-test-oc-continue:
+test-oc-continue: $(CORPUS_GATES)
 	@echo "Testing oc-continue runner..."
 	@bash tests/oc-continue/test-oc-continue.sh
 
 # Test the pi-continue runner (quota-riding supervisor: session lockstep,
 # marker protocol, hermetic fake pi)
-test-pi-continue:
+test-pi-continue: $(CORPUS_GATES)
 	@echo "Testing pi-continue runner..."
 	@bash tests/pi-continue/test-pi-continue.sh
 
 # Test the versioned metrics ledger contract (schema, validator, fixtures)
-test-task-metrics:
+test-task-metrics: $(CORPUS_GATES)
 	@echo "Testing task-metrics ledger contract..."
 	@bash tests/task-metrics/test-task-metrics.sh
 
 # Test the pi extractor (task-metrics pi) against the hermetic fixture store
 # and the ledger validator
-test-pi-extractor:
+test-pi-extractor: $(CORPUS_GATES)
 	@echo "Testing task-metrics pi extractor..."
 	@bash tests/task-metrics/test-pi-extractor.sh
 
@@ -636,7 +658,7 @@ pin-manager-body:
 # the feed and the pi binary are faked on PATH, and the ThoDHa/pi origin
 # is probed only when the network is reachable, so the suite runs green
 # network-off (verify-inner) with the origin section announced as skipped.
-test-pi:
+test-pi: $(CORPUS_GATES)
 	@echo "Testing the pi integration contract..."
 	@bash tests/pi/test-pi.sh
 
@@ -675,6 +697,7 @@ help:
 	@echo "  make test        - Run all tests (corpus lint + symlinks + rules + tasks + oc-continue + pi-continue + pi)"
 	@echo "  make check       - Alias for make test"
 	@echo "  make lint-corpus - Mechanical corpus lint (dashes, links, INVENTORY sync)"
+	@echo "  make test-gate-wiring - Prove every suite target carries the corpus gates (wiring pin)"
 	@echo "  make verify      - Container verification suite (verifier dispatches)"
 	@echo "  make test-links  - Verify stow deployment completeness and symlinks"
 	@echo "  make test-rules  - Verify opencode loads all rules files"
