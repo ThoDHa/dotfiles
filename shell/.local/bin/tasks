@@ -717,6 +717,10 @@ readonly HEADER_FIELDS="$(_header_fields_list "${TEMPLATE_HEADER_FIELDS[@]}")"
 
 err() { printf 'tasks: %s\n' "$*" >&2; }
 die() { err "$*"; exit 1; }
+# A forward-tolerance notice: the operation succeeded, but something the
+# CLI does not know yet was present and ignored. Warnings ride stderr
+# with the same prefix as errors but never set an exit status.
+warn() { printf 'tasks: warning: %s\n' "$*" >&2; }
 
 # Reader-surface failures carry a stable machine-readable code in trailing
 # parentheses: consumers of the versioned JSON readers match the code, not
@@ -1297,19 +1301,24 @@ Options accept "--flag VALUE" or "--flag=VALUE"; only the = form can pass
 a value that itself begins with "--" (e.g. --name=--force).
 
 The board directory is located from --dir, then $TASKS_DIR, then the
-project's explicit store mapping (a .tasks-map marker file in the project
+project's explicit store mapping (a .tasksrc config file in the project
 directory naming its namespace, else a reverse lookup of the derived
 project path in the store registry $TASKS_DEV_ROOT/tasks/mapping.yaml),
-then the project's derived central-store slice. The store maps a
-project under $TASKS_DEV_ROOT (default /home/khave/dev) to
+then the project's derived central-store slice. A .tasksrc config is the
+project's machine-local tasks configuration in one strict flat
+key-value format: the 'namespace: <name>' line is required for board
+resolution, and unknown keys are tolerated forward with a warning,
+never fatal. The store maps a project under $TASKS_DEV_ROOT (default
+/home/khave/dev) to
 $TASKS_DEV_ROOT/tasks/<project> where <project> is the topmost directory
 under the dev root with any leading dot stripped (.dotfiles maps to
 tasks/dotfiles); a cwd outside the dev root falls back to the git
 repository root and its basename. A derived name that the registry binds
 to a different project refuses with a store namespace collision error
-instead of crossing boards. A board is always a store slice under
-$TASKS_DEV_ROOT/tasks: local .tasks directories are never resolved, and
-a chain that ends with nothing dies with the no-board error. init
+instead of crossing boards. A board lives as a store slice under
+$TASKS_DEV_ROOT/tasks unless an explicit --dir or TASKS_DIR pin names
+another directory; local .tasks directories are never resolved, and a
+chain that ends with nothing dies with the no-board error. init
 additionally claims a not-yet-existing slice through the explicit
 mapping or, for an unmapped dev-root project, the derivation.
 EOF
@@ -1388,51 +1397,71 @@ project_store_slice() {
 	PROJECT_STORE_SLICE="$TASKS_DEV_ROOT/tasks/$rel"
 }
 
-# The project-side half of the explicit mapping: a one-line marker file in
-# the project directory naming the store namespace it uses
-# ("namespace: sudoku"). The seam reads it before every derivation
-# because explicit beats derived: a project whose layout would mislead
-# the walk (nested repos, renamed directories, symlinked entry paths)
-# plants the marker and pins its namespace regardless of how the
-# invocation cwd derives. Searched upward from the cwd, nearest marker
-# winning, so one marker per project covers
-# every cwd inside it and a nested project's own marker shadows the
-# parent's. The name carries no path structure: a namespace is one flat
-# store-slice name, so a hostile or typoed marker value cannot point the
-# slice outside the store root.
-TASKS_MAP_MARKER=".tasks-map"
+# The project-side half of the explicit mapping, generalized into the
+# project's machine-local tasks configuration (the GENERAL CONFIG
+# ruling): a gitignored .tasksrc file whose strict flat key-value format
+# matches the store registry's, so future tasks-tooling settings land
+# beside the mapping keys instead of in new files. The location stays
+# the CLI's own knowledge (the dev-root convention, TASKS_DIR, --dir),
+# so the one mapping key is "namespace: <name>", naming the store slice
+# and required for board resolution. Unknown keys are tolerated forward
+# with a warning, never fatal, so the file can grow without waiting on
+# the CLI. The config is read before every derivation because explicit
+# beats derived: a project whose layout would mislead the walk (nested
+# repos, renamed directories, symlinked entry paths) plants the config
+# and pins its namespace regardless of how the invocation cwd derives.
+# Searched upward from the cwd, nearest config winning, so one config
+# per project covers every cwd inside it and a nested project's own
+# config shadows the parent's. A namespace carries no path structure:
+# one flat store-slice name, so a hostile or typoed value cannot point
+# the slice outside the store root.
+TASKS_CONFIG_FILE=".tasksrc"
 MARKER_NAMESPACE=""
 MARKER_DIR=""
 
-# Read the nearest .tasks-map walking up from the invocation cwd. Assigns
+# Read the nearest .tasksrc walking up from the invocation cwd. Assigns
 # MARKER_NAMESPACE and MARKER_DIR in the caller's shell (the same direct
-# contract as project_store_slice) and returns 0 when a marker was found;
-# returns 1 with empty globals when none was. The file admits blank lines
-# and # comments around exactly one "namespace: <name>" line; anything
-# else, a missing or repeated namespace, or a name outside the flat
-# namespace charset is a named refusal rather than a silent guess.
-project_tasks_marker() {
-	local dir="$PWD" line ns
+# contract as project_store_slice) and returns 0 when a config was
+# found; returns 1 with empty globals when none was. The file admits
+# blank lines and # comments around flat "key: value" lines; a line
+# outside that shape, a repeated namespace, or a name outside the flat
+# charset is a named refusal rather than a silent guess, while an
+# unknown key warns and passes, and a config with no namespace key
+# warns, binds nothing, and returns 1: the chain falls through to the
+# registry leg instead of dying, the search stopping at the nearest
+# config so a parent project's config is never silently bound.
+project_tasks_config() {
+	local dir="$PWD" line key value ns
 	MARKER_NAMESPACE=""
 	MARKER_DIR=""
 	while [[ "$dir" != "/" ]]; do
-		if [[ -r "$dir/$TASKS_MAP_MARKER" ]]; then
+		if [[ -r "$dir/$TASKS_CONFIG_FILE" ]]; then
 			ns=""
 			while IFS= read -r line || [[ -n "$line" ]]; do
 				line="${line%$'\r'}"
 				line="${line%"${line##*[![:space:]]}"}"
 				line="${line#"${line%%[![:space:]]*}"}"
 				if [[ -z "$line" || "$line" == \#* ]]; then continue; fi
-				if [[ "$line" =~ ^namespace:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
-					[[ -z "$ns" ]] || die "$TASKS_MAP_MARKER at $dir names more than one namespace"
-					ns="${BASH_REMATCH[1]}"
+				if [[ "$line" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*):[[:space:]]*(.+)$ ]]; then
+					key="${BASH_REMATCH[1]}"
+					value="${BASH_REMATCH[2]}"
+					value="${value%"${value##*[![:space:]]}"}"
+					case "$key" in
+						namespace)
+							[[ -z "$ns" ]] || die "$TASKS_CONFIG_FILE at $dir names more than one namespace"
+							ns="$value" ;;
+						*) warn "unknown key '$key' in $dir/$TASKS_CONFIG_FILE (ignored; known keys: namespace)" ;;
+					esac
 				else
-					die "malformed $dir/$TASKS_MAP_MARKER: the only content is one 'namespace: <name>' line (blank lines and # comments allowed)"
+					die "malformed $dir/$TASKS_CONFIG_FILE: the content is flat 'key: value' lines (blank lines and # comments allowed)"
 				fi
-			done < "$dir/$TASKS_MAP_MARKER"
-			[[ -n "$ns" ]] || die "$TASKS_MAP_MARKER at $dir names no namespace"
+			done < "$dir/$TASKS_CONFIG_FILE"
+			if [[ -z "$ns" ]]; then
+				warn "$TASKS_CONFIG_FILE at $dir names no namespace (a config without its namespace binds no board; resolution falls through to the registry)"
+				return 1
+			fi
 			if ! [[ "$ns" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-				die "$TASKS_MAP_MARKER at $dir names '$ns': a namespace is one flat store-slice name (letters, digits, dots, dashes, underscores; no leading dot or slash)"
+				die "$TASKS_CONFIG_FILE at $dir names '$ns': a namespace is one flat store-slice name (letters, digits, dots, dashes, underscores; no leading dot or slash)"
 			fi
 			MARKER_NAMESPACE="$ns"
 			MARKER_DIR="$dir"
@@ -1556,24 +1585,25 @@ refuse_registry_namespace_conflict() {
 }
 
 # Resolve the board directory: explicit --dir wins, then the TASKS_DIR
-# pin, then the project's explicit store mapping (the nearest .tasks-map
-# marker naming the namespace, else the registry's reverse lookup of the
+# pin, then the project's explicit store mapping (the nearest .tasksrc
+# config naming the namespace, else the registry's reverse lookup of the
 # derived project path), then the derived central-store slice. An
 # explicit mapping whose slice does not exist yet suppresses the derived
-# guesses below it, so planting a marker or a registry entry never
+# guesses below it, so planting a config or a registry entry never
 # silently re-homes a project onto a neighboring namespace while its
 # slice is still staging. The optional second argument (create mode,
 # passed by init) additionally claims a not-yet-existing slice: the
-# marker's namespace first, then the registry's, then a dev-walk
+# config's namespace first, then the registry's, then a dev-walk
 # derivation, so unpinned init scaffolds the explicit target when one
 # exists and the store location for unmapped dev-root projects; every
-# other verb resolves through the same precedence with no create mode.
-# Local .tasks directories are never resolved: the chain stands alone,
-# and a chain that ends with nothing dies with the named no-board error
-# (the legacy local-board search is retired; a local directory stays
-# reachable only through an explicit --dir or TASKS_DIR pin). A derived
-# name the registry binds to a different project refuses with a store
-# namespace collision error instead of resolving.
+# other verb resolves
+# through the same precedence with no create mode. Local .tasks
+# directories are never resolved: the chain stands alone, and a chain
+# that ends with nothing dies with the named no-board error (the legacy
+# local-board search is retired; a local directory stays reachable only
+# through an explicit --dir or TASKS_DIR pin). A derived name the
+# registry binds to a different project refuses with a store namespace
+# collision error instead of resolving.
 resolve_tasks_dir() {
 	local explicit="${1:-}" create="${2:-}" slice reg_ns=""
 	if [[ -n "$explicit" ]]; then RESOLVED_TASKS_DIR="$explicit"; return; fi
@@ -1581,11 +1611,11 @@ resolve_tasks_dir() {
 	# The empty-slice return is the no-project outcome the no-board die
 	# below consumes, so it is consumed here: a bare call returning
 	# non-zero would trip set -e and kill the verb silently.
-	project_tasks_marker || true
+	project_tasks_config || true
 	load_store_registry
 	project_store_slice || true
 	if [[ -n "$MARKER_NAMESPACE" ]]; then
-		refuse_registry_namespace_conflict "$TASKS_MAP_MARKER at $MARKER_DIR" "$MARKER_NAMESPACE" "$MARKER_DIR"
+		refuse_registry_namespace_conflict "$TASKS_CONFIG_FILE at $MARKER_DIR" "$MARKER_NAMESPACE" "$MARKER_DIR"
 		slice="$TASKS_DEV_ROOT/tasks/$MARKER_NAMESPACE"
 		if [[ -d "$slice" ]]; then RESOLVED_TASKS_DIR="$slice"; return; fi
 	elif store_registry_namespace_for_path "$PROJECT_ROOT"; then
@@ -1610,7 +1640,7 @@ resolve_tasks_dir() {
 			RESOLVED_TASKS_DIR="$PROJECT_STORE_SLICE"; return
 		fi
 	fi
-	diec "$CODE_NO_BOARD" "no task board found from $PWD (no --dir, no TASKS_DIR, no .tasks-map marker, no registry entry, and no derived slice under $TASKS_DEV_ROOT/tasks); plant a .tasks-map marker, pass --dir, or run 'tasks init' inside a project under $TASKS_DEV_ROOT"
+	diec "$CODE_NO_BOARD" "no task board found from $PWD (no --dir, no TASKS_DIR, no .tasksrc config, no registry entry, and no derived slice under $TASKS_DEV_ROOT/tasks); plant a .tasksrc config with a namespace line, pass --dir, or run 'tasks init' inside a project under $TASKS_DEV_ROOT"
 }
 
 # Resolve a task file argument to a real path: as given, or under current/,
@@ -4064,22 +4094,33 @@ lint_scan_files() { # tasks_dir files...
 
 # Resolve the repository the reachability pass consults for a board. A
 # store-slice board ($TASKS_DEV_ROOT/tasks/<namespace>) resolves its
-# project repo through the store registry's forward lookup (namespace to
-# local path), so recorded project commits are judged against the
-# project's own history; the store repo's own history is board
-# bookkeeping and must never serve as the reachability ground, where
-# every project commit would report unreachable (the migration geometry
-# class). A board outside the store is an explicit --dir or TASKS_DIR
-# pin, and the history around the board itself serves as the ground.
-# Prints the repo directory, or nothing when no ground
-# exists (the caller skips the pass with a note): a slice whose namespace
-# has no registry entry, or a bound path that is not a git work tree.
+# project repo through the mapping chain, every shape grounded: the
+# store registry's forward lookup (namespace to local path) first, then
+# the invocation's own resolution state, so a slice claimed through the
+# nearest .tasksrc config grounds at the config's directory and a
+# derived slice grounds at the project root even with no registry
+# entry. The store repo's own history is board bookkeeping and must
+# never serve as the reachability ground, where every project commit
+# would report unreachable (the migration geometry class). A board
+# outside the store is an explicit --dir or TASKS_DIR pin, and the
+# history around the board itself serves as the ground. Prints the repo
+# directory, or nothing when no ground exists (the caller skips the
+# pass with a note): a slice whose namespace no mapping shape grounds
+# into a project, or a ground that is not a git work tree.
 lint_reach_repo() { # <tasks_dir>
 	local tasks_dir="$1" ns bound
 	[[ "$tasks_dir" == "$TASKS_DEV_ROOT/tasks/"* ]] || { printf '%s\n' "$tasks_dir"; return; }
 	ns="${tasks_dir#"$TASKS_DEV_ROOT/tasks/"}"
-	if [[ -z "$ns" || "$ns" == */* ]] || ! store_registry_path_for_namespace "$ns"; then return 0; fi
-	bound="$REGISTRY_LOCAL_PATH"
+	if [[ -z "$ns" || "$ns" == */* ]]; then return 0; fi
+	if store_registry_path_for_namespace "$ns"; then
+		bound="$REGISTRY_LOCAL_PATH"
+	elif [[ "$ns" == "$MARKER_NAMESPACE" && -n "$MARKER_DIR" ]]; then
+		bound="$MARKER_DIR"
+	elif [[ -n "$PROJECT_ROOT" && "$PROJECT_STORE_SLICE" == "$tasks_dir" ]]; then
+		bound="$PROJECT_ROOT"
+	else
+		return 0
+	fi
 	[[ -n "$(git -C "$bound" rev-parse --git-dir 2>/dev/null)" ]] || return 0
 	printf '%s\n' "$bound"
 }
@@ -4135,14 +4176,14 @@ lint_classified_findings() { # <tasks_dir> <rel>...
 
 	# ---- pass 2: closure push-reconcile ------------------------------------
 	# Every recorded hash must be reachable from some ref of the repo it was
-	# recorded against: the project repo, resolved through the store mapping
+	# recorded against: the project repo, resolved through the mapping chain
 	# (lint_reach_repo). One rev-list stream merges against the sorted
 	# candidate list (cands collected while consuming the scan records), so
 	# a board with hundreds of recorded hashes costs one git process total.
-	# Without a usable ground (a store slice with no registry binding to its
-	# project, a bound project that is not a repository, a board outside any
-	# repo, or a repo with no commits) the pass is skipped with a note
-	# rather than reporting every hash unreachable.
+	# Without a usable ground (a store slice no mapping shape grounds into
+	# a project repository, a ground that is not a repository, a board
+	# outside any repo, or a repo with no commits) the pass is skipped
+	# with a note rather than reporting every hash unreachable.
 	local reach_repo=""
 	((${#cands[@]} > 0)) && reach_repo="$(lint_reach_repo "$tasks_dir")"
 	local -A cand_reach=()
@@ -4168,7 +4209,7 @@ lint_classified_findings() { # <tasks_dir> <rel>...
 		$saw_any && have_history=1
 		((have_history)) || printf 'SKIP\t%s\n' "no reachable git history found from $reach_repo"
 	elif ((${#cands[@]} > 0)); then
-		printf 'SKIP\t%s\n' "no project repository resolved for $tasks_dir (a store-slice board needs a registry binding to its project; reachability has no ground without it)"
+		printf 'SKIP\t%s\n' "no project repository resolved for $tasks_dir (the registry, the .tasksrc config, and the derivation name no git work tree for this slice; reachability has no ground)"
 	fi
 
 	# ---- pass 3: classify every finding ------------------------------------

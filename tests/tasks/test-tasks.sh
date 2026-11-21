@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1377
+EXPECTED_ASSERTIONS=1400
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -3308,8 +3308,8 @@ trap 'rm -rf "$ROOT" "$guard_root"' EXIT
 mkdir -p "$guard_board/current"
 refuse_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t new --id GRD-1 --name "No Board Refusal Probe" </dev/null 2>&1 >/dev/null || true )"
 assert_contains "new refuses when only a local .tasks exists" "$refuse_err" "no task board found from"
-assert_contains "the refusal enumerates the chain that resolved nothing" "$refuse_err" "no .tasks-map marker, no registry entry"
-assert_contains "the refusal leads with the universal remediations, init conditioned on dev-root derivability" "$refuse_err" "plant a .tasks-map marker, pass --dir, or run 'tasks init' inside a project under"
+assert_contains "the refusal enumerates the chain that resolved nothing" "$refuse_err" "no .tasksrc config, no registry entry"
+assert_contains "the refusal leads with the universal remediations, init conditioned on dev-root derivability" "$refuse_err" "plant a .tasksrc config with a namespace line, pass --dir, or run 'tasks init' inside a project under"
 assert_contains "the no-board refusal carries the coded exit contract" "$refuse_err" "(code: NO_BOARD)"
 set_err="$( cd "$guard_root" && unset TASKS_DIR TASKS_TEST_CLOCK && t set nosuchfile.md Progress=5% </dev/null 2>&1 >/dev/null || true )"
 assert_contains "set refuses the unresolving root" "$set_err" "no task board found from"
@@ -6600,13 +6600,13 @@ else
 fi
 
 section "store seam: marker-resolved board"
-# The explicit mapping layer (STORE-1 marker-registry): a .tasks-map marker
-# in the project directory names the store namespace and outranks both the
-# derived slice name and the legacy walk. This section runs before any
-# mapping.yaml exists, pinning that the marker layer alone carries
+# The explicit mapping layer (STORE-1 marker-registry): a .tasksrc config
+# in the project directory names the store namespace and outranks both
+# the derived slice name and the legacy walk. This section runs before
+# any mapping.yaml exists, pinning that the config layer alone carries
 # resolution and that a missing registry is no error.
 mkdir -p "$seam_devroot/mapproj/nested" "$seam_store/mapmark"
-printf 'namespace: mapmark\n' > "$seam_devroot/mapproj/.tasks-map"
+printf 'namespace: mapmark\n' > "$seam_devroot/mapproj/.tasksrc"
 seam_out="$(seam_t "$seam_devroot/mapproj/nested" init)"
 assert_contains "a marker names the namespace every cwd inside the project resolves" "$seam_out" "$seam_store/mapmark"
 seam_task="$(seam_t "$seam_devroot/mapproj" new --id SEAM-6 --name "Marker Resolved Board" --status Triage)"
@@ -6616,6 +6616,61 @@ if [[ ! -e "$seam_store/mapproj" && ! -e "$seam_devroot/mapproj/.tasks" ]]; then
 else
 	bad "the marker suppresses the derived slice and the legacy board alike"
 fi
+
+section "store seam: the .tasksrc config parses strictly and tolerates unknown keys"
+# The GENERAL CONFIG ruling: the project-side marker generalizes into a
+# machine-local .tasksrc config with strict flat key-value parsing. The
+# namespace line keeps resolution as today and is the one mapping key:
+# the store location stays the CLI's own knowledge (the dev-root
+# convention, TASKS_DIR, --dir), so a config names its namespace and
+# nothing else; unknown keys are tolerated forward with a warning,
+# never fatal, so the file can grow without waiting on the CLI.
+# Dedicated dev root: TASKS_DEV_ROOT must scope the derivation to the
+# scratch dev root, never the real store.
+tsrc_root="$(mktemp -d)"
+tsrc_devroot="$tsrc_root/devroot"
+tsrc_t() { # <cwd> <args...>: run the CLI from <cwd> under the dedicated dev root
+	local cwd="$1"; shift
+	(cd "$cwd" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$tsrc_devroot" "$TASKS_BIN" "$@")
+}
+mkdir -p "$tsrc_devroot/ovrproj" "$tsrc_devroot/plainproj"
+printf 'namespace: ovrns\n' > "$tsrc_devroot/ovrproj/.tasksrc"
+tsrc_out="$(tsrc_t "$tsrc_devroot/ovrproj" init)"
+assert_contains "a config namespace claims the slice at the dev-root store" "$tsrc_out" "$tsrc_devroot/tasks/ovrns"
+tsrc_task="$(tsrc_t "$tsrc_devroot/ovrproj" new --id TSRC-1 --name "Config Resolved Board" --status Triage)"
+assert_contains "new writes into the config-resolved store slice" "$tsrc_task" "$tsrc_devroot/tasks/ovrns/current/"
+printf 'namespace: ovrns\nfuture-setting: on\n' > "$tsrc_devroot/ovrproj/.tasksrc"
+tsrc_err="$(tsrc_t "$tsrc_devroot/ovrproj" list 2>&1 >/dev/null || true)"
+assert_contains "an unknown key warns on stderr without naming an error" "$tsrc_err" "warning: unknown key 'future-setting'"
+tsrc_rc=0
+tsrc_out="$(tsrc_t "$tsrc_devroot/ovrproj" list)" || tsrc_rc=$?
+assert_eq "an unknown key leaves the verb green" "0" "$tsrc_rc"
+assert_contains "the config still resolves the board beside an unknown key" "$tsrc_out" "TSRC-1"
+printf 'namespace: plainns\n' > "$tsrc_devroot/plainproj/.tasksrc"
+tsrc_out="$(tsrc_t "$tsrc_devroot/plainproj" init)"
+assert_contains "a plain namespace config keeps the dev-root store" "$tsrc_out" "$tsrc_devroot/tasks/plainns"
+printf 'namespace: plainns\nnot a key value line\n' > "$tsrc_devroot/plainproj/.tasksrc"
+tsrc_rc=0
+tsrc_err="$(tsrc_t "$tsrc_devroot/plainproj" list </dev/null 2>&1 >/dev/null)" || tsrc_rc=$?
+if ((tsrc_rc != 0)); then
+	ok "a line outside the flat key-value shape refuses"
+else
+	bad "a line outside the flat key-value shape refuses"
+fi
+assert_contains "the malformed refusal names the file and the format" "$tsrc_err" "malformed $tsrc_devroot/plainproj/.tasksrc"
+# A config without its namespace key binds no board but does not kill
+# the chain: it warns and the registry leg carries, so a half-written
+# config degrades loudly without losing resolution.
+printf 'future-setting: on\n' > "$tsrc_devroot/plainproj/.tasksrc"
+printf '# store registry: one "name: /local/path" entry per line\nregns: %s\n' "$tsrc_devroot/plainproj" > "$tsrc_devroot/tasks/mapping.yaml"
+tsrc_t "$tsrc_devroot/plainproj" init >/dev/null
+tsrc_t "$tsrc_devroot/plainproj" new --id REG-1 --name "Registry Fall-Through" --status Triage >/dev/null
+tsrc_rc=0
+tsrc_out="$(tsrc_t "$tsrc_devroot/plainproj" list </dev/null 2>&1)" || tsrc_rc=$?
+assert_eq "a namespace-less config keeps the verb green" "0" "$tsrc_rc"
+assert_contains "the namespace-less fall-through warns with the named note" "$tsrc_out" "names no namespace"
+assert_contains "a config of only unknown keys still resolves via the registry leg" "$tsrc_out" "REG-1"
+rm -rf "$tsrc_root"
 
 section "store seam: registry-resolved board"
 # The store-side registry (mapping.yaml at the store root) binds a
@@ -6658,7 +6713,7 @@ fi
 assert_contains "the refusal names the collision" "$seam_err" "store namespace collision"
 assert_eq "the refused write crossed nothing into the bound slice" "1" "$(ls "$seam_store/clashname/current/" | wc -l)"
 mkdir -p "$seam_devroot/badmarker"
-printf 'namespace: clashname\n' > "$seam_devroot/badmarker/.tasks-map"
+printf 'namespace: clashname\n' > "$seam_devroot/badmarker/.tasksrc"
 seam_rc=0
 seam_err="$(seam_t "$seam_devroot/badmarker" show nowhere.md </dev/null 2>&1 >/dev/null)" || seam_rc=$?
 if ((seam_rc != 0)); then
@@ -6671,7 +6726,7 @@ rm -rf "$seam_clash_repo"
 
 section "store seam: marker wins over the derived slice with a local board inert"
 mkdir -p "$seam_devroot/dualproj" "$seam_store/dualproj" "$seam_store/markwin"
-printf 'namespace: markwin\n' > "$seam_devroot/dualproj/.tasks-map"
+printf 'namespace: markwin\n' > "$seam_devroot/dualproj/.tasksrc"
 seam_t "$seam_devroot/dualproj" init --dir "$seam_devroot/dualproj/.tasks" >/dev/null
 seam_out="$(seam_t "$seam_devroot/dualproj" init)"
 assert_contains "the marker resolves the slice with a local .tasks sitting inert" "$seam_out" "$seam_store/markwin"
@@ -6698,8 +6753,8 @@ section "store seam: init claims the explicit namespace when no slice exists"
 # the scratch store, not the real one.
 seam_map_root="$(mktemp -d)"
 mkdir -p "$seam_map_root/mkinproj" "$seam_map_root/reginit" "$seam_map_root/noinproj" "$seam_map_root/tasks"
-printf 'namespace: mkinmark\n' > "$seam_map_root/mkinproj/.tasks-map"
-printf 'namespace: nomark\n' > "$seam_map_root/noinproj/.tasks-map"
+printf 'namespace: mkinmark\n' > "$seam_map_root/mkinproj/.tasksrc"
+printf 'namespace: nomark\n' > "$seam_map_root/noinproj/.tasksrc"
 printf 'regmark: %s\n' "$seam_map_root/reginit" > "$seam_map_root/tasks/mapping.yaml"
 seam_out="$(cd "$seam_map_root/mkinproj" && env -u TASKS_DIR -u TASKS_TEST_CLOCK TASKS_DEV_ROOT="$seam_map_root" "$TASKS_BIN" init)"
 assert_contains "init claims the marker namespace for a mapped project with no slice" "$seam_out" "$seam_map_root/tasks/mkinmark"
@@ -6715,9 +6770,10 @@ fi
 rm -rf "$seam_map_root"
 
 section "store seam: lint reachability resolves the project repo through the mapping"
-# STORE-1 Half A.1: recorded project hashes are judged against the
-# project's own history, resolved through the store registry (namespace
-# to local path). Dedicated dev root: TASKS_DEV_ROOT must scope the
+# STORE-1 Half A.1, completed by the routed MEDIUM: recorded project
+# hashes are judged against the project's own history, resolved through
+# the mapping chain's every shape (registry entry, .tasksrc marker,
+# derivation). Dedicated dev root: TASKS_DEV_ROOT must scope the
 # derivation and the registry lookup to the scratch store, not the real
 # one. The scratch store is itself a
 # repository with an unrelated commit, so a lint that consulted the store
@@ -6753,10 +6809,58 @@ lint_out="$(reach_t "$reach_devroot/reachproj" lint 2>&1 || true)"
 assert_not_contains "a project-reachable hash reports no unreachable finding" "$lint_out" "$reach_reach"
 assert_contains "an unreachable hash still reports as hard" "$lint_out" "recorded commit deadbee97"
 assert_not_contains "the store repo's own history never serves as the ground" "$lint_out" "push-reconcile skipped"
+
+# The registry leg grounds from a nested cwd too: the git walk finds the
+# project root the registry binds from any directory inside the project.
+mkdir -p "$reach_devroot/reachproj/nested"
+lint_out="$(reach_t "$reach_devroot/reachproj/nested" lint 2>&1 || true)"
+assert_not_contains "the registry ground holds from a nested cwd" "$lint_out" "$reach_reach"
+assert_contains "the registry nested cwd still reports the unreachable hash as hard" "$lint_out" "recorded commit deadbee97"
+
 grep -v '^reachproj:' "$reach_store/mapping.yaml" > "$reach_store/mapping.yaml.tmp" && mv "$reach_store/mapping.yaml.tmp" "$reach_store/mapping.yaml"
 lint_out="$(reach_t "$reach_devroot/reachproj" lint 2>&1 || true)"
-assert_contains "an unbound slice skips the pass with a named note" "$lint_out" "no project repository resolved"
-assert_not_contains "the skipped pass reports no reachability finding" "$lint_out" "unreachable from any"
+assert_not_contains "a derived-only slice's reachable hash stays silent without a registry entry" "$lint_out" "$reach_reach"
+assert_contains "a derived-only slice still reports the unreachable hash as hard" "$lint_out" "recorded commit deadbee97"
+assert_not_contains "the derived ground needs no registry entry" "$lint_out" "push-reconcile skipped"
+
+# The marker shape grounds too: a .tasksrc config naming the namespace
+# carries the reach ground even with no registry entry, from every cwd
+# inside the project.
+mkdir -p "$reach_devroot/markproj/nested"
+git -C "$reach_devroot/markproj" init -q
+git -C "$reach_devroot/markproj" config user.email seam@invalid
+git -C "$reach_devroot/markproj" config user.name "Seam Probe"
+echo one >"$reach_devroot/markproj/one.txt"
+git -C "$reach_devroot/markproj" add one.txt
+git -C "$reach_devroot/markproj" commit -qm "one"
+mark_reach="$(git -C "$reach_devroot/markproj" rev-parse HEAD)"
+printf 'namespace: markproj\n' > "$reach_devroot/markproj/.tasksrc"
+reach_t "$reach_devroot/markproj" init >/dev/null
+f_mark="$reach_store/markproj/current/20260603-0900-mark-probe.md"
+printf '%s\n' '# Task: Mark Probe' '' '**Created:** 2026-06-03 09:00' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2026-06-03 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '- landed commit '"$mark_reach"' on the branch' '' '## Execution Log' >"$f_mark"
+printf '%s\n' 'commit deadbee97 pushed to origin' >>"$f_mark"
+lint_out="$(reach_t "$reach_devroot/markproj" lint 2>&1 || true)"
+assert_not_contains "a marker-only slice's reachable hash stays silent without a registry entry" "$lint_out" "$mark_reach"
+assert_contains "a marker-only slice still reports the unreachable hash as hard" "$lint_out" "recorded commit deadbee97"
+assert_not_contains "the marker ground needs no registry entry" "$lint_out" "push-reconcile skipped"
+lint_out="$(reach_t "$reach_devroot/markproj/nested" lint 2>&1 || true)"
+assert_not_contains "the marker ground holds from a nested cwd" "$lint_out" "$mark_reach"
+assert_contains "the marker nested cwd still reports the unreachable hash as hard" "$lint_out" "recorded commit deadbee97"
+
+# A ground that resolves but is not a git work tree skips the pass with
+# the named note, and a pinned slice outside the resolution chain has no
+# ground at all: both degrade honestly.
+mkdir -p "$reach_devroot/nogitproj"
+printf 'namespace: nogitproj\n' > "$reach_devroot/nogitproj/.tasksrc"
+reach_t "$reach_devroot/nogitproj" init >/dev/null
+f_nogit="$reach_store/nogitproj/current/20260604-0900-nogit-probe.md"
+printf '%s\n' '# Task: NoGit Probe' '' '**Created:** 2026-06-04 09:00' '**Status:** Triage' '**Priority:** Low' '**Progress:** 0%' '**Owner:**' '**Updated:** 2026-06-04 09:30' '' '## Table of Contents' '' '## Objective' '' '## Success Criteria' '' '## Work Log' '' '- commit deadbee97 pushed to origin' '' '## Execution Log' >"$f_nogit"
+lint_out="$(reach_t "$reach_devroot/nogitproj" lint 2>&1 || true)"
+assert_contains "a non-repository ground skips the pass with the named note" "$lint_out" "no project repository resolved"
+assert_not_contains "the groundless pass reports no reachability finding" "$lint_out" "unreachable from any"
+lint_out="$(reach_t "$reach_devroot/reachproj" lint --dir "$reach_store/reachproj" 2>&1 || true)"
+assert_contains "a pinned slice outside the chain resolves no ground" "$lint_out" "no project repository resolved"
+assert_not_contains "the pinned groundless pass reports no reachability finding" "$lint_out" "unreachable from any"
 rm -rf "$reach_root"
 
 section "store seam: bare repos and no-git cwds refuse with the no-board error"
