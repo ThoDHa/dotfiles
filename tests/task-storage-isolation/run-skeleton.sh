@@ -90,8 +90,8 @@ echo "fixture ready: $FIXTURE"
 
 echo "=== 2. fixture board (tasks init + one task file) ==="
 export TASKS_SESSION=skeleton-harness
-(cd "$FIXTURE" && tasks init >/dev/null)
-(cd "$FIXTURE" && tasks new --id SKEL-1 --name "Sanctioned Verb Target" >/dev/null)
+(cd "$FIXTURE" && TASKS_DIR="$FIXTURE/.tasks" tasks init >/dev/null)
+(cd "$FIXTURE" && TASKS_DIR="$FIXTURE/.tasks" tasks new --id SKEL-1 --name "Sanctioned Verb Target" >/dev/null)
 TASKFILE_BASE="$(cd "$FIXTURE" && find .tasks/current -maxdepth 1 -name 'SKEL-1-*.md' -printf '%f\n' | head -1)"
 [[ -n "$TASKFILE_BASE" ]] || fail "fixture task file was not created"
 echo "fixture task file: $TASKFILE_BASE"

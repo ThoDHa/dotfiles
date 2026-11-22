@@ -353,8 +353,8 @@ if [[ ! -d "$AGENT_DIR/sessions" || ! -d "$REPO/.tasks" || ! -d "$WORKTREE/.task
 fi
 
 export TASKS_SESSION=isolation-suite
-(cd "$REPO" && tasks init >/dev/null) || fail_fast "tasks init failed on fixture"
-(cd "$REPO" && tasks new --id ISO-1 --name "Isolation Suite Target" >/dev/null) || fail_fast "tasks new failed on fixture"
+(cd "$REPO" && TASKS_DIR="$REPO/.tasks" tasks init >/dev/null) || fail_fast "tasks init failed on fixture"
+(cd "$REPO" && TASKS_DIR="$REPO/.tasks" tasks new --id ISO-1 --name "Isolation Suite Target" >/dev/null) || fail_fast "tasks new failed on fixture"
 TASKFILE_BASE="$(cd "$REPO" && find .tasks/current -maxdepth 1 -name 'ISO-1-*.md' -printf '%f\n' | head -1)"
 if [[ -n "$TASKFILE_BASE" ]]; then
 	ok "fixture board ready (task file $TASKFILE_BASE)"
@@ -366,7 +366,16 @@ SUITE_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
 echo "== 4. escape-channel service (shared instance) =="
 printf '{}\n' >"$TRUST_FILE"
-PI_TASK_STORAGE_TOKEN="$SUITE_TOKEN" python3 "$SERVICE_PY" "$SOCKET" "$REPO" "$SERVICE_LOG" &
+mkdir -p "$RUN/bin"
+cat >"$RUN/bin/tasks" <<LAUNCHER
+#!/usr/bin/env bash
+# Fixture board pin: a /tmp scratch board resolves only through the
+# explicit TASKS_DIR override, so the service exec carries the pin for
+# its cwd (the fixture repo root).
+exec env TASKS_DIR="\$PWD/.tasks" "$REPO_ROOT/shell/.local/bin/tasks" "\$@"
+LAUNCHER
+chmod +x "$RUN/bin/tasks"
+PI_TASK_STORAGE_TOKEN="$SUITE_TOKEN" PATH="$RUN/bin:$PATH" python3 "$SERVICE_PY" "$SOCKET" "$REPO" "$SERVICE_LOG" &
 SERVICE_PID=$!
 for _ in $(seq 1 50); do
 	if [[ -S "$SOCKET" ]]; then
@@ -431,7 +440,7 @@ if [[ "$HAVE_NODE" == "1" ]]; then
 	driver_out="$(node "$DRIVER" wrap "$REPO_ROOT" "$RUN/driver-wrap" "$ACTIVATED_COPY" "$RUN/parity-expected.json" 2>&1)"
 	absorb_results "ts-driver wrap section (parity)" "$driver_out" $?
 
-	driver_out="$(node "$DRIVER" extension "$REPO_ROOT" "$RUN/driver-extension" "$REPO" "$TASKFILE_BASE" 2>&1)"
+	driver_out="$(PATH="$RUN/bin:$PATH" node "$DRIVER" extension "$REPO_ROOT" "$RUN/driver-extension" "$REPO" "$TASKFILE_BASE" 2>&1)"
 	absorb_results "ts-driver extension section (hosting round trip)" "$driver_out" $?
 else
 	skip_test "ts-driver guard, wrap-parity, and extension sections (node not installed; degraded mode)"
@@ -633,7 +642,9 @@ echo "== 7. escape-channel service units =="
 # host-side (no namespace), exercising the service contract directly.
 export SUITE_RUN_DIR="$RUN" SUITE_REPO="$REPO" SUITE_AGENT_DIR="$AGENT_DIR" SUITE_SERVICE_PY="$SERVICE_PY"
 run_service_unit() { # python snippet on stdin; ok/bad lines on stdout
-	ISOLATION_LIB="$LIB" python3 - "$@" 2>&1
+	# The shim dir rides PATH so an in-process handle() exec (the L1 pin)
+	# resolves the fixture pin exactly like the launched service does.
+	PATH="$RUN/bin:$PATH" ISOLATION_LIB="$LIB" python3 - "$@" 2>&1
 }
 
 service_out="$(run_service_unit "$SOCKET" "$SUITE_TOKEN" "$TASKFILE_BASE" <<'PYEOF'

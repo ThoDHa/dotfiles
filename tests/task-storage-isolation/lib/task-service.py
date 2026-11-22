@@ -50,7 +50,8 @@ def handle(path: str, fixture: str, taskfile: str, log_path: str,
             completed = subprocess.run(
                 argv, cwd=fixture, capture_output=True, text=True, timeout=30,
                 env={"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
-                     "TASKS_SESSION": "skeleton-child"})
+                     "TASKS_SESSION": "skeleton-child",
+                     "TASKS_DIR": os.path.join(fixture, ".tasks")})
             response = {"exit": completed.returncode, "stdout": completed.stdout,
                         "stderr": completed.stderr}
         log(log_path, f"response exit={response['exit']} stdout_bytes={len(response['stdout'])}")

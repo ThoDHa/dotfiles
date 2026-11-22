@@ -161,8 +161,8 @@ if [[ ! -d "$REPO_FIX/.tasks" || ! -d "$WORKTREE_FIX/.tasks" ]]; then
 fi
 
 export TASKS_SESSION=adversarial-suite
-(cd "$REPO_FIX" && tasks init >/dev/null) || fail_fast "tasks init failed on fixture"
-(cd "$REPO_FIX" && tasks new --id ADV-1 --name "Adversarial Target" >/dev/null) || fail_fast "tasks new failed on fixture"
+(cd "$REPO_FIX" && TASKS_DIR="$REPO_FIX/.tasks" tasks init >/dev/null) || fail_fast "tasks init failed on fixture"
+(cd "$REPO_FIX" && TASKS_DIR="$REPO_FIX/.tasks" tasks new --id ADV-1 --name "Adversarial Target" >/dev/null) || fail_fast "tasks new failed on fixture"
 TASKFILE_BASE="$(cd "$REPO_FIX" && find .tasks/current -maxdepth 1 -name 'ADV-1-*.md' -printf '%f\n' | head -1)"
 [[ -n "$TASKFILE_BASE" ]] || fail_fast "fixture task file was not created"
 mkdir -p "$REPO_FIX/.tasks/reports"
@@ -185,8 +185,8 @@ printf 'secret: %s\n' "$TWIN_SECRET" >"$TWIN/.tasks/current/secret.md"
 printf 'secret: %s\n' "$TWIN_SECRET" >"$TWIN/.tasks/reports/secret.md"
 git -C "$TWIN" add -A
 git -C "$TWIN" commit -qm "twin fixture"
-(cd "$TWIN" && tasks init >/dev/null) || fail_fast "tasks init failed on twin"
-(cd "$TWIN" && tasks new --id ADV-1 --name "Adversarial Twin" >/dev/null) || fail_fast "tasks new failed on twin"
+(cd "$TWIN" && TASKS_DIR="$TWIN/.tasks" tasks init >/dev/null) || fail_fast "tasks init failed on twin"
+(cd "$TWIN" && TASKS_DIR="$TWIN/.tasks" tasks new --id ADV-1 --name "Adversarial Twin" >/dev/null) || fail_fast "tasks new failed on twin"
 TWIN_TASKFILE="$(cd "$TWIN" && find .tasks/current -maxdepth 1 -name 'ADV-1-*.md' -printf '%f\n' | head -1)"
 [[ -n "$TWIN_TASKFILE" ]] || fail_fast "twin task file was not created"
 ok "twin fixture ready (task file $TWIN_TASKFILE)"
@@ -202,7 +202,16 @@ if [[ "$HAVE_BWRAP" == "1" ]]; then
 	mkdir -p "$ESCAPE_DIR"
 	chmod 700 "$ESCAPE_DIR"
 	printf '{}\n' >"$TRUST_FILE"
-	PI_TASK_STORAGE_TOKEN="adv-suite-token" python3 "$SERVICE_PY" "$SOCKET" "$REPO_FIX" "$RUN/service.log" &
+	mkdir -p "$RUN/bin"
+	cat >"$RUN/bin/tasks" <<LAUNCHER
+#!/usr/bin/env bash
+# Fixture board pin: a /tmp scratch board resolves only through the
+# explicit TASKS_DIR override, so the service exec carries the pin for
+# its cwd (the fixture repo root).
+exec env TASKS_DIR="\$PWD/.tasks" "$REPO_ROOT/shell/.local/bin/tasks" "\$@"
+LAUNCHER
+	chmod +x "$RUN/bin/tasks"
+	PI_TASK_STORAGE_TOKEN="adv-suite-token" PATH="$RUN/bin:$PATH" python3 "$SERVICE_PY" "$SOCKET" "$REPO_FIX" "$RUN/service.log" &
 	SERVICE_PID=$!
 	for _ in $(seq 1 50); do
 		[[ -S "$SOCKET" ]] && break
@@ -628,8 +637,11 @@ def run_client(session, agent, command, stdin_body=None, cwd=None):
 
 
 def run_plain(command, cwd=None):
+	board_cwd = cwd or FIX
+	env = dict(env_full)
+	env["TASKS_DIR"] = os.path.join(board_cwd, ".tasks")
 	return subprocess.run(["/bin/bash", "-c", command], capture_output=True,
-	                      text=True, cwd=cwd or FIX, env=env_full, timeout=120)
+	                      text=True, cwd=board_cwd, env=env, timeout=120)
 
 
 def expect(label, cond, detail=""):
@@ -1366,8 +1378,10 @@ os.chmod(RUN, 0o700)
 
 # Seed a task whose report body is 48 MiB, directly in the fixture
 # board (a body this size cannot ride the 1 MiB-bounded broker stdin).
+r2_env = dict(os.environ)
+r2_env["TASKS_DIR"] = os.path.join(FIX, ".tasks")
 subprocess.run([TASKS_BIN, "new", "--id", "ADV-2", "--name", "R2 Target"],
-	           cwd=FIX, capture_output=True, check=True)
+	           cwd=FIX, capture_output=True, check=True, env=r2_env)
 name = subprocess.run(
 	["bash", "-c", f"cd '{FIX}' && find .tasks/current -name 'ADV-2-*.md' -printf '%f\\n' | head -1"],
 	capture_output=True, text=True).stdout.strip()
@@ -1509,6 +1523,7 @@ RESIDUE_SNIPPET = (
 
 def tcli(*argv, session=None):
 	env = dict(os.environ)
+	env["TASKS_DIR"] = os.path.join(FIX, ".tasks")
 	if session:
 		env["TASKS_SESSION"] = session
 	return subprocess.run([TASKS, *argv], capture_output=True, text=True,

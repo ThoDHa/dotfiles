@@ -600,13 +600,18 @@ def run_capped(argv: list, cwd: str, env: dict, timeout: int,
 
 
 def execute_sanctioned(exec_argv: list, cwd: str, timeout: int, stdin: str = "",
-                       attribution: str = "") -> dict:
+                       attribution: str = "", ground_root: str = "") -> dict:
     """Run the parsed tasks invocation only, never the original shell
     string, with a sanitized env whose TASKS_SESSION is pinned to the
-    service-bound attribution label. Non-empty stdin (report/edit
+    service-bound attribution label and whose TASKS_DIR is pinned to the
+    validated cwd's repo/worktree root's .tasks tree (a scratch board
+    resolves only through the explicit pin; the request cwd is already
+    contained to those roots). Non-empty stdin (report/edit
     bodies) rides the subprocess stdin, bounded by the request cap that
     delivered it; output is pumped under the hard cap."""
     env = sanitized_env(attribution)
+    if ground_root:
+        env["TASKS_DIR"] = os.path.join(ground_root, ".tasks")
     resolved = shutil.which(exec_argv[0], path=env.get("PATH", ""))
     if resolved is None:
         return finish(126, "", f"{exec_argv[0]} not found in the broker PATH; "
@@ -791,11 +796,15 @@ def handle(repo: str, token: str, log_path: str, state: dict,
         kind = classify(agent, argv)
         exec_argv = None
         if kind == "sanctioned":
-            repo_roots = [os.path.realpath(r) for r in worktree_roots(repo)]
             resolved = os.path.realpath(cwd) if cwd else ""
-            inside = any(resolved == r or resolved.startswith(r + os.sep)
-                         for r in repo_roots)
-            if not inside:
+            # Longest-containing root wins: worktree list order puts the
+            # main repo first, and the board ground must follow the cwd's
+            # nearest project root, not an ancestor repo.
+            ground_root = next((r for r in sorted(
+                                    [os.path.realpath(rr) for rr in worktree_roots(repo)],
+                                    key=len, reverse=True)
+                                if resolved == r or resolved.startswith(r + os.sep)), "")
+            if not ground_root:
                 audit(log_path, {"class": "refused", "reason": "cwd outside repository",
                                  "session": session, "agent": agent, "argv": argv})
                 conn.sendall(json.dumps(refused("cwd outside the repository")).encode())
@@ -816,7 +825,7 @@ def handle(repo: str, token: str, log_path: str, state: dict,
                 return
             exec_argv = bind_write_attribution(exec_argv, state["attribution"])
             response = execute_sanctioned(exec_argv, cwd, timeout, stdin_body,
-                                          state["attribution"])
+                                          state["attribution"], ground_root)
         elif kind == "masked":
             response = execute_masked(argv, cwd, repo, timeout)
         else:
