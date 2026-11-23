@@ -2774,7 +2774,8 @@ cmd_release() {
 	# sanctioned cross-process completion that lets a per-process harness
 	# caller finish a reclaim-based recovery without sidecar surgery;
 	# tokenless recovery is still the explicit manager surface: 'tasks
-	# claims' reports stale claims, 'tasks reclaim' takes one over. Rollout window: until the fleet converges on this
+	# claims' reports stale claims, 'tasks reclaim' takes one over.
+	# Rollout window: until the fleet converges on this
 	# version, a pre-upgrade binary still carries the old broad unlock and
 	# can drop a v2 claim with no generation check - the ABA guard is only
 	# as strong as the oldest tasks binary in the fleet (worktree-stowed
