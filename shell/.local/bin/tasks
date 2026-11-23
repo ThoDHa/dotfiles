@@ -1224,14 +1224,24 @@ Commands:
   claim <taskfile> [--owner ID]        Atomically claim a task (O_EXCL sidecar carrying a
                                        generation token), render. A live foreign claim
                                        refuses; an expired one routes recovery to the
-                                       manager surface (claims/reclaim).
+                                       manager surface (claims/reclaim). With neither
+                                       TASKS_SESSION nor --owner set the owner is the
+                                       caller's per-process hostname-pid identity and a
+                                       stderr warning says so: the next invocation
+                                       cannot refresh that claim's heartbeat, so
+                                       harness callers export a stable TASKS_SESSION
+                                       per session.
   release <taskfile> --generation T [--outcome fail|error]
                                        Release the caller's own claim and clear Owner, render.
                                        T is required on a generation-token claim (the ABA
                                        guard: identity strings replay, so a tokenless
                                        release is refused even for the recorded owner; a
                                        lost token routes through manager reclaim); a
-                                       foreign release is refused - recovery is
+                                       foreign release is refused unless the presented
+                                       token matches the claim's current generation,
+                                       in which case the release completes
+                                       cross-process (the sanctioned completion of a
+                                       reclaim-based recovery); tokenless recovery is
                                        manager-owned (claims, reclaim). --outcome records
                                        a failed or errored attempt (fail|error only; a
                                        plain release stays not-run), so a failed fix
@@ -2666,6 +2676,14 @@ cmd_claim() {
 		esac
 	done
 	[[ -n "$target" ]] || die "claim: usage: tasks claim <taskfile> [--owner ID]"
+	# The unset-identity warning: the hostname-pid fallback is per-process,
+	# so under it no later invocation can refresh this claim's heartbeat
+	# (the recorded owner never matches another pid). The claim still
+	# succeeds - the fallback is correct for a casual interactive user -
+	# but the silent degradation becomes visible at claim time.
+	if [[ -z "$owner" && -z "${TASKS_SESSION:-}" ]]; then
+		printf 'warning: TASKS_SESSION is unset and no --owner was given; this claim is owned by the per-process identity %s, so the next invocation cannot refresh its heartbeat (export a stable TASKS_SESSION per session, or claim with --owner)\n' "$(session_id)" >&2
+	fi
 	[[ -n "$owner" ]] || owner="$(session_id)"
 
 	local tasks_dir; resolve_tasks_dir "$dir"; tasks_dir="$RESOLVED_TASKS_DIR"
@@ -2750,11 +2768,13 @@ cmd_release() {
 	# reclaim. close and a set landing on a terminal status run the same
 	# sequence through the shared check (verify_release_claim), so neither
 	# a foreign closure nor a same-owner tokenless or stale-token one can
-	# drop a live claim. A foreign release is
-	# refused on every arm because the broad unlock was exactly the stale-
-	# release hole the ABA guard exists to close; recovery is the explicit
-	# manager surface: 'tasks claims' reports stale claims, 'tasks reclaim'
-	# takes one over. Rollout window: until the fleet converges on this
+	# drop a live claim. The identity-only unlock stays closed: a foreign
+	# release is refused on every arm unless the caller presents the
+	# claim's current generation token (narrowed by TASKS-2), the
+	# sanctioned cross-process completion that lets a per-process harness
+	# caller finish a reclaim-based recovery without sidecar surgery;
+	# tokenless recovery is still the explicit manager surface: 'tasks
+	# claims' reports stale claims, 'tasks reclaim' takes one over. Rollout window: until the fleet converges on this
 	# version, a pre-upgrade binary still carries the old broad unlock and
 	# can drop a v2 claim with no generation check - the ABA guard is only
 	# as strong as the oldest tasks binary in the fleet (worktree-stowed
@@ -2888,10 +2908,14 @@ cmd_reclaim() {
 # route through this check via verify_release_claim, so a foreign session
 # cannot drop a live claim through any release arm; stale-claim recovery
 # stays the explicit manager surface ('tasks claims' reports, 'tasks
-# reclaim' takes over). The migration rides this write-path touch (owner
-# survives byte-exact), so the check always judges v2 state; a caller
-# that already migrated re-runs a no-op read. Unclaimed tasks pass
-# through untouched.
+# reclaim' takes over). The one sanctioned bypass lives in the caller:
+# verify_release_claim skips this check when the presented generation
+# equals the claim's current one, because the CSPRNG token printed only
+# to the claimer is strictly stronger evidence than the replayable
+# identity string compared here. The migration rides this write-path
+# touch (owner survives byte-exact), so the check always judges v2
+# state; a caller that already migrated re-runs a no-op read. Unclaimed
+# tasks pass through untouched.
 refuse_foreign_claim() { # file tasks_dir verb
 	local claim="$1$CLAIM_SUFFIX"
 	[[ -e "$claim" ]] || return 0
@@ -2907,23 +2931,29 @@ refuse_foreign_claim() { # file tasks_dir verb
 # status). The order is load-bearing: a presented token that mismatches
 # the sidecar's generation refuses first (the ABA guard outranks every
 # identity, so a stale token never falls through to the ownership
-# verdict), the ownership check follows, and a live v2 claim presented
-# with no token refuses last - identity strings replay via hostname-pid
-# reuse or a duplicated TASKS_SESSION, so the token itself is required
-# and a lost token routes through manager reclaim. generation is the
-# caller's --generation value, empty when none was presented; verb names
-# the refusing arm in the messages.
+# verdict), the ownership check follows unless the presented token
+# equals the claim's current generation - holding the CSPRNG secret
+# printed only to the claimer is the sanctioned cross-process
+# completion, strictly stronger evidence than the replayable identity
+# string - and a live v2 claim presented with no token refuses last -
+# identity strings replay via hostname-pid reuse or a duplicated
+# TASKS_SESSION, so the token itself is required and a lost token
+# routes through manager reclaim. generation is the caller's
+# --generation value, empty when none was presented; verb names the
+# refusing arm in the messages.
 verify_release_claim() { # file tasks_dir verb generation
 	local file="$1" tasks_dir="$2" verb="$3" generation="${4:-}"
 	local claim="$file$CLAIM_SUFFIX"
+	local token_held=0
 	if [[ -e "$claim" ]]; then
 		claim_sidecar_migrate "$claim" "$tasks_dir" "${file#"$tasks_dir/"}" >/dev/null
 		claim_sidecar_read "$claim"
 		if [[ -n "$generation" && "$generation" != "$CS_GENERATION" ]]; then
 			die "$verb: generation mismatch on $(basename "$file") (claim generation is ${CS_GENERATION:-none}, caller presented $generation); a stale generation may not release a reissued claim (ABA guard; recovery is manager-owned: 'tasks reclaim')"
 		fi
+		[[ -n "$generation" && "$generation" == "$CS_GENERATION" ]] && token_held=1
 	fi
-	refuse_foreign_claim "$file" "$tasks_dir" "$verb"
+	((token_held)) || refuse_foreign_claim "$file" "$tasks_dir" "$verb"
 	if [[ -e "$claim" && -z "$generation" ]]; then
 		die "$verb: $(basename "$file") carries a generation-token claim and no --generation was presented; the token is required because identity strings replay (hostname-pid reuse, a duplicated TASKS_SESSION) - pass the token the claim printed, or route a lost token through manager recovery ('tasks reclaim')"
 	fi
@@ -3465,8 +3495,11 @@ cmd_close() {
 	# session refuses the closure before any write it would make (including
 	# a --force override note), and the release-verb generation sequence
 	# rides the same check - a same-owner tokenless or stale-token closure
-	# refuses too, because identity strings replay. Recovery is
-	# manager-owned (claims, reclaim).
+	# refuses too, because identity strings replay. The one cross-process
+	# completion is the claim's current generation token: presenting it
+	# satisfies the ownership step in verify_release_claim, so a harness
+	# caller holding the token closes a reclaimed claim without sidecar
+	# surgery. Tokenless recovery is manager-owned (claims, reclaim).
 	verify_release_claim "$file" "$tasks_dir" "close" "$generation"
 
 	local status
