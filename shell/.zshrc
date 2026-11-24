@@ -250,3 +250,7 @@ export OPENCODE_DISABLE_CLAUDE_CODE=1
 export PATH=$HOME/.opencode/bin:$HOME/.local/bin:$PATH
 export KUBECONFIG=$HOME/.kube/config
 export PI_CODING_AGENT_SESSION_DIR="$HOME/.local/share/pi/sessions"
+# tasks CLI claim owner: one stable identity per interactive shell; the
+# :- guard keeps an inherited or user-set value so nested shells and
+# agent children stay attributed to the origin session.
+export TASKS_SESSION="${TASKS_SESSION:-$(hostname -s 2>/dev/null || hostname)-$$}"

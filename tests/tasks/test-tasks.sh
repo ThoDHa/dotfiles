@@ -11,7 +11,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TASKS_BIN="$REPO_ROOT/shell/.local/bin/tasks"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
-EXPECTED_ASSERTIONS=1400
+EXPECTED_ASSERTIONS=1418
 
 refuse() { # label; rest is the command to attempt
 	local label="$1"; shift
@@ -178,21 +178,26 @@ assert_eq "Owner cleared on release" "" "${owner_after:-}"
 assert_eq "release leaves the Owner field present and empty" "1" \
 	"$(grep -c '^\*\*Owner:\*\*$' "$f_tr")"
 
-section "release: foreign release refused, recovery is manager-owned (G15 change)"
-# BEHAVIOR CHANGE (documented, ORCH-4-4-4): the old G15 pin "any session may
-# release a foreign claim" narrowed under generation-token claims, on all
-# three release arms (release, close, terminal set). The broad
-# cooperative unlock was exactly the stale-release hole the ABA guard
-# exists to close: a foreign release can no longer drop a claim, and
-# stale-claim recovery is the explicit manager surface (tasks claims
-# reports, tasks reclaim recovers). The generation token is itself
-# required on every arm that drops a live claim: a tokenless release is
-# refused even for the recorded owner, because the replayed identity
-# (hostname-pid reuse, a duplicated TASKS_SESSION) is exactly the bypass
-# the guard exists to close; a lost token routes through manager
-# reclaim. This section is the updated pin;
-# the behavior-change record rides the same landing (child Work Log +
-# report) per the protocol's behavior-change rule.
+section "release: tokenless foreign release refused, tokened release completes cross-process (G15 rule)"
+# BEHAVIOR CHANGE (documented, ORCH-4-4-4, narrowed by TASKS-2): the old
+# G15 pin "any session may release a foreign claim" stays narrowed under
+# generation-token claims on all three release arms (release, close,
+# terminal set): a tokenless release is refused even for the recorded
+# owner, because the replayed identity (hostname-pid reuse, a duplicated
+# TASKS_SESSION) is exactly the bypass the guard exists to close, and a
+# foreign tokenless release is refused outright; a lost token routes
+# through manager reclaim. The identity-only unlock stays closed. The
+# matching-token cell is the sanctioned cross-process completion instead
+# of the old even-with-token refusal: a presented --generation equal to
+# the sidecar's current generation satisfies the ownership step on every
+# arm, because the CSPRNG token printed only to the claimer is strictly
+# stronger evidence than the replayable identity string; the ABA order is
+# unchanged (a stale token still dies first). Per-process harness callers
+# (one fresh pid per invocation) reclaim to a stable id, then complete
+# the release or close cross-process with the token, no sidecar surgery.
+# This section is the updated pin; the behavior-change record rides the
+# same landing (child Work Log + report) per the protocol's
+# behavior-change rule.
 f_xo="$(t new --id XOWN-1 --name "Cross Owner Release Target")"
 t claim "$f_xo" --owner session-alice >/dev/null
 assert_contains "claim sets the owning session" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
@@ -206,9 +211,23 @@ assert_contains "the foreign refusal names the caller session" "$xo_err" "sessio
 assert_contains "the foreign refusal routes recovery to the manager surface" "$xo_err" "reclaim"
 [[ -f "$f_xo.claim" ]] && ok "a refused foreign release leaves the sidecar intact" || bad "a refused foreign release leaves the sidecar intact"
 assert_contains "a refused foreign release leaves Owner set" "$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo")" "session-alice"
-xof_err="$(TASKS_SESSION=session-bob t release "$f_xo" --generation "$(gen_of "$f_xo")" 2>&1 >/dev/null || true)"
-assert_contains "a foreign release is refused even with the correct token" "$xof_err" "not by 'session-bob'"
-[[ -f "$f_xo.claim" ]] && ok "the correct-token foreign refusal keeps the claim too" || bad "the correct-token foreign refusal keeps the claim too"
+# The flip (TASKS-2): a foreign session presenting the claim's current
+# generation token completes the release cross-process. This is the
+# per-process harness path: reclaim --owner <stable-id> re-issues the
+# claim, then a session matching neither the original claimer nor the
+# reclaimed owner drops it holding only the token - the quote-2 repro,
+# where even after reclaim a fresh-pid caller's session_id() matches
+# nothing and the token is the sole evidence it holds.
+f_xok="$(t new --id XOWN-2 --name "Tokened Foreign Release Target")"
+TASKS_SESSION=session-alice t claim "$f_xok" >/dev/null
+TASKS_SESSION=manager t reclaim "$f_xok" --owner session-bob >/dev/null
+xok_err_file="$ROOT/xok-release-err.txt"
+TASKS_SESSION=session-carol t release "$f_xok" --generation "$(gen_of "$f_xok")" >/dev/null 2>"$xok_err_file"; xok_rc=$?
+assert_eq "a foreign session's tokened release exits zero" "0" "$xok_rc"
+assert_not_contains "the tokened cross-process release emits no foreign refusal" "$(cat "$xok_err_file")" "foreign release is refused"
+[[ ! -f "$f_xok.claim" ]] && ok "the tokened cross-process release drops the sidecar" || bad "the tokened cross-process release drops the sidecar"
+owner_xok="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xok" || true)"
+assert_eq "the tokened cross-process release clears Owner" "" "${owner_xok:-}"
 xo2_err_file="$ROOT/xo2-release-err.txt"
 TASKS_SESSION=session-alice t release "$f_xo" 2>"$xo2_err_file" && xo2_rc=0 || xo2_rc=$?
 assert_eq "a tokenless release is refused even for the recorded owner" "1" "$xo2_rc"
@@ -220,7 +239,7 @@ TASKS_SESSION=session-alice t release "$f_xo" --generation "$(gen_of "$f_xo")" >
 [[ ! -f "$f_xo.claim" ]] && ok "the owner's own tokened release removes the sidecar" || bad "the owner's own tokened release removes the sidecar"
 owner_cross="$(grep -oP '^\*\*Owner:\*\*\s+\K.*' "$f_xo" || true)"
 assert_eq "the owner's own release clears Owner" "" "${owner_cross:-}"
-rm -f "$f_xo" "$xo_err_file"
+rm -f "$f_xo" "$f_xok" "$xo_err_file" "$xok_err_file"
 t render >/dev/null
 
 section "ABA guard: a stale generation's late release cannot drop a successor's claim"
@@ -298,10 +317,12 @@ assert_contains "the tokened close lands the closure" "$(grep -oP '^\*\*Status:\
 rm -f "$f_aba3"
 t render >/dev/null
 
-# The G15 narrowing on the closure arm: a foreign close on a fresh claim
-# refuses and routes to reclaim, mirroring the release verb; the owner's
-# own close still releases its claim with the closure by presenting the
-# claim's token.
+# The G15 narrowing on the closure arm: a foreign tokenless close on a
+# fresh claim refuses and routes to reclaim, mirroring the release verb;
+# the owner's own close releases its claim with the closure by
+# presenting the claim's token, and a foreign session holding the
+# current token completes the close cross-process (the TASKS-2 flip),
+# the quote-3 recovery flow without sidecar surgery.
 f_fc="$(t new --id FCL-1 --name "Foreign Close Target")"
 sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_fc"
 t claim "$f_fc" --owner session-holder >/dev/null
@@ -315,7 +336,13 @@ assert_contains "the refused foreign close leaves the status open" "$(grep -oP '
 TASKS_SESSION=session-holder t close "$f_fc" --generation "$(gen_of "$f_fc")" >/dev/null
 [[ ! -f "$f_fc.claim" ]] && ok "the owner's own tokened close releases the claim" || bad "the owner's own tokened close releases the claim"
 assert_contains "the owner's close lands the closure" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_fc")" "Completed"
-rm -f "$f_fc"
+f_fc2="$(t new --id FCL-2 --name "Tokened Foreign Close Target")"
+sed -i 's/^- \[ \] TODO$/- [x] TODO/' "$f_fc2"
+TASKS_SESSION=session-holder t claim "$f_fc2" >/dev/null
+TASKS_SESSION=session-foreign t close "$f_fc2" --generation "$(gen_of "$f_fc2")" >/dev/null
+[[ ! -f "$f_fc2.claim" ]] && ok "the tokened foreign close drops the sidecar" || bad "the tokened foreign close drops the sidecar"
+assert_contains "the tokened foreign close lands the closure" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_fc2")" "Completed"
+rm -f "$f_fc" "$f_fc2"
 t render >/dev/null
 
 section "expiry-on-read: an expired claim refuses takeover and routes to the manager"
@@ -385,8 +412,49 @@ printf 'foreign body\n' | TASKS_TEST_CLOCK="2026-06-15 17:00" TASKS_SESSION=sess
 assert_contains "a foreign report also skips the heartbeat with a note" "$(cat "$ROOT/hb-foreign-err.txt")" "heartbeat was not refreshed"
 assert_eq "a foreign report leaves the created stamp untouched" "2026-06-14 07:00" "$(sed -n 's/^created //p' "$f_hb.claim")"
 rm -f "$ROOT/hb-foreign-err.txt"
+# Stable-identity heartbeats (TASKS-2): a claim taken under TASKS_SESSION
+# (no --owner) in one invocation is owned by that identity in the next
+# invocation too, so the checkpoint refreshes silently and the release
+# completes under the same env value. This is the quote-1 anchor's
+# remediation path: one stable value per harness session closes the
+# per-process degradation the hostname-pid default causes.
+f_hb2="$(t new --id HB-2 --name "Stable Session Heartbeat Target")"
+hb2_err="$(TASKS_SESSION=session-stable t claim "$f_hb2" 2>&1 >/dev/null)"
+assert_not_contains "a TASKS_SESSION-claimed claim emits no warning" "$hb2_err" "warning:"
+hb2_err2="$(TASKS_TEST_CLOCK="2026-06-15 18:00" TASKS_SESSION=session-stable t log "$f_hb2" "stable checkpoint" 2>&1 >/dev/null)"
+assert_eq "the stable session's log re-stamps the heartbeat" "2026-06-15 18:00" "$(sed -n 's/^created //p' "$f_hb2.claim")"
+assert_not_contains "the stable session's log emits no warning" "$hb2_err2" "warning:"
+TASKS_SESSION=session-stable t release "$f_hb2" --generation "$(gen_of "$f_hb2")" >/dev/null
+rm -f "$f_hb2"
 TASKS_SESSION=session-hb t release "$f_hb" --generation "$(gen_of "$f_hb")" >/dev/null
 rm -f "$f_hb"
+t render >/dev/null
+
+section "claim: unset identity warns on stderr and still succeeds"
+# The per-process degradation becomes visible at claim time (TASKS-2):
+# with neither TASKS_SESSION nor --owner set, the owner id is the
+# hostname-pid fallback of the claiming process, so the next invocation
+# is a stranger to this claim and no heartbeat can refresh; the claim
+# still succeeds and the warning names the override.
+f_cw="$(t new --id CW-1 --name "Unset Identity Claim Target")"
+cw_err_file="$ROOT/cw-claim-err.txt"
+env -u TASKS_SESSION "$TASKS_BIN" claim "$f_cw" >/dev/null 2>"$cw_err_file"; cw_rc=$?
+assert_eq "the unset-identity claim still succeeds" "0" "$cw_rc"
+assert_contains "the unset-identity warning names TASKS_SESSION" "$(cat "$cw_err_file")" "TASKS_SESSION"
+assert_contains "the unset-identity warning names the per-process consequence" "$(cat "$cw_err_file")" "per-process"
+[[ -f "$f_cw.claim" ]] && ok "the unset-identity claim still writes the sidecar" || bad "the unset-identity claim still writes the sidecar"
+cw_owner="$(sed -n '1p' "$f_cw.claim")"
+[[ "$cw_owner" =~ ^.+-[0-9]+$ ]] && ok "the unset-identity owner reads as hostname-pid" || bad "the unset-identity owner reads as hostname-pid"
+f_cw2="$(t new --id CW-2 --name "Quiet Claim Session Target")"
+cw2_err="$(TASKS_SESSION=session-quiet t claim "$f_cw2" 2>&1 >/dev/null)"
+assert_eq "a TASKS_SESSION-set claim emits no warning" "" "$cw2_err"
+f_cw3="$(t new --id CW-3 --name "Quiet Claim Owner Target")"
+cw3_err="$(env -u TASKS_SESSION "$TASKS_BIN" claim "$f_cw3" --owner session-explicit 2>&1 >/dev/null)"
+assert_eq "an --owner claim emits no warning" "" "$cw3_err"
+TASKS_SESSION="$cw_owner" t release "$f_cw" --generation "$(gen_of "$f_cw")" >/dev/null
+TASKS_SESSION=session-quiet t release "$f_cw2" --generation "$(gen_of "$f_cw2")" >/dev/null
+TASKS_SESSION=session-explicit t release "$f_cw3" --generation "$(gen_of "$f_cw3")" >/dev/null
+rm -f "$f_cw" "$f_cw2" "$f_cw3" "$cw_err_file"
 t render >/dev/null
 
 section "claim.expired records once per generation"
@@ -1042,6 +1110,19 @@ fset_tok_err="$(TASKS_SESSION=sess-holder t set "$f_t5" Status=Cancelled "Status
 assert_contains "the owner's tokenless terminal-set is refused with the token requirement" "$fset_tok_err" "--generation"
 TASKS_SESSION=sess-holder t set "$f_t5" --generation "$(gen_of "$f_t5")" Status=Cancelled "Status Reason=own probe" >/dev/null
 [[ ! -f "$f_t5.claim" ]] && ok "the owner's own tokened terminal set releases the claim" || bad "the owner's own tokened terminal set releases the claim"
+# The flip (TASKS-2) on the terminal-set arm: a stale token from a
+# foreign identity still dies on the ABA guard first, and a foreign
+# session holding the claim's current token completes the transition.
+f_t6="$(t new --id TRL-6 --name "Tokened Foreign Terminal Set Target")"
+t claim "$f_t6" --owner sess-holder >/dev/null
+t6_stale="$(gen_of "$f_t6")"
+TASKS_SESSION=manager t reclaim "$f_t6" --owner sess-successor >/dev/null
+fset6_err="$(TASKS_SESSION=sess-foreign t set "$f_t6" --generation "$t6_stale" Status=Cancelled "Status Reason=stale probe" 2>&1 >/dev/null || true)"
+[[ -f "$f_t6.claim" ]] && ok "a stale token's foreign terminal-set leaves the claim intact" || bad "a stale token's foreign terminal-set leaves the claim intact"
+assert_contains "a stale token's foreign terminal-set trips the ABA guard first" "$fset6_err" "generation mismatch"
+TASKS_SESSION=sess-foreign t set "$f_t6" --generation "$(gen_of "$f_t6")" Status=Cancelled "Status Reason=foreign probe" >/dev/null
+[[ ! -f "$f_t6.claim" ]] && ok "the tokened foreign terminal-set releases the claim" || bad "the tokened foreign terminal-set releases the claim"
+assert_contains "the tokened foreign terminal-set lands the status" "$(grep -oP '^\*\*Status:\*\*\s+\K.*' "$f_t6")" "Cancelled"
 f_t3="$(t new --id TRL-3 --name "Stale Claim On Terminal")"
 t set "$f_t3" Status=Cancelled "Status Reason=stale probe" >/dev/null
 printf 'sess-stale\n' >"$f_t3.claim"
@@ -1052,7 +1133,7 @@ t claim "$f_t4" --owner sess-open >/dev/null
 t set "$f_t4" Priority=High >/dev/null
 [[ -f "$f_t4.claim" ]] && ok "an open-status set keeps the live claim" || bad "an open-status set keeps the live claim"
 TASKS_SESSION=sess-open t release "$f_t4" --generation "$(gen_of "$f_t4")" >/dev/null
-rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4" "$f_t5"
+rm -f "$f_t1" "$f_t2" "$f_t3" "$f_t4" "$f_t5" "$f_t6"
 t render >/dev/null
 
 section "set: unknown header keys are rejected before any write"
