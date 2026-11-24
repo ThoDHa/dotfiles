@@ -2911,9 +2911,14 @@ cmd_reclaim() {
 # stays the explicit manager surface ('tasks claims' reports, 'tasks
 # reclaim' takes over). The one sanctioned bypass lives in the caller:
 # verify_release_claim skips this check when the presented generation
-# equals the claim's current one, because the CSPRNG token printed only
-# to the claimer is strictly stronger evidence than the replayable
-# identity string compared here. The migration rides this write-path
+# equals the claim's current one. The token is not secret: the sidecar
+# persists the current generation in plaintext for same-user board
+# readers, so holding it is equivalent to reading it. What it offers
+# over the replayable identity string compared here is unguessability
+# (no accidental holder: identity strings collide by pid reuse or a
+# duplicated TASKS_SESSION, a CSPRNG value does not) and rotation
+# (reclaim reissues the token on takeover, the ABA freshness guard).
+# The migration rides this write-path
 # touch (owner survives byte-exact), so the check always judges v2
 # state; a caller that already migrated re-runs a no-op read. Unclaimed
 # tasks pass through untouched.
@@ -2933,10 +2938,13 @@ refuse_foreign_claim() { # file tasks_dir verb
 # the sidecar's generation refuses first (the ABA guard outranks every
 # identity, so a stale token never falls through to the ownership
 # verdict), the ownership check follows unless the presented token
-# equals the claim's current generation - holding the CSPRNG secret
-# printed only to the claimer is the sanctioned cross-process
-# completion, strictly stronger evidence than the replayable identity
-# string - and a live v2 claim presented with no token refuses last -
+# equals the claim's current generation - holding the current
+# generation is the sanctioned cross-process completion: the token is
+# not secret (the sidecar persists it in plaintext for same-user board
+# readers), it is unguessable (no accidental holder, unlike the
+# replayable identity string) and reclaim rotates it on takeover (the
+# ABA freshness guard) - and a live v2 claim presented with no token
+# refuses last -
 # identity strings replay via hostname-pid reuse or a duplicated
 # TASKS_SESSION, so the token itself is required and a lost token
 # routes through manager reclaim. generation is the caller's
@@ -2984,8 +2992,10 @@ attempt_outcome_for_status() { # <Status>
 # session field carries the same actor; the field keeps the record body
 # self-describing), while worker names the attempt's owner. Every release
 # arm verifies ownership plus the claim's generation before calling
-# (verify_release_claim), so the two attributions differ only when a
-# future manager-mediated release path arrives. outcome is the attempt's
+# (verify_release_claim), so the two attributions differ when a tokened
+# cross-process release completes another session's claim (that path
+# has arrived as the live sanctioned case: the caller presents the
+# claim's current generation). outcome is the attempt's
 # execution verdict from the locked taxonomy: pass on the completion arms
 # (terminal set to Completed, archive of a Completed file, close),
 # cancelled on the cancellation arms (close --cancelled, terminal set to
