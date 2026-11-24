@@ -23,7 +23,6 @@ CLAUDECODE_STOW   := $(if $(or $(FORCE_CLAUDECODE),$(CLAUDE_PRESENT)),claudecode
 STOW_PACKAGES     := shell tmux isort agents $(OPENCODE_STOW) $(CLAUDECODE_STOW)
 SKIPPED_PACKAGES  := $(filter-out $(STOW_PACKAGES),$(STOW_PACKAGES_ALL))
 PI_PRESENT        := $(shell command -v pi >/dev/null 2>&1 && echo 1)
-PI_SYNC           := $(or $(FORCE_PI),$(PI_PRESENT))
 
 # Rules target path (after stow): used by tests
 OPENCODE_RULES := $(STOW_TARGET)/.config/opencode/rules
@@ -36,16 +35,12 @@ OPENCODE_CONFIG := $(STOW_TARGET)/.config/opencode
 # pi agent generator (compiled from the opencode fleet agents)
 PI_AGENTS_GENERATOR := $(CURDIR)/pi/generate-pi-agents.sh
 
-# pi manager-mode extension source, deployed verbatim by sync-pi-extensions
-PI_EXTENSIONS_SRC := $(CURDIR)/pi/extensions
-PI_EXTENSIONS_DIR := $(HOME)/.pi/agent/extensions
-
 # pi AGENTS.md generator (compiled from the opencode rules)
 AGENTS_MD_GENERATOR := $(CURDIR)/pi/generate-agents-md.sh
 
 .PHONY: all stow unstow restow dry-run install uninstall run build help bootstrap verify
-.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus test-gate-wiring check verify-inner
-.PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md sync-pi-extensions test-pi-extensions
+.PHONY: clean-stow readopt test test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-task-storage-opencode test-task-storage-adversarial test-pi-extractor test-oc-continue test-pi-continue test-pi test-smoke lint-corpus test-gate-wiring check verify-inner
+.PHONY: stow-claudecode sync-pi-agents test-pi-agents pin-manager-body sync-agents-md test-agents-md
 
 # Default target
 all: help
@@ -74,14 +69,13 @@ endef
 # recipe lines are defined exactly once.
 define pi_sync_run
 @$(MAKE) sync-pi-agents
-@$(MAKE) sync-pi-extensions
 endef
 
 define pi_sync_skip
 @echo "Skipping pi agents sync (pi not installed)"
 endef
 
-ifneq ($(PI_SYNC),)
+ifneq ($(PI_PRESENT),)
 PI_SYNC_TAIL := pi_sync_run
 else
 PI_SYNC_TAIL := pi_sync_skip
@@ -235,47 +229,6 @@ sync-pi-agents:
 	@$(PI_AGENTS_GENERATOR)
 	@echo "Done! pi agents compiled from the opencode fleet."
 
-# Deploy the repo's pi extensions into ~/.pi/agent/extensions as a
-# git-tracked prune: the deployed set becomes exactly the repo-tracked
-# set under the source dir (git ls-files, subdirs included), host files
-# at history-tracked paths the repo has since deleted are pruned, and
-# foreign host content is never touched. Host-created files at
-# history-tracked addresses count as drift and are pruned with an
-# echoed notice; foreign content means never-tracked addresses. The
-# verbatim copy corrects byte drift at tracked paths. Only enumerated
-# tracked paths are written or removed, so foreign files stay safe
-# without an rsync --delete sweep. The sync test canaries this contract
-# against a hermetic fixture (tests/pi-extensions/test-sync.sh).
-sync-pi-extensions:
-	@echo "Syncing pi extensions..."
-	@test -d $(PI_EXTENSIONS_SRC) || (echo "ERROR: $(PI_EXTENSIONS_SRC) not found; nothing to deploy" && exit 1)
-	@bash -eu -o pipefail -c '\
-		src="$$(cd $(PI_EXTENSIONS_SRC) && pwd -P)"; \
-		root="$$(git -C "$$src" rev-parse --show-toplevel)"; \
-		rel="$$(git -C "$$src" rev-parse --show-prefix)"; \
-		rel="$${rel%/}"; \
-		historical="$$(git -C "$$root" log --format= --name-only -- "$$rel" | sed "/^$$/d" | LC_ALL=C sort -u)"; \
-		mkdir -p $(PI_EXTENSIONS_DIR); \
-		host="$$(cd $(PI_EXTENSIONS_DIR) && pwd -P)"; \
-		git -C "$$root" ls-files -z -- "$$rel" | \
-			while IFS= read -r -d "" tracked_rel; do \
-				host_rel="$${tracked_rel#$$rel/}"; \
-				mkdir -p "$$host/$$(dirname "$$host_rel")"; \
-				cp "$$root/$$tracked_rel" "$$host/$$host_rel"; \
-			done; \
-		LC_ALL=C comm -13 \
-			<(git -C "$$root" ls-files -- "$$rel" | LC_ALL=C sort) \
-			<(printf "%s\n" "$$historical") | \
-			while IFS= read -r stale_rel; do \
-				stale_host="$$host/$${stale_rel#$$rel/}"; \
-				if [[ -f "$$stale_host" || -L "$$stale_host" ]]; then \
-					rm -f -- "$$stale_host"; \
-					echo "  pruned drifted tracked path: $${stale_rel#$$rel/}"; \
-				fi; \
-			done; \
-	'
-	@echo "Done! pi extensions deployed to $(PI_EXTENSIONS_DIR)."
-
 # Generate ~/.pi/agent/AGENTS.md from the opencode rules
 sync-agents-md:
 	@echo "Syncing pi AGENTS.md with opencode rules..."
@@ -388,15 +341,15 @@ endef
 # aggregates. Make runs a prerequisite once per invocation, so a full
 # make test pays the gates once. The census checks (INVENTORY counts
 # and membership) ride inside lint-corpus; the sync checks are the
-# three test-sync suites. The gate targets themselves stay
+# two test-sync suites. The gate targets themselves stay
 # prerequisite-free so the graph stays acyclic: a gate list naming any
-# test target then meets all four gates, because a target that is not
+# test target then meets all three gates, because a target that is not
 # a gate carries them and a target that is one is a gate. The wiring
 # pin is test-gate-wiring.
-CORPUS_GATES := lint-corpus test-agents-md test-pi-agents test-pi-extensions
+CORPUS_GATES := lint-corpus test-agents-md test-pi-agents
 
 # Test deployment completeness, symlinks, and opencode rules loading
-test: lint-corpus test-gate-wiring test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
+test: lint-corpus test-gate-wiring test-smoke test-links test-rules test-tasks test-tasks-hazard test-task-metrics test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "All tests passed!"
 
@@ -414,7 +367,7 @@ check: test
 # exit code can mask an individual suite failure (the coding standards'
 # Test Suite Invocation rule).
 verify-inner: export ISOLATION_ALLOW_DEGRADED := 1
-verify-inner: lint-corpus test-gate-wiring test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi-extensions test-pi test-task-storage-pi test-task-storage-opencode test-task-storage-adversarial
+verify-inner: lint-corpus test-gate-wiring test-smoke test-tasks test-tasks-hazard test-task-metrics test-task-access-drift test-task-access-replay test-task-access-tierb test-pi-extractor test-oc-continue test-pi-continue test-agents-md test-pi-agents test-pi test-task-storage-opencode test-task-storage-adversarial
 	@echo ""
 	@echo "Container verification suite passed!"
 
@@ -547,18 +500,6 @@ test-task-access-replay: $(CORPUS_GATES)
 	@echo "Testing task-access command-sufficiency replay..."
 	@bash tests/task-access/test-replay.sh
 
-# The pi task-storage enforcement suite (ORCH-4-10-2; ORCH-4-10-4 wired
-# it into make test and verify-inner). Full mode runs the node driver
-# sections and the machine-side bwrap probes; with
-# ISOLATION_ALLOW_DEGRADED=1 the missing-tool gates and dependent
-# sections are announced as skipped and the suite gates on what ran.
-# The repo tasks bin dir rides on PATH so the suite resolves the CLI
-# it enforces in both worlds.
-test-task-storage-pi: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
-test-task-storage-pi: $(CORPUS_GATES)
-	@echo "Testing pi task-storage enforcement..."
-	@bash tests/task-storage-isolation/run-suite.sh
-
 # The opencode task-storage enforcement suite (ORCH-4-10-3; ORCH-4-10-4
 # wired it into make test and verify-inner). Sections 1-4 are hermetic
 # service units; the e2e section drives real opencode sessions (LLM
@@ -570,10 +511,11 @@ test-task-storage-opencode: $(CORPUS_GATES)
 	@echo "Testing opencode task-storage enforcement..."
 	@bash tests/task-storage-isolation/test-opencode-enforcement.sh
 
-# The combined adversarial bypass suite (ORCH-4-10-4). Both harness
-# columns run through the real dispatch paths; with
-# ISOLATION_ALLOW_DEGRADED=1 the bwrap-dependent columns announce as
-# skipped and the suite gates on what ran.
+# The adversarial bypass suite (ORCH-4-10-4), opencode column: the
+# landed BrokerService through the real bridge client. The pi column
+# moved with the extensions to ThoDHa/pi (PIRELOC-1) and runs there.
+# With ISOLATION_ALLOW_DEGRADED=1 the bwrap-dependent sections announce
+# as skipped and the suite gates on what ran.
 test-task-storage-adversarial: export PATH := $(CURDIR)/shell/.local/bin:$(PATH)
 test-task-storage-adversarial: $(CORPUS_GATES)
 	@echo "Testing the task-storage adversarial bypass suite..."
@@ -617,12 +559,6 @@ test-agents-md:
 test-pi-agents:
 	@echo "Testing pi agents sync (generated files vs opencode fleet)..."
 	@bash tests/pi-agents/test-sync.sh
-
-# Test that the deployed pi extensions match the repo source and that the
-# vendored manager body matches the fleet pin
-test-pi-extensions:
-	@echo "Testing pi extensions sync (deployed copies vs repo source)..."
-	@bash tests/pi-extensions/test-sync.sh
 
 # Fleet manager source and its digest pin (see pin-manager-body; the digest
 # must match the single digest home tests/lib/body-digest.sh)
@@ -689,7 +625,6 @@ help:
 	@echo ""
 	@echo "pi Agents:"
 	@echo "  make sync-pi-agents     - Compile ~/.pi/agent/agents from the opencode fleet"
-	@echo "  make sync-pi-extensions - Deploy pi/extensions into ~/.pi/agent/extensions"
 	@echo "  make sync-agents-md     - Generate ~/.pi/agent/AGENTS.md from the opencode rules"
 	@echo "  make pin-manager-body   - Regenerate the manager body digest pin (rejects missing or empty body)"
 	@echo ""
@@ -707,10 +642,8 @@ help:
 	@echo "  make test-pi-continue - Verify the pi-continue runner (quota-riding supervisor)"
 	@echo "  make test-agents-md - Verify ~/.pi/agent/AGENTS.md matches a fresh generation of the opencode rules"
 	@echo "  make test-pi-agents - Verify ~/.pi/agent/agents matches a fresh compilation of the fleet"
-	@echo "  make test-pi-extensions - Verify deployed pi extensions match the repo source and the body pin"
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo "  make test-smoke  - Validate the smoke harness instrument (scenarios, registry, grader self-test)"
-	@echo "  make test-task-storage-pi - Verify the pi task-storage enforcement suite"
 	@echo "  make test-task-storage-opencode - Verify the opencode task-storage enforcement suite"
 	@echo "  make test-task-storage-adversarial - Verify the combined adversarial bypass suite"
 	@echo ""

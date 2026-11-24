@@ -71,9 +71,8 @@ dotfiles/
 │   └── windows_terminal_settings.json
 ├── tests/              # Host-side tests (make test)
 ├── lib/                # Shared generator library for the rules compilers (not stowed)
-├── pi/                 # pi agent design note, extensions, and generator (not stowed)
+├── pi/                 # pi agent design note and generators (not stowed)
 │   ├── DESIGN.md
-│   ├── extensions/
 │   ├── generate-agents-md.sh
 │   └── generate-pi-agents.sh
 ├── Makefile

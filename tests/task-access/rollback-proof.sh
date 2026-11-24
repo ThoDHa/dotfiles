@@ -76,8 +76,157 @@ die() { printf 'rollback-proof: %s\n' "$1" | tee -a "$RESULTS_FILE" >&2; exit 1;
 MAIN_TREE="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
 MAIN_TREE="${MAIN_TREE%/.git}"
 [[ -d "$MAIN_TREE" ]] || die "cannot resolve the main tree from $REPO_ROOT"
-LIVE_BOARD="$MAIN_TREE/.tasks"
-[[ -d "$LIVE_BOARD" ]] || die "live board not found at $LIVE_BOARD"
+
+# The live board lives in the central store; the legacy local .tasks/
+# path is retired and never resolves (the CLI's chain stands alone, and
+# a local directory stays reachable only through an explicit --dir or
+# TASKS_DIR pin, which a proof about the live board must not take).
+# Resolution mirrors the CLI's chain for the main tree: the nearest
+# .tasksrc namespace first, then the store registry's reverse lookup,
+# then the derived dev-root slice; a named namespace or registry entry
+# whose slice does not exist is the CLI's no-board outcome, reported by
+# name instead of falling through to a neighboring board.
+STORE_ROOT="${TASKS_DEV_ROOT:-/home/khave/dev}"
+STORE_ROOT="${STORE_ROOT%/}"
+STORE_REGISTRY="$STORE_ROOT/tasks/mapping.yaml"
+
+STORE_REG_NS=()
+STORE_REG_PATH=()
+store_normalize_path() { # path: expand a leading ~ against HOME, strip trailing slashes
+	local p="$1"
+	case "$p" in
+		"~") p="$HOME" ;;
+		"~"/*) p="$HOME/${p#"~/"}" ;;
+	esac
+	while [[ "$p" != "/" && "$p" == */ ]]; do p="${p%/}"; done
+	printf '%s' "$p"
+}
+store_registry_load() { # parse mapping.yaml into parallel arrays; refuses drift loudly like the CLI
+	local line ns path norm i
+	[[ -r "$STORE_REGISTRY" ]] || return 0
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line%$'\r'}"
+		line="${line%"${line##*[![:space:]]}"}"
+		line="${line#"${line%%[![:space:]]*}"}"
+		if [[ -z "$line" || "$line" == \#* ]]; then continue; fi
+		if ! [[ "$line" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*):[[:space:]]*(.+)$ ]]; then
+			die "malformed entry in $STORE_REGISTRY: expected one flat 'name: /local/path' line, got: $line"
+		fi
+		ns="${BASH_REMATCH[1]}"
+		path="${BASH_REMATCH[2]}"
+		path="${path%"${path##*[![:space:]]}"}"
+		case "$path" in
+			/*|~|~/*) ;;
+			*) die "relative local path for '$ns' in $STORE_REGISTRY: registry paths are absolute or ~/-prefixed" ;;
+		esac
+		for i in "${!STORE_REG_NS[@]}"; do
+			if [[ "${STORE_REG_NS[i]}" == "$ns" ]]; then
+				die "duplicate registry entry for '$ns' in $STORE_REGISTRY: one namespace binds one local path"
+			fi
+		done
+		STORE_REG_NS+=("$ns")
+		STORE_REG_PATH+=("$(store_normalize_path "$path")")
+	done < "$STORE_REGISTRY"
+}
+# The lookups assign globals in the caller's shell instead of printing
+# their result: a printf contract would run inside the $( ) command
+# substitution every caller wraps this in, where die cannot stop the
+# script and the value strands in the subshell (the CLI's resolution
+# contract for the same reason).
+STORE_REG_HIT_PATH=""
+STORE_REG_HIT_NS=""
+STORE_CONFIG_NS=""
+STORE_DERIVED_SLICE=""
+store_registry_path_for_namespace() { # namespace; assigns STORE_REG_HIT_PATH (empty when unregistered)
+	local i
+	STORE_REG_HIT_PATH=""
+	for i in "${!STORE_REG_NS[@]}"; do
+		if [[ "${STORE_REG_NS[i]}" == "$1" ]]; then STORE_REG_HIT_PATH="${STORE_REG_PATH[i]}"; return 0; fi
+	done
+}
+store_registry_namespace_for_path() { # project root; assigns STORE_REG_HIT_NS (empty when unregistered)
+	local i norm
+	STORE_REG_HIT_NS=""
+	norm="$(store_normalize_path "$1")"
+	for i in "${!STORE_REG_PATH[@]}"; do
+		if [[ "${STORE_REG_PATH[i]}" == "$norm" ]]; then STORE_REG_HIT_NS="${STORE_REG_NS[i]}"; return 0; fi
+	done
+}
+store_config_namespace() { # project root; assigns STORE_CONFIG_NS from the nearest .tasksrc (empty when it binds none)
+	local dir line ns value
+	dir="$1"
+	while [[ "$dir" != "/" ]]; do
+		if [[ -r "$dir/.tasksrc" ]]; then
+			ns=""
+			while IFS= read -r line || [[ -n "$line" ]]; do
+				line="${line%$'\r'}"
+				line="${line%"${line##*[![:space:]]}"}"
+				line="${line#"${line%%[![:space:]]*}"}"
+				if [[ -z "$line" || "$line" == \#* ]]; then continue; fi
+				if ! [[ "$line" =~ ^([A-Za-z0-9][A-Za-z0-9._-]*):[[:space:]]*(.+)$ ]]; then
+					die "malformed .tasksrc at $dir: the content is flat 'key: value' lines (blank lines and # comments allowed)"
+				fi
+				if [[ "${BASH_REMATCH[1]}" == "namespace" ]]; then
+					[[ -z "$ns" ]] || die ".tasksrc at $dir names more than one namespace"
+					value="${BASH_REMATCH[2]}"
+					value="${value%"${value##*[![:space:]]}"}"
+					if ! [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+						die ".tasksrc at $dir names '$value': a namespace is one flat store-slice name (letters, digits, dots, dashes, underscores; no leading dot or slash)"
+					fi
+					ns="$value"
+				fi
+			done < "$dir/.tasksrc"
+			STORE_CONFIG_NS="$ns"
+			return 0
+		fi
+		dir="$(dirname "$dir")"
+	done
+	STORE_CONFIG_NS=""
+}
+store_derived_slice() { # project root; assigns STORE_DERIVED_SLICE (empty when underivable)
+	local dir="$1" rel
+	STORE_DERIVED_SLICE=""
+	if [[ "$dir" == "$STORE_ROOT"/* ]]; then
+		while [[ "$(dirname "$dir")" != "$STORE_ROOT" ]]; do dir="$(dirname "$dir")"; done
+		rel="${dir#"$STORE_ROOT"/}"
+	else
+		dir="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 0
+		[[ "$dir" != "/" ]] || return 0
+		rel="$(basename "$dir")"
+	fi
+	rel="${rel#.}"
+	[[ -n "$rel" ]] || return 0
+	STORE_DERIVED_SLICE="$STORE_ROOT/tasks/$rel"
+}
+
+store_registry_load
+store_config_namespace "$MAIN_TREE"
+board_slice=""
+if [[ -n "$STORE_CONFIG_NS" ]]; then
+	store_registry_path_for_namespace "$STORE_CONFIG_NS"
+	if [[ -n "$STORE_REG_HIT_PATH" && "$STORE_REG_HIT_PATH" != "$(store_normalize_path "$MAIN_TREE")" ]]; then
+		die "store namespace collision: .tasksrc at $MAIN_TREE claims namespace '$STORE_CONFIG_NS' but $STORE_REGISTRY binds it to $STORE_REG_HIT_PATH; fix the claim or the registry entry rather than crossing into another project's board"
+	fi
+	board_slice="$STORE_ROOT/tasks/$STORE_CONFIG_NS"
+	[[ -d "$board_slice" ]] || die ".tasksrc at $MAIN_TREE names namespace '$STORE_CONFIG_NS' but the slice $board_slice does not exist"
+else
+	store_registry_namespace_for_path "$MAIN_TREE"
+	if [[ -n "$STORE_REG_HIT_NS" ]]; then
+		board_slice="$STORE_ROOT/tasks/$STORE_REG_HIT_NS"
+		[[ -d "$board_slice" ]] || die "$STORE_REGISTRY binds $MAIN_TREE to namespace '$STORE_REG_HIT_NS' but the slice $board_slice does not exist"
+	else
+		store_derived_slice "$MAIN_TREE"
+		if [[ -n "$STORE_DERIVED_SLICE" && -d "$STORE_DERIVED_SLICE" ]]; then
+			store_registry_path_for_namespace "${STORE_DERIVED_SLICE##*/}"
+			if [[ -n "$STORE_REG_HIT_PATH" && "$STORE_REG_HIT_PATH" != "$(store_normalize_path "$MAIN_TREE")" ]]; then
+				die "store namespace collision: the derived namespace of the main tree ($MAIN_TREE) claims '${STORE_DERIVED_SLICE##*/}' but $STORE_REGISTRY binds it to $STORE_REG_HIT_PATH; fix the claim or the registry entry rather than crossing into another project's board"
+			fi
+			board_slice="$STORE_DERIVED_SLICE"
+		fi
+	fi
+fi
+[[ -n "$board_slice" ]] || die "no live board found for the main tree $MAIN_TREE (no .tasksrc namespace, no registry entry in $STORE_REGISTRY, and no derived slice under $STORE_ROOT/tasks)"
+LIVE_BOARD="$board_slice"
 
 echo "== rollback proof (scratch: $SCRATCH) =="
 

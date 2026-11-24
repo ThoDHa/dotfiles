@@ -61,8 +61,8 @@ MODEL="${1:-zai-coding-plan/glm-5.3-flash}"
 DEGRADED="${ISOLATION_ALLOW_DEGRADED:-0}"
 
 # Imports of repo-source modules (the lib service under test) must not
-# drop __pycache__ into the repo tree; the pi-extensions
-# deploy-completeness gate fails on untracked litter there.
+# drop __pycache__ into the repo tree; the corpus stays clean of
+# untracked litter.
 export PYTHONDONTWRITEBYTECODE=1
 
 source "$REPO_ROOT/tests/lib/harness.sh"
