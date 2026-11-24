@@ -6,8 +6,8 @@
 # undetected), so the Makefile wires the gates as prerequisites of
 # every suite target a gate list can name and this suite pins that
 # wiring. For every pinned target, a make -n dry run must execute all
-# four corpus gates: lint-corpus (the INVENTORY census checks ride
-# inside it), test-agents-md, test-pi-agents, and test-pi-extensions.
+# three corpus gates: lint-corpus (the INVENTORY census checks ride
+# inside it), test-agents-md, and test-pi-agents.
 # The gate targets themselves are excluded from the pin list: they are
 # the gates, and keeping them prerequisite-free is what keeps the
 # graph acyclic. Any gate list naming any test target then meets all
@@ -34,11 +34,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 source "$REPO_ROOT/tests/lib/harness.sh"
 
-# Assertion total for the self-pin: 19 pinned targets x 5 (one make -n
-# exit check plus four gate checks) + 5 detector self-test checks + 5
+# Assertion total for the self-pin: 18 pinned targets x 4 (one make -n
+# exit check plus three gate checks) + 4 detector self-test checks + 5
 # outer-edge and derived-set checks (check gates, acyclicity, verify
 # chain, wiring-line count, target-universe diff).
-EXPECTED_ASSERTIONS=105
+EXPECTED_ASSERTIONS=81
 
 # Every suite target a landing gate list can name that is not itself a
 # corpus gate, the pin's own target, and the two aggregates whose
@@ -57,7 +57,6 @@ WIRED_TARGETS=(
 	test-oc-continue
 	test-pi-continue
 	test-pi
-	test-task-storage-pi
 	test-task-storage-opencode
 	test-task-storage-adversarial
 	test-gate-wiring
@@ -70,7 +69,6 @@ GATE_RECIPE_LINES=(
 	"bash tests/corpus/lint-corpus.sh"
 	"bash tests/agents-md/test-sync.sh"
 	"bash tests/pi-agents/test-sync.sh"
-	"bash tests/pi-extensions/test-sync.sh"
 )
 
 missing_gates() { # dry-run output; prints each gate recipe line absent from it
@@ -112,7 +110,7 @@ verify_dry_run="$(make -C "$REPO_ROOT" -n verify 2>&1)"
 assert_contains "verify: dry run chains to verify-inner (the gate-carrying aggregate)" "$verify_dry_run" "make verify-inner"
 
 wired_line_count="$(grep -cE '^[A-Za-z0-9_.-]+:[[:space:]]*\$\(CORPUS_GATES\)' "$REPO_ROOT/Makefile")"
-assert_eq 'Makefile wiring lines matching ": $(CORPUS_GATES)" number exactly 17' "17" "$wired_line_count"
+assert_eq 'Makefile wiring lines matching ": $(CORPUS_GATES)" number exactly 16' "16" "$wired_line_count"
 
 declared_gates="$(sed -nE 's/^CORPUS_GATES[[:space:]]*[:?+]?=[[:space:]]*(.*)$/\1/p' "$REPO_ROOT/Makefile")"
 discovered_universe="$(grep -oE '^test[A-Za-z0-9_-]*:' "$REPO_ROOT/Makefile" | sed 's/:$//' | LC_ALL=C sort -u)"

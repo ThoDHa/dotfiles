@@ -473,14 +473,8 @@ check_inventory_counts() {
 inventory_corpus_docs_members() {
 	# Corpus-docs derivation (task contract): tracked .md outside the
 	# stowed config and non-corpus trees, minus the manifest itself.
-	# pi/extensions is excluded as a deployed-artifact tree: its
-	# markdown is the vendored manager-body.md sidecar, a byte-pin of
-	# the fleet manager body already registered under Fleet agents,
-	# pin-covered (tests/pi-agents/manager-body.sha256, enforced by
-	# tests/pi-extensions/test-sync.sh), not an independently editable
-	# corpus document.
 	git ls-files '*.md' | awk \
-		'$0 != inv && $0 !~ /^(agents\/|opencode\/\.config\/|bootstrap\/|reference\/|tests\/|pi\/extensions\/|\.github\/)/' \
+		'$0 != inv && $0 !~ /^(agents\/|opencode\/\.config\/|bootstrap\/|reference\/|tests\/|\.github\/)/' \
 		inv="$INVENTORY" - | sort
 }
 

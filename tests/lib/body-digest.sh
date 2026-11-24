@@ -1,9 +1,8 @@
 # Single home of the fleet manager body digest: sha256 of everything
 # below the frontmatter closing --- line of the fleet manager source
-# (opencode/.config/opencode/agents/manager.md). Consumed three ways:
-# tests/pi-agents/test-sync.sh and tests/pi-extensions/test-sync.sh
-# source the manager_body_digest function for their pin checks
-# (tests/pi-agents/test-sync.sh also applies it to the host charter
+# (opencode/.config/opencode/agents/manager.md). Consumed two ways:
+# tests/pi-agents/test-sync.sh sources the manager_body_digest
+# function for its pin check (it also applies it to the host charter
 # manager.md for its notice-only divergence check), and
 # make pin-manager-body consumes the CLI form (bash
 # tests/lib/body-digest.sh <file> prints the digest), so a program

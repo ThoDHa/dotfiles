@@ -23,13 +23,13 @@ manager-mode extension injects that file's pinned body (the sha256 pin under
 verbatim as the session's governing protocol at activation, beside the
 tool-surface enforcement. The mechanism is the system prompt's append field:
 on every agent run while the mode is active, the extension appends the body
-(the vendored `pi/extensions/manager-body.md` sidecar, byte-extracted from
-the fleet file) to the session's system prompt through the
+(the vendored `extensions/manager-body.md` sidecar in ThoDHa/pi,
+byte-extracted from the fleet file) to the session's system prompt through the
 `before_agent_start` event's prompt options, and deactivation stops the
 append. The extension re-derives the sidecar's sha256 at activation against
 the pin and announces a warning instead of injecting when it mismatches; the
-sync test (tests/pi-extensions/test-sync.sh) is the standing enforcement
-that the deployed copy stays pinned. This note records the posture and its enforcement
+body-pin suite (tests/manager-body-pin.test.mjs in ThoDHa/pi) is the standing
+enforcement that the vendored copy stays pinned. This note records the posture and its enforcement
 shape; the injected body governs conduct. No pi-side document restates the
 rules, and a conduct question about a pi manager session resolves to the
 injected body first and this note second.
