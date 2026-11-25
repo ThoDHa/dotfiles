@@ -44,7 +44,7 @@
 #                         session cwd).
 #
 # The e2e section makes real LLM calls on the fleet worker model (override
-# with argument 1, mirroring run-skeleton.sh). With
+# with argument 1, mirroring ThoDHa/pi's run-skeleton.sh). With
 # ISOLATION_ALLOW_DEGRADED=1 (set by the container verify chain, which
 # has no opencode) a missing opencode binary announces the section as
 # skipped instead of failing; without the flag the missing binary fails

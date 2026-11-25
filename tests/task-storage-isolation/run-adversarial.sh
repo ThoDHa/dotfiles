@@ -20,11 +20,11 @@
 # Classes: symlink, relative-path, worktree, alternate-command,
 # child-process, inherited-fd, git-history smuggling (write and read),
 # write side (redirect/tee/sed -i/mv/rm against storage paths including
-# the claim sidecar and lock), compound-composition shapes. The
-# transcript-copy-store class (10-2's deferred DC2) and the routed
-# findings (registered-pair replay, output cap, argv element cap,
-# socket-dir verification) land in their own sections alongside the
-# fixes they mandate.
+# the claim sidecar and lock), compound-composition shapes, and the
+# recovery/concurrency class. The transcript-copy-store class (10-2's
+# deferred DC2) and the routed findings (registered-pair replay, output
+# cap, argv element cap, socket-dir verification) land in their own
+# sections alongside the fixes they mandate.
 #
 # Degradation contract: with ISOLATION_ALLOW_DEGRADED=1 (set by the
 # container verify chain, which has no bwrap and no model gateway) the

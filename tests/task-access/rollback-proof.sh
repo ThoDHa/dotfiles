@@ -30,7 +30,12 @@
 #      tree's git status are identical to the pre-procedure snapshots.
 #
 # Host-only (needs git, make, rsync, and the host toolchain); it is not
-# part of verify-inner. The scratch checkout stays in place after the run
+# part of verify-inner. Non-root is part of that posture: the reverted
+# suite family's failure-injection assertions are root-immune (they
+# never execute as root), so a root run would print green while they
+# never ran. That is the same EUID-dependent green the verify
+# container's root user model produces, and pre-flight refuses root for
+# that reason. The scratch checkout stays in place after the run
 # (scratch waiver) for inspection; its path is printed in the results.
 # The script writes nothing outside the scratch dir and nothing to the
 # live board: every live-board access here is a read.
@@ -231,6 +236,7 @@ LIVE_BOARD="$board_slice"
 echo "== rollback proof (scratch: $SCRATCH) =="
 
 echo "== pre-flight =="
+(( EUID != 0 )) || die "run as non-root: the suite family's failure-injection assertions are root-immune, so a root run's green would silently drop them"
 git -C "$REPO_ROOT" merge-base --is-ancestor "$BASE_COMMIT" HEAD ||
 	die "base commit $BASE_COMMIT is not an ancestor of HEAD"
 base_subject="$(git -C "$REPO_ROOT" log -1 --format=%s "$BASE_COMMIT")"
@@ -242,7 +248,7 @@ for commit in "${MIGRATION_COMMITS[@]}"; do
 done
 ok "all three migration commits resolve ($(printf '%s ' "${MIGRATION_COMMITS[@]}"))"
 if grep -q 'prints the whole task file byte-exact when no projection fits' "$ESCAPE_HATCH_DOC" &&
-	grep -q 'MUST NOT fall back to writing `.tasks/` files by hand' "$ESCAPE_HATCH_DOC"; then
+	grep -q 'MUST NOT fall back to writing board files by hand' "$ESCAPE_HATCH_DOC"; then
 	ok "escape-hatch fallback wording present in the landed contract (task-files skill)"
 else
 	bad "escape-hatch fallback wording present in the landed contract (task-files skill)"
@@ -262,9 +268,13 @@ BEFORE_STATUS="$(main_tree_status_digest)"
 ok "live board snapshotted ($(printf '%s' "$BEFORE_BOARD" | cut -d' ' -f1) files)"
 
 echo "== scratch checkout at the base commit =="
+expected_base="$(git -C "$REPO_ROOT" rev-parse "$BASE_COMMIT^{commit}")"
 git clone --quiet --no-hardlinks "$MAIN_TREE" "$SCRATCH/repo" || die "clone failed"
-head_hash="$(git -C "$SCRATCH/repo" rev-parse --short=7 HEAD)"
-[[ "$head_hash" == "$BASE_COMMIT" ]] || die "scratch HEAD is $head_hash, not $BASE_COMMIT"
+git -C "$SCRATCH/repo" checkout --quiet --detach "$expected_base" ||
+	die "cannot check out the base commit $BASE_COMMIT in the scratch clone"
+head_hash="$(git -C "$SCRATCH/repo" rev-parse HEAD)"
+[[ "$head_hash" == "$expected_base" ]] ||
+	die "scratch HEAD is $head_hash, not the base commit $expected_base"
 git -C "$SCRATCH/repo" config user.name "orch4-9-4 rollback proof"
 git -C "$SCRATCH/repo" config user.email "orch4-9-4@rollback.invalid"
 ok "scratch checkout at $BASE_COMMIT"
@@ -343,7 +353,10 @@ else
 fi
 cp -R "$SCRATCH/repo" "$SCRATCH/board-repo"
 cp -R "$LIVE_BOARD" "$SCRATCH/board-repo/.tasks"
-rollback_tasks="$SCRATCH/board-repo/shell/.local/bin/tasks"
+# The export leg runs the ROLLED-BACK CLI, so the path is the reverted
+# tree's own pre-move home (opencode/.local/bin at 4d52cd9^), not the
+# current tree's shell/.local/bin home the live CLI moved to in 60047b3.
+rollback_tasks="$SCRATCH/board-repo/opencode/.local/bin/tasks"
 export_records="$SCRATCH/rollback-export.jsonl"
 # lint is deliberately excluded here: its commit-reachability check
 # inspects the git context around the board copy, and the scratch clone

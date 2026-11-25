@@ -645,7 +645,7 @@ help:
 	@echo "  make test-pi     - Verify the pi integration contract (feed parsers, gates, seed repo guard)"
 	@echo "  make test-smoke  - Validate the smoke harness instrument (scenarios, registry, grader self-test)"
 	@echo "  make test-task-storage-opencode - Verify the opencode task-storage enforcement suite"
-	@echo "  make test-task-storage-adversarial - Verify the combined adversarial bypass suite"
+	@echo "  make test-task-storage-adversarial - Verify the adversarial bypass suite (opencode column)"
 	@echo ""
 	@echo "Available stow packages: $(STOW_PACKAGES_ALL)"
 	@echo "opencode/claudecode are stowed only when the tool is installed"
